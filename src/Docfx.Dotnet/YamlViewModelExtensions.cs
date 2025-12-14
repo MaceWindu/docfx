@@ -32,7 +32,8 @@ internal static class YamlViewModelExtensions
                     or MemberType.Enum
                     or MemberType.Delegate
                     or MemberType.Interface
-                    or MemberType.Struct;
+                    or MemberType.Struct
+                    or MemberType.Extension;
     }
 
     public static MetadataItem ShrinkToSimpleToc(this MetadataItem item)
