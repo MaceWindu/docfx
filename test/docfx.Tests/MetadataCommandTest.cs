@@ -332,6 +332,117 @@ public class MetadataCommandTest : TestBase
         Assert.Equal("Bar", tocViewModel[1].Items[1].Name);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TestMetadataCommandWithoutUidPrefixesDropsDuplicatedApis()
+    {
+        var projects = CreateProjectsSharingANamespace();
+
+        using var listener = new TestListenerScope();
+
+        await DotnetApiCatalog.Exec(
+            new(new MetadataJsonItemConfig { Dest = _outputFolder, Src = new(new FileMappingItem([.. projects])) { Expanded = true } }),
+            new(), Directory.GetCurrentDirectory());
+
+        // Both assemblies declare `Shared.Widget`, so one of them is dropped.
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("Ignore duplicated member"));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Shared.Widget.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "A.Shared.Widget.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "B.Shared.Widget.yml")));
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TestMetadataCommandWithUidPrefixes()
+    {
+        var projects = CreateProjectsSharingANamespace();
+
+        using var listener = new TestListenerScope();
+
+        await DotnetApiCatalog.Exec(
+            new(new MetadataJsonItemConfig
+            {
+                Dest = _outputFolder,
+                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
+                UidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+            }),
+            new(), Directory.GetCurrentDirectory());
+
+        Assert.DoesNotContain(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("Ignore duplicated member"));
+
+        // Each assembly gets its own page instead of overwriting the other one.
+        foreach (var (prefix, description) in new[] { ("A", "The widget of assembly A."), ("B", "The widget of assembly B.") })
+        {
+            var file = Path.Combine(_outputFolder, $"{prefix}.Shared.Widget.yml");
+            Assert.True(File.Exists(file), $"{file} is missing.");
+
+            var memberViewModel = YamlUtility.Deserialize<PageViewModel>(file);
+            Assert.Equal($"{prefix}.Shared.Widget", memberViewModel.Items[0].Uid);
+            Assert.Equal($"T:{prefix}.Shared.Widget", memberViewModel.Items[0].CommentId);
+            Assert.Equal($"{prefix}.Shared", memberViewModel.Items[0].NamespaceName);
+            Assert.Equal(description, memberViewModel.Items[0].Summary);
+            Assert.Equal($"{prefix}.Shared.Widget.Do", memberViewModel.Items[1].Uid);
+        }
+
+        // The namespaces are distinguishable in the TOC.
+        var tocViewModel = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml")).Items;
+        Assert.Equal(["A.Other", "A.Shared", "B.Other", "B.Shared"], tocViewModel.Select(x => x.Uid));
+        Assert.Equal(["A.Other", "A.Shared", "B.Other", "B.Shared"], tocViewModel.Select(x => x.Name));
+
+        // ... and both are addressable through the manifest.
+        var manifest = JsonUtility.Deserialize<Dictionary<string, string>>(Path.Combine(_outputFolder, ".manifest"));
+        Assert.Equal("A.Shared.Widget.yml", manifest["A.Shared.Widget"]);
+        Assert.Equal("B.Shared.Widget.yml", manifest["B.Shared.Widget"]);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TestMetadataCommandWithUidPrefixesAndNestedToc()
+    {
+        var projects = CreateProjectsSharingANamespace();
+
+        await DotnetApiCatalog.Exec(
+            new(new MetadataJsonItemConfig
+            {
+                Dest = _outputFolder,
+                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
+                UidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+                NamespaceLayout = NamespaceLayout.Nested,
+            }),
+            new(), Directory.GetCurrentDirectory());
+
+        // The prefix becomes a per assembly root node that groups the namespaces of that assembly.
+        var tocViewModel = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml")).Items;
+        Assert.Equal(["A", "B"], tocViewModel.Select(x => x.Name));
+        Assert.Equal(["A.Other", "A.Shared"], tocViewModel[0].Items.Select(x => x.Uid));
+        Assert.Equal(["Other", "Shared"], tocViewModel[0].Items.Select(x => x.Name));
+        Assert.Equal(["B.Other", "B.Shared"], tocViewModel[1].Items.Select(x => x.Uid));
+        Assert.Equal("A.Shared.Widget", tocViewModel[0].Items[1].Items[0].Uid);
+        Assert.Equal("B.Shared.Widget", tocViewModel[1].Items[1].Items[0].Uid);
+    }
+
+    /// <summary>
+    /// Creates two projects, `a` and `b`, that both declare `Shared.Widget`.
+    /// </summary>
+    private List<string> CreateProjectsSharingANamespace()
+    {
+        var result = new List<string>();
+
+        foreach (var name in new[] { "a", "b" })
+        {
+            var folder = Path.Combine(_projectFolder, name);
+            Directory.CreateDirectory(folder);
+
+            var projectFile = Path.Combine(folder, $"{name}.csproj");
+            File.Copy("Assets/uidprefix.csproj.sample.1", projectFile);
+            File.Copy($"Assets/uidprefix.{name}.cs.sample.1", Path.Combine(folder, "Widget.cs"));
+
+            result.Add(projectFile);
+        }
+
+        return result;
+    }
+
     private void CheckResult()
     {
         Assert.True(File.Exists(Path.Combine(_outputFolder, ".manifest")));

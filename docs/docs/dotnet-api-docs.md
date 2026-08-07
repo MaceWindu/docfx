@@ -112,6 +112,46 @@ When the file extension is `.cs` or `.vb`, docfx uses the latest supported .NET 
 }
 ```
 
+## Assemblies that share namespaces
+
+A UID, the identifier docfx uses to address an API, is derived from the fully qualified name of the API
+alone. When a single docfx project documents several assemblies that declare the same namespace, their
+APIs therefore end up with the same UID: pages overwrite each other, `DuplicateUids` warnings are
+reported, and every link to a shared namespace resolves to whichever assembly happened to win.
+
+This is common when shipping platform or version specific packages that intentionally expose the same
+API surface, for example `MyLib.Ef8` and `MyLib.Ef9`.
+
+Use the [`uidPrefixes`](../reference/docfx-json-reference.md#uidprefixes) option to give each assembly
+its own UID namespace:
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
+      "dest": "api/ef8",
+      "uidPrefixes": { "MyLib.Ef8": "Ef8" }
+    },
+    {
+      "src": [ "src/MyLib.Ef9/MyLib.Ef9.csproj" ],
+      "dest": "api/ef9",
+      "uidPrefixes": { "MyLib.Ef9": "Ef9" }
+    }
+  ]
+}
+```
+
+`MyLib.Widget` then becomes `Ef8.MyLib.Widget` and `Ef9.MyLib.Widget`. References between the assemblies,
+`<see cref="..."/>` links and the table of contents all follow the prefix, and with
+`"namespaceLayout": "nested"` the prefix shows up as a per assembly root node in the TOC.
+
+> [!NOTE]
+> Enabling this option changes the UID of every API in the listed assemblies. Update anything that
+> refers to those UIDs by hand, such as `<xref>` links in markdown, overwrite files and external xref
+> maps. Filter rules in [`filter`](#filter-apis) configs are unaffected: they keep matching the
+> unprefixed API surface.
+
 ## Customization Options
 
 There are several options available for customizing .NET API pages that are tailored to your specific needs and preferences. To customize .NET API pages for DocFX, you can use the following options:

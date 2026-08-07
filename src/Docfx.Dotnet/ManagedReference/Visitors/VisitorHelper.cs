@@ -16,6 +16,13 @@ internal static partial class VisitorHelper
 {
     public static string GlobalNamespaceId { get; set; }
 
+    /// <summary>
+    /// Maps an assembly name to the prefix prepended to the UID of every API declared in that assembly.
+    /// This is assigned once before metadata generation starts and is only read afterwards,
+    /// so it is safe to read from the parallel API page generation.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> UidPrefixes { get; set; }
+
     [GeneratedRegex(@"``\d+$")]
     private static partial Regex GenericMethodPostFix();
 
@@ -25,6 +32,21 @@ internal static partial class VisitorHelper
     }
 
     public static string GetId(ISymbol symbol)
+    {
+        return GetId(symbol, applyUidPrefix: true);
+    }
+
+    /// <summary>
+    /// Gets the id of a symbol without applying <see cref="UidPrefixes"/>.
+    /// API filters use this so that filter rules keep matching the actual API surface
+    /// regardless of the configured UID prefixes.
+    /// </summary>
+    public static string GetRawId(ISymbol symbol)
+    {
+        return GetId(symbol, applyUidPrefix: false);
+    }
+
+    private static string GetId(ISymbol symbol, bool applyUidPrefix)
     {
         if (symbol == null)
         {
@@ -46,7 +68,7 @@ internal static partial class VisitorHelper
             return "dynamic";
         }
 
-        var id = GetDocumentationCommentId(symbol)?.Substring(2);
+        var id = GetDocumentationCommentId(symbol, applyUidPrefix)?.Substring(2);
 
         if ((id is null) && (symbol is IFunctionPointerTypeSymbol functionPointerTypeSymbol))
         {
@@ -60,7 +82,7 @@ internal static partial class VisitorHelper
         return id;
     }
 
-    private static string GetDocumentationCommentId(ISymbol symbol)
+    private static string GetDocumentationCommentId(ISymbol symbol, bool applyUidPrefix = true)
     {
         string str = symbol.GetDocumentationCommentId();
         if (string.IsNullOrEmpty(str))
@@ -77,7 +99,66 @@ internal static partial class VisitorHelper
                 str = str.Insert(2, GlobalNamespaceId + ".");
             }
         }
+
+        if (applyUidPrefix && GetUidPrefix(symbol) is { } uidPrefix)
+        {
+            str = str.Insert(2, uidPrefix + ".");
+        }
+
         return str;
+    }
+
+    /// <summary>
+    /// Gets the configured UID prefix of the assembly that declares <paramref name="symbol"/>,
+    /// or <see langword="null"/> when the symbol is not prefixed.
+    /// </summary>
+    public static string GetUidPrefix(ISymbol symbol)
+    {
+        if (UidPrefixes is not { Count: > 0 } prefixes || symbol is null)
+        {
+            return null;
+        }
+
+        // Type parameters are scoped to their declaring API, prefixing them would break the
+        // `` `0 `` / ` ``0 ` references used by the documentation comment id format.
+        if (symbol is ITypeParameterSymbol)
+        {
+            return null;
+        }
+
+        // ContainingAssembly is null for symbols that don't belong to a single assembly,
+        // e.g. merged namespaces or some symbols reached through cref resolution.
+        if (symbol.ContainingAssembly is not { } assembly)
+        {
+            return null;
+        }
+
+        return prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
+    }
+
+    /// <summary>
+    /// Gets the configured UID prefix of the API a documentation comment id (i.e. a cref) points to,
+    /// or <see langword="null"/> when the target is not prefixed or cannot be resolved.
+    /// </summary>
+    public static string GetUidPrefixForCommentId(string commentId, Compilation compilation)
+    {
+        if (UidPrefixes is not { Count: > 0 } || string.IsNullOrEmpty(commentId))
+        {
+            return null;
+        }
+
+        // `Overload:` is a docfx concept, Roslyn only knows about declaration id kinds.
+        const string overloadPrefix = "Overload:";
+        if (commentId.StartsWith(overloadPrefix, StringComparison.Ordinal))
+        {
+            var body = commentId[overloadPrefix.Length..];
+            return GetUidPrefix(ResolveDeclarationId($"M:{body}"))
+                ?? GetUidPrefix(ResolveDeclarationId($"P:{body}"));
+        }
+
+        return GetUidPrefix(ResolveDeclarationId(commentId));
+
+        ISymbol ResolveDeclarationId(string id) => DocumentationCommentId.GetFirstSymbolForDeclarationId(id, compilation);
     }
 
     public static string GetCommentId(ISymbol symbol)

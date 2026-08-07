@@ -179,6 +179,17 @@ internal class MetadataJsonItemConfig
     public string GlobalNamespaceId { get; set; }
 
     /// <summary>
+    /// Maps assembly names to a prefix that is prepended to the UID of every API declared in
+    /// that assembly. Use it to disambiguate assemblies that share namespaces, which would
+    /// otherwise produce colliding UIDs and cross-linked pages.
+    /// Assemblies that are not listed are left unchanged.
+    /// The maps of all metadata entries are combined, so an assembly only needs to be listed once.
+    /// </summary>
+    [JsonProperty("uidPrefixes")]
+    [JsonPropertyName("uidPrefixes")]
+    public Dictionary<string, string> UidPrefixes { get; set; }
+
+    /// <summary>
     /// An optional set of MSBuild properties used when interpreting project files. These
     ///  are the same properties that are passed to MSBuild via the /property:&lt;n&gt;=&lt;v&gt;
     ///  command line argument.

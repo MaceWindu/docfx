@@ -480,6 +480,39 @@ Specifies whether explicit interface implementations are included in the generat
 
 Specify the name to use for the global namespace. The default value is an empty string.
 
+### `uidPrefixes`
+
+Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
+Use it when a single docfx project documents several assemblies that share namespaces, which would
+otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged.
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ "src/MyLib/MyLib.csproj" ],
+      "dest": "api/core",
+      "uidPrefixes": { "MyLib": "Core" }
+    },
+    {
+      "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
+      "dest": "api/ef8",
+      "uidPrefixes": { "MyLib.Ef8": "Ef8" }
+    }
+  ]
+}
+```
+
+With this configuration, `MyLib.Widget` from `MyLib.dll` gets the UID `Core.MyLib.Widget`, while the
+same type name coming from `MyLib.Ef8.dll` gets `Ef8.MyLib.Widget`, so each one keeps its own page,
+TOC entry and cross references.
+
+A prefix must be a dot separated identifier, e.g. `Core` or `MyLib.V2`. The maps of all `metadata`
+entries are combined into one, so each assembly only needs to be listed once regardless of the order
+the entries are declared in.
+
+See [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces).
+
 ## File Mappings
 
 In the short-hand form, these filenames are resolved relative to the directory containing the `docfx.json` file:

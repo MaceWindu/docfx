@@ -13,5 +13,10 @@ internal class XmlCommentParserContext
 
     public Func<string, string> ResolveCode { get; init; }
 
+    /// <summary>
+    /// Resolves the UID prefix of the API a cref points to, or <see langword="null"/> when it isn't prefixed.
+    /// </summary>
+    public Func<string, string> ResolveUidPrefix { get; init; }
+
     public SourceDetail Source { get; init; }
 }

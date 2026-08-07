@@ -746,6 +746,7 @@ partial class DotnetApiCatalog
                     AddReferenceDelegate = (a, b) => { },
                     Source = src,
                     ResolveCode = ResolveCode,
+                    ResolveUidPrefix = commentId => VisitorHelper.GetUidPrefixForCommentId(commentId, compilation),
                 };
 
                 var comment = symbol.GetDocumentationComment(compilation, expandIncludes: true, expandInheritdoc: true);
