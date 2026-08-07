@@ -34,6 +34,8 @@ public class UidPrefixUnitTest : IDisposable
     public void Dispose()
     {
         VisitorHelper.UidPrefixes = null;
+        VisitorHelper.UidPrefix = null;
+        VisitorHelper.UidPrefixAssemblies = null;
         VisitorHelper.GlobalNamespaceId = null;
     }
 
@@ -256,6 +258,74 @@ public class UidPrefixUnitTest : IDisposable
 
         // The prefix is applied exactly once, everywhere.
         Assert.DoesNotContain(output.References.Keys, key => key.Contains("Pkg.Pkg"));
+    }
+
+    /// <summary>
+    /// Several metadata items can document assemblies that share an assembly name, e.g. per target
+    /// version variants of one project. The per item prefix is the only way to tell those apart.
+    /// </summary>
+    [Fact]
+    public void PerItemPrefixDistinguishesAssembliesSharingAnAssemblyName()
+    {
+        var v1 = CompilationHelper.CreateCompilationFromCSharpCode(SharedLibraryCode, EmptyMSBuildProperties, "MyLib.dll");
+        var v2 = CompilationHelper.CreateCompilationFromCSharpCode(SharedLibraryCode, EmptyMSBuildProperties, "MyLib.dll");
+
+        var a = GenerateWithPerItemPrefix(v1, "V1");
+        var b = GenerateWithPerItemPrefix(v2, "V2");
+
+        Assert.Equal("V1.Shared", a.Items[0].Name);
+        Assert.Equal("V2.Shared", b.Items[0].Name);
+        Assert.Equal("V1.Shared.Widget", a.Items[0].Items[0].Name);
+        Assert.Equal("V2.Shared.Widget", b.Items[0].Items[0].Name);
+    }
+
+    [Fact]
+    public void PerItemPrefixWinsOverTheAssemblyNameMap()
+    {
+        UsePrefixes(("test.dll", "FromMap"));
+
+        var compilation = CompilationHelper.CreateCompilationFromCSharpCode(SharedLibraryCode, EmptyMSBuildProperties, "test.dll");
+        var output = GenerateWithPerItemPrefix(compilation, "FromItem");
+
+        Assert.Equal("FromItem.Shared.Widget", output.Items[0].Items[0].Name);
+    }
+
+    [Fact]
+    public void PerItemPrefixDoesNotApplyToOtherAssemblies()
+    {
+        // `a.dll` is documented by another metadata item, so it is addressed through the map.
+        UsePrefixes(("a.dll", "A"));
+
+        var reference = CreateReference(SharedLibraryCode, "a.dll");
+        var compilation = CompilationHelper.CreateCompilationFromCSharpCode(
+            """
+            namespace Other;
+
+            /// <summary>A gadget.</summary>
+            public class Gadget : Shared.Widget { }
+            """,
+            EmptyMSBuildProperties, "b.dll", reference);
+
+        var output = GenerateWithPerItemPrefix(compilation, "B");
+        var type = output.Items[0].Items[0];
+
+        Assert.Equal("B.Other.Gadget", type.Name);
+        Assert.Equal(["System.Object", "A.Shared.Widget"], type.Inheritance);
+    }
+
+    private static MetadataItem GenerateWithPerItemPrefix(Compilation compilation, string prefix)
+    {
+        VisitorHelper.UidPrefix = prefix;
+        VisitorHelper.UidPrefixAssemblies = new(SymbolEqualityComparer.Default) { compilation.Assembly };
+        try
+        {
+            return compilation.Assembly.GenerateMetadataItem(compilation);
+        }
+        finally
+        {
+            VisitorHelper.UidPrefix = null;
+            VisitorHelper.UidPrefixAssemblies = null;
+        }
     }
 
     [Fact]

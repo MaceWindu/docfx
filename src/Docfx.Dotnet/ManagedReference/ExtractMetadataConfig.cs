@@ -23,6 +23,8 @@ internal class ExtractMetadataConfig
 
     public string GlobalNamespaceId { get; init; }
 
+    public string UidPrefix { get; init; }
+
     public string CodeSourceBasePath { get; init; }
 
     public bool DisableDefaultFilter { get; init; }

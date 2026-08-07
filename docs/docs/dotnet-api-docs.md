@@ -122,29 +122,42 @@ reported, and every link to a shared namespace resolves to whichever assembly ha
 This is common when shipping platform or version specific packages that intentionally expose the same
 API surface, for example `MyLib.Ef8` and `MyLib.Ef9`.
 
-Use the [`uidPrefixes`](../reference/docfx-json-reference.md#uidprefixes) option to give each assembly
-its own UID namespace:
+Use the [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix) option to give each entry its own
+UID namespace:
 
 ```json
 {
   "metadata": [
     {
+      "src": [ "src/MyLib/MyLib.csproj" ],
+      "dest": "api/core",
+      "uidPrefix": "Core",
+      "uidPrefixes": { "MyLib": "Core" }
+    },
+    {
       "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
       "dest": "api/ef8",
-      "uidPrefixes": { "MyLib.Ef8": "Ef8" }
+      "uidPrefix": "Ef8"
     },
     {
       "src": [ "src/MyLib.Ef9/MyLib.Ef9.csproj" ],
       "dest": "api/ef9",
-      "uidPrefixes": { "MyLib.Ef9": "Ef9" }
+      "uidPrefix": "Ef9"
     }
   ]
 }
 ```
 
-`MyLib.Widget` then becomes `Ef8.MyLib.Widget` and `Ef9.MyLib.Widget`. References between the assemblies,
-`<see cref="..."/>` links and the table of contents all follow the prefix, and with
-`"namespaceLayout": "nested"` the prefix shows up as a per assembly root node in the TOC.
+`MyLib.Widget` then becomes `Ef8.MyLib.Widget` and `Ef9.MyLib.Widget`. `<see cref="..."/>` links and the
+table of contents follow the prefix, and with `"namespaceLayout": "nested"` the prefix groups that
+assembly's namespaces under a single root node.
+
+`uidPrefix` is scoped to its own entry, so it also handles the common case of per target version builds
+of one project, which all produce the *same* assembly name and therefore cannot be told apart by name.
+
+Add [`uidPrefixes`](../reference/docfx-json-reference.md#uidprefixes) for any assembly that other
+entries reference, as in the `MyLib` entry above: an entry cannot see another entry's `uidPrefix`, so
+that map is what makes references *between* entries resolve.
 
 > [!NOTE]
 > Enabling this option changes the UID of every API in the listed assemblies. Update anything that

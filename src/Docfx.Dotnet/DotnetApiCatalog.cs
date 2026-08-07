@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Docfx.Common;
 using Docfx.Plugins;
+using Microsoft.CodeAnalysis;
 using Newtonsoft.Json.Linq;
 using YamlDotNet.Serialization;
 
@@ -62,6 +63,8 @@ public static partial class DotnetApiCatalog
 
         var originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
         var originalUidPrefixes = VisitorHelper.UidPrefixes;
+        var originalUidPrefix = VisitorHelper.UidPrefix;
+        var originalUidPrefixAssemblies = VisitorHelper.UidPrefixAssemblies;
 
         try
         {
@@ -84,6 +87,8 @@ public static partial class DotnetApiCatalog
         {
             VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
             VisitorHelper.UidPrefixes = originalUidPrefixes;
+            VisitorHelper.UidPrefix = originalUidPrefix;
+            VisitorHelper.UidPrefixAssemblies = originalUidPrefixAssemblies;
             EnvironmentContext.Clean();
         }
 
@@ -92,6 +97,14 @@ public static partial class DotnetApiCatalog
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
             var assemblies = await Compile(config);
+
+            // `uidPrefix` applies to the assemblies this metadata item documents, which are only
+            // known once they are compiled. It stays constant for the whole item, so the parallel
+            // API page generation can read it safely.
+            VisitorHelper.UidPrefix = config.UidPrefix;
+            VisitorHelper.UidPrefixAssemblies = string.IsNullOrEmpty(config.UidPrefix)
+                ? null
+                : new HashSet<IAssemblySymbol>(assemblies.Select(a => a.symbol), SymbolEqualityComparer.Default);
 
             switch (config.OutputFormat)
             {
@@ -125,6 +138,11 @@ public static partial class DotnetApiCatalog
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")]
     private static partial Regex UidPrefixRegex();
 
+    private static bool IsValidUidPrefix(string prefix)
+    {
+        return !string.IsNullOrEmpty(prefix) && UidPrefixRegex().IsMatch(prefix);
+    }
+
     /// <summary>
     /// Combines the <c>uidPrefixes</c> maps of every metadata item into a single assembly name to prefix map.
     /// </summary>
@@ -134,6 +152,14 @@ public static partial class DotnetApiCatalog
 
         foreach (var item in config)
         {
+            if (item.UidPrefix is not null && !IsValidUidPrefix(item.UidPrefix))
+            {
+                Logger.LogWarning(
+                    $"Ignoring invalid UID prefix '{item.UidPrefix}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    code: "InvalidUidPrefix");
+                item.UidPrefix = null;
+            }
+
             if (item.UidPrefixes is null)
             {
                 continue;
@@ -147,7 +173,7 @@ public static partial class DotnetApiCatalog
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(prefix) || !UidPrefixRegex().IsMatch(prefix))
+                if (!IsValidUidPrefix(prefix))
                 {
                     Logger.LogWarning(
                         $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
@@ -196,6 +222,7 @@ public static partial class DotnetApiCatalog
             IncludePrivateMembers = configModel?.IncludePrivateMembers ?? false,
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
+            UidPrefix = configModel?.UidPrefix,
             MSBuildProperties = configModel?.Properties,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,

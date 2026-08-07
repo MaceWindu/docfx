@@ -179,9 +179,20 @@ internal class MetadataJsonItemConfig
     public string GlobalNamespaceId { get; set; }
 
     /// <summary>
+    /// A prefix that is prepended to the UID of every API declared in the assemblies documented by
+    /// this entry. Use it to disambiguate assemblies that share namespaces, which would otherwise
+    /// produce colliding UIDs and cross-linked pages.
+    /// This takes precedence over <see cref="UidPrefixes"/>, so entries that document assemblies
+    /// sharing an assembly name can still give them distinct UIDs.
+    /// </summary>
+    [JsonProperty("uidPrefix")]
+    [JsonPropertyName("uidPrefix")]
+    public string UidPrefix { get; set; }
+
+    /// <summary>
     /// Maps assembly names to a prefix that is prepended to the UID of every API declared in
-    /// that assembly. Use it to disambiguate assemblies that share namespaces, which would
-    /// otherwise produce colliding UIDs and cross-linked pages.
+    /// that assembly. Use it to address APIs documented by another metadata entry, whose
+    /// <see cref="UidPrefix"/> is not visible from this one.
     /// Assemblies that are not listed are left unchanged.
     /// The maps of all metadata entries are combined, so an assembly only needs to be listed once.
     /// </summary>
