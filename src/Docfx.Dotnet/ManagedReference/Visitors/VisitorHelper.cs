@@ -23,6 +23,20 @@ internal static partial class VisitorHelper
     /// </summary>
     public static IReadOnlyDictionary<string, string> UidPrefixes { get; set; }
 
+    /// <summary>
+    /// The prefix prepended to the UID of every API declared in <see cref="UidPrefixAssemblies"/>.
+    /// It takes precedence over <see cref="UidPrefixes"/>, which lets metadata items that document
+    /// assemblies sharing an assembly name give them distinct UIDs.
+    /// This is assigned once per metadata item, before its APIs are generated.
+    /// </summary>
+    public static string UidPrefix { get; set; }
+
+    /// <summary>
+    /// The assemblies <see cref="UidPrefix"/> applies to, i.e. the assemblies documented by the
+    /// metadata item that is currently being processed.
+    /// </summary>
+    public static HashSet<IAssemblySymbol> UidPrefixAssemblies { get; set; }
+
     [GeneratedRegex(@"``\d+$")]
     private static partial Regex GenericMethodPostFix();
 
@@ -114,7 +128,7 @@ internal static partial class VisitorHelper
     /// </summary>
     public static string GetUidPrefix(ISymbol symbol)
     {
-        if (UidPrefixes is not { Count: > 0 } prefixes || symbol is null)
+        if (symbol is null || (UidPrefixes is not { Count: > 0 } && string.IsNullOrEmpty(UidPrefix)))
         {
             return null;
         }
@@ -133,7 +147,14 @@ internal static partial class VisitorHelper
             return null;
         }
 
-        return prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
+        // The prefix of the metadata item being processed wins, so that assemblies sharing an
+        // assembly name can still be told apart by the item that documents each of them.
+        if (!string.IsNullOrEmpty(UidPrefix) && UidPrefixAssemblies is { } assemblies && assemblies.Contains(assembly))
+        {
+            return UidPrefix;
+        }
+
+        return UidPrefixes is { } prefixes && prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
     }
 
     /// <summary>
