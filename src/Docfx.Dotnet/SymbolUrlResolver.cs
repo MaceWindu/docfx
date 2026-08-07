@@ -43,6 +43,11 @@ internal static partial class SymbolUrlResolver
         if (commentId is null)
             return null;
 
+        // The file names and anchors this method builds come from VisitorHelper, so the UID prefix
+        // has to be applied here as well, otherwise the generated links miss the pages they target.
+        if (VisitorHelper.GetUidPrefix(symbol) is { } uidPrefix)
+            commentId = commentId.Insert(2, uidPrefix + ".");
+
         var parts = commentId.Split(':');
         var type = parts[0];
         var uid = parts[1];

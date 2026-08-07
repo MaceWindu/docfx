@@ -132,6 +132,15 @@ internal partial class XmlComment
         }
     }
 
+    /// <summary>
+    /// Prepends the UID prefix of the API <paramref name="commentId"/> points to, so that crefs
+    /// keep resolving when the target assembly is configured with a `uidPrefixes` entry.
+    /// </summary>
+    private string ApplyUidPrefix(string id, string commentId)
+    {
+        return _context?.ResolveUidPrefix?.Invoke(commentId) is { } prefix ? $"{prefix}.{id}" : id;
+    }
+
     public string GetParameter(string name)
     {
         return Parameters.GetValueOrDefault(name);
@@ -335,6 +344,8 @@ internal partial class XmlComment
                     id += '*';
                 }
 
+                id = ApplyUidPrefix(id, cref);
+
                 // When see and seealso are top level nodes in triple slash comments, do not convert it into xref node
                 if (item.Parent?.Parent != null)
                 {
@@ -439,7 +450,7 @@ internal partial class XmlComment
                     yield return new ExceptionInfo
                     {
                         Description = description,
-                        Type = id,
+                        Type = ApplyUidPrefix(id, commentId),
                         CommentId = commentId,
                     };
                 }
@@ -447,7 +458,7 @@ internal partial class XmlComment
         }
     }
 
-    private static IEnumerable<LinkInfo> GetMultipleLinkInfo(XDocument doc, string selector)
+    private IEnumerable<LinkInfo> GetMultipleLinkInfo(XDocument doc, string selector)
     {
         var nodes = doc.XPathSelectElements(selector).ToArray();
 
@@ -490,7 +501,7 @@ internal partial class XmlComment
                     yield return new LinkInfo
                     {
                         AltText = altText,
-                        LinkId = id,
+                        LinkId = ApplyUidPrefix(id, commentId),
                         CommentId = commentId,
                         LinkType = LinkType.CRef
                     };

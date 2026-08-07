@@ -630,6 +630,14 @@
             "type": "string",
             "description": "Specify the name to use for the global namespace."
           },
+          "uidPrefixes": {
+            "type": "object",
+            "description": "Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly. Use it to disambiguate assemblies that share namespaces. Assemblies that are not listed are left unchanged. The maps of all metadata entries are combined, so an assembly only needs to be listed once.",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+            }
+          },
           "properties": {
             "type": "object",
             "additionalProperties": {

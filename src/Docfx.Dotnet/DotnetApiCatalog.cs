@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Docfx.Common;
 using Docfx.Plugins;
 using Newtonsoft.Json.Linq;
@@ -59,11 +60,17 @@ public static partial class DotnetApiCatalog
     {
         var stopwatch = Stopwatch.StartNew();
 
+        var originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
+        var originalUidPrefixes = VisitorHelper.UidPrefixes;
+
         try
         {
-            string originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
-
             EnvironmentContext.SetBaseDirectory(configDirectory);
+
+            // A UID prefix is a property of the assembly, not of the metadata item that documents it,
+            // so the maps of all metadata items are combined before any of them is processed. This keeps
+            // references between metadata items resolvable regardless of the order they are declared in.
+            VisitorHelper.UidPrefixes = GetUidPrefixes(config);
 
             foreach (var item in config)
             {
@@ -72,11 +79,11 @@ public static partial class DotnetApiCatalog
 
                 await Build(ConvertConfig(item, configDirectory, outputDirectory), options);
             }
-
-            VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
         }
         finally
         {
+            VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
+            VisitorHelper.UidPrefixes = originalUidPrefixes;
             EnvironmentContext.Clean();
         }
 
@@ -113,6 +120,59 @@ public static partial class DotnetApiCatalog
                     break;
             }
         }
+    }
+
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")]
+    private static partial Regex UidPrefixRegex();
+
+    /// <summary>
+    /// Combines the <c>uidPrefixes</c> maps of every metadata item into a single assembly name to prefix map.
+    /// </summary>
+    private static Dictionary<string, string> GetUidPrefixes(MetadataJsonConfig config)
+    {
+        Dictionary<string, string> result = null;
+
+        foreach (var item in config)
+        {
+            if (item.UidPrefixes is null)
+            {
+                continue;
+            }
+
+            foreach (var (assemblyName, prefix) in item.UidPrefixes)
+            {
+                if (string.IsNullOrWhiteSpace(assemblyName))
+                {
+                    Logger.LogWarning("Ignoring 'uidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(prefix) || !UidPrefixRegex().IsMatch(prefix))
+                {
+                    Logger.LogWarning(
+                        $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                        code: "InvalidUidPrefix");
+                    continue;
+                }
+
+                result ??= new(StringComparer.OrdinalIgnoreCase);
+
+                if (result.TryGetValue(assemblyName, out var existingPrefix))
+                {
+                    if (existingPrefix != prefix)
+                    {
+                        Logger.LogWarning(
+                            $"Assembly '{assemblyName}' is mapped to both UID prefix '{existingPrefix}' and '{prefix}', '{existingPrefix}' is used.",
+                            code: "InvalidUidPrefix");
+                    }
+                    continue;
+                }
+
+                result.Add(assemblyName, prefix);
+            }
+        }
+
+        return result;
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)

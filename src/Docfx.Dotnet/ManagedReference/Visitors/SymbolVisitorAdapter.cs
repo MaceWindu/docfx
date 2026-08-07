@@ -130,12 +130,32 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
             return null;
         }
         item.Type = MemberType.Namespace;
+
+        // A namespace shared by several prefixed assemblies would otherwise be indistinguishable in
+        // the TOC, breadcrumbs and page titles. Showing the prefix also keeps the parent namespace
+        // trimming in `YamlViewModelExtensions.ToTocItemViewModel` working, as that compares the
+        // display name against the uid of the parent namespace.
+        if (VisitorHelper.GetUidPrefix(symbol) is not null)
+        {
+            UseUidAsDisplayName(item.DisplayNames);
+            UseUidAsDisplayName(item.DisplayNamesWithType);
+            UseUidAsDisplayName(item.DisplayQualifiedNames);
+        }
+
         item.Items = VisitDescendants(
             symbol.GetMembers().OfType<ITypeSymbol>(),
             t => t.GetMembers().OfType<ITypeSymbol>(),
             t => true);
         AddReference(symbol);
         return item;
+
+        void UseUidAsDisplayName(SortedList<SyntaxLanguage, string> names)
+        {
+            foreach (var language in names.Keys.ToArray())
+            {
+                names[language] = item.Name;
+            }
+        }
     }
 
     public override MetadataItem VisitNamedType(INamedTypeSymbol symbol)
@@ -721,6 +741,7 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
             AddReferenceDelegate = AddReferenceDelegate,
             Source = item.Source,
             ResolveCode = ResolveCode,
+            ResolveUidPrefix = commentId => VisitorHelper.GetUidPrefixForCommentId(commentId, _compilation),
         };
 
         void AddReferenceDelegate(string id, string commentId)
