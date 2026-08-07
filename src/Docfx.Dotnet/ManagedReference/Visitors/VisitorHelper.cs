@@ -104,11 +104,14 @@ internal static partial class VisitorHelper
         return GetGlobalId(symbol, id);
     }
 
-    private static string GetGlobalId(ISymbol symbol, string id) => id == null || !symbol.ContainingAssembly.Name.StartsWith("linq2db")
+    // ContainingAssembly is null for some symbols reached through cref resolution, and `id != null`
+    // short-circuits past the first check, so this dereferenced null. A symbol with no containing
+    // assembly cannot be a linq2db symbol, so it falls through to the plain id like any other.
+    private static string GetGlobalId(ISymbol symbol, string id) => id == null || symbol.ContainingAssembly is not { } assembly || !assembly.Name.StartsWith("linq2db")
                 ? id
-                : symbol.ContainingAssembly.Name == OldPrefix
+                : assembly.Name == OldPrefix
                     ? $"{NewPrefix}.{id}"
-                    : $"{symbol.ContainingAssembly.Name}.{id}";
+                    : $"{assembly.Name}.{id}";
 
     public static string GetOverloadId(ISymbol symbol)
     {
