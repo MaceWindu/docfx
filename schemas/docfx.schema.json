@@ -26,7 +26,7 @@
       "description": "Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly, to disambiguate assemblies that share namespaces. Assemblies that are not listed are left unchanged. This is a project level setting because every metadata entry has to agree on the prefixes: an entry mints UIDs for the APIs it references as well as the ones it documents.",
       "additionalProperties": {
         "type": "string",
-        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)*$"
       }
     }
   },
@@ -641,7 +641,7 @@
           "uidPrefixOverride": {
             "type": "string",
             "description": "Overrides the project level assemblyUidPrefixes for the assemblies documented by this entry. Needed only when several entries document assemblies that share an assembly name, such as per target version builds of one project, which a map keyed by assembly name cannot tell apart. Because it is scoped to its own entry, other entries cannot see it, so an assembly that other entries reference belongs in assemblyUidPrefixes instead.",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)*$"
           },
           "properties": {
             "type": "object",

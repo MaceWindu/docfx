@@ -363,7 +363,7 @@ public class MetadataCommandTest : TestBase
             new(new MetadataJsonItemConfig
             {
                 Dest = _outputFolder,
-Src = new(new FileMappingItem([.. projects])) { Expanded = true },
+                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
             }),
             new(), Directory.GetCurrentDirectory(),
             assemblyUidPrefixes: new() { ["a"] = "A", ["b"] = "B" });
@@ -405,7 +405,7 @@ Src = new(new FileMappingItem([.. projects])) { Expanded = true },
             new(new MetadataJsonItemConfig
             {
                 Dest = _outputFolder,
-Src = new(new FileMappingItem([.. projects])) { Expanded = true },
+                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
                 NamespaceLayout = NamespaceLayout.Nested,
             }),
             new(), Directory.GetCurrentDirectory(),
@@ -454,6 +454,29 @@ Src = new(new FileMappingItem([.. projects])) { Expanded = true },
             Assert.True(File.Exists(file), $"{file} is missing.");
             Assert.Equal($"{prefix}.Shared.Widget", YamlUtility.Deserialize<PageViewModel>(file).Items[0].Uid);
         }
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TestMetadataCommandWithInvalidUidPrefixes()
+    {
+        var projects = CreateProjectsSharingANamespace();
+
+        using var listener = new TestListenerScope();
+
+        await DotnetApiCatalog.Exec(
+            new(new MetadataJsonItemConfig
+            {
+                Dest = _outputFolder,
+                Src = new(new FileMappingItem(projects[0])) { Expanded = true },
+                UidPrefixOverride = "not a prefix",
+            }),
+            new(), Directory.GetCurrentDirectory(),
+            assemblyUidPrefixes: new() { ["a"] = "also/invalid", [""] = "A" });
+
+        // Both invalid values are reported and dropped, and generation continues unprefixed.
+        Assert.Equal(3, listener.GetItemsByLogLevel(LogLevel.Warning).Count(x => x.Code == "InvalidUidPrefix"));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Shared.Widget.yml")));
     }
 
     /// <summary>

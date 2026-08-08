@@ -313,6 +313,40 @@ public class UidPrefixUnitTest : IDisposable
         Assert.Equal(["System.Object", "A.Shared.Widget"], type.Inheritance);
     }
 
+    /// <summary>
+    /// An assembly documented under a per item prefix can still be listed in the assembly name map, which
+    /// makes that entry the target other items link to. This is the only way to give other items something
+    /// to point at when several of them document assemblies sharing an assembly name.
+    /// </summary>
+    [Fact]
+    public void TheAssemblyNameMapIsTheDefaultTargetForOtherItems()
+    {
+        // `Shared.dll` is documented twice, once per version, and the map names V2 as the default target.
+        UsePrefixes(("Shared", "V2"), ("consumer.dll", "Consumer"));
+
+        var v1 = CompilationHelper.CreateCompilationFromCSharpCode(SharedLibraryCode, EmptyMSBuildProperties, "Shared");
+        var v2 = CompilationHelper.CreateCompilationFromCSharpCode(SharedLibraryCode, EmptyMSBuildProperties, "Shared");
+
+        // Each item's own prefix still wins for the assembly it documents.
+        Assert.Equal("V1.Shared.Widget", GenerateWithPerItemPrefix(v1, "V1").Items[0].Items[0].Name);
+        Assert.Equal("V2.Shared.Widget", GenerateWithPerItemPrefix(v2, "V2").Items[0].Items[0].Name);
+
+        // An item that only references it falls back to the map, so its links land on the V2 pages.
+        var consumer = CompilationHelper.CreateCompilationFromCSharpCode(
+            """
+            namespace Consumes;
+
+            /// <summary>A gadget.</summary>
+            public class Gadget : Shared.Widget { }
+            """,
+            EmptyMSBuildProperties, "consumer.dll", v2.ToMetadataReference());
+
+        var type = consumer.Assembly.GenerateMetadataItem(consumer).Items[0].Items[0];
+
+        Assert.Equal("Consumer.Consumes.Gadget", type.Name);
+        Assert.Equal(["System.Object", "V2.Shared.Widget"], type.Inheritance);
+    }
+
     [Fact]
     public void CrefsArePrefixedByThePerItemPrefixToo()
     {
@@ -349,6 +383,22 @@ public class UidPrefixUnitTest : IDisposable
             VisitorHelper.UidPrefixOverride = null;
             VisitorHelper.UidPrefixOverrideAssemblies = null;
         }
+    }
+
+    /// <summary>
+    /// A prefix segment may start with a digit, unlike a namespace, so target framework style prefixes
+    /// work. This is the one place the prefix grammar differs from C# identifiers.
+    /// </summary>
+    [Fact]
+    public void PrefixSegmentsMayStartWithADigit()
+    {
+        UsePrefixes(("test.dll", "net8.0"));
+
+        var output = Verify(SharedLibraryCode);
+
+        Assert.Equal("net8.0.Shared", output.Items[0].Name);
+        Assert.Equal("net8.0.Shared.Widget", output.Items[0].Items[0].Name);
+        Assert.Equal("T:net8.0.Shared.Widget", output.Items[0].Items[0].CommentId);
     }
 
     [Fact]

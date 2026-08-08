@@ -146,7 +146,11 @@ public static partial class DotnetApiCatalog
         }
     }
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")]
+    // A UID ends up as a file name, an xref key and an HTML anchor, so a prefix is restricted to the
+    // characters that are safe in all three: letters, digits, underscores, and dots as separators.
+    // Unlike a namespace, a segment may start with a digit, so target framework style prefixes such as
+    // `net8.0` work.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$")]
     private static partial Regex UidPrefixRegex();
 
     private static bool IsValidUidPrefix(string prefix)
@@ -178,7 +182,7 @@ public static partial class DotnetApiCatalog
             if (!IsValidUidPrefix(prefix))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must start with a letter or underscore and may contain letters, digits, underscores and dots, e.g. 'MyLib', 'MyLib.V2' or 'net8.0'.",
                     code: "InvalidUidPrefix");
                 continue;
             }
@@ -210,7 +214,7 @@ public static partial class DotnetApiCatalog
             if (item.UidPrefixOverride is not null && !IsValidUidPrefix(item.UidPrefixOverride))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{item.UidPrefixOverride}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    $"Ignoring invalid UID prefix '{item.UidPrefixOverride}'. A UID prefix must start with a letter or underscore and may contain letters, digits, underscores and dots, e.g. 'MyLib', 'MyLib.V2' or 'net8.0'.",
                     code: "InvalidUidPrefix");
                 item.UidPrefixOverride = null;
             }

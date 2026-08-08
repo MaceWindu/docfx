@@ -31,8 +31,12 @@ Overrides default log message severity level. Key is the log code, supported val
 
 Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
 Use it when a single docfx project documents several assemblies that share namespaces, which would
-otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged. A prefix must be a
-dot separated identifier, e.g. `Core` or `MyLib.V2`.
+otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged.
+
+A prefix must start with a letter or underscore and may contain letters, digits, underscores and dots,
+e.g. `Core`, `MyLib.V2` or `net8.0`. Dots separate it into segments the same way a namespace is
+separated, so with `"namespaceLayout": "nested"` a multi segment prefix becomes nested TOC nodes. Unlike
+a namespace, a segment may start with a digit.
 
 ```json
 {
@@ -550,8 +554,24 @@ The override has two limits, both following from the fact that it names an *entr
 assembly:
 
 - **Other entries cannot see it.** An entry referencing `MyLib.Ef.dll` has no way to know whether you
-  meant `Ef8` or `Ef9`, so its references come out unprefixed and silently render without a link. Only
-  use the override for assemblies nothing else in the project references.
+  meant `Ef8` or `Ef9`, so its references come out unprefixed and silently render without a link. To give
+  those references somewhere to go, also list the assembly in
+  [`assemblyUidPrefixes`](#assemblyuidprefixes) with the prefix of the version you want to be the default
+  link target:
+
+  ```json
+  {
+    "assemblyUidPrefixes": { "MyLib": "Core", "MyLib.Ef": "Ef9" },
+    "metadata": [
+      { "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ], "dest": "api/ef8", "uidPrefixOverride": "Ef8" },
+      { "src": [ "src/MyLib.Ef/MyLib.Ef.Ef9.csproj" ], "dest": "api/ef9", "uidPrefixOverride": "Ef9" }
+    ]
+  }
+  ```
+
+  Each entry still documents its own version, because the override wins for the assemblies its entry
+  documents, while every *other* entry resolves `MyLib.Ef` references to the `Ef9` pages.
+
 - **It does not disambiguate within one entry.** All the assemblies an entry documents get the same
   prefix, so if one entry compiles two assemblies with the same name — a glob matching several target
   framework folders, for instance — they still collide.

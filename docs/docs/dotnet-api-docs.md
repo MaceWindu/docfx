@@ -200,14 +200,39 @@ anchors — is consistent with them.
 It does not fix two things, both following from the fact that it names an entry rather than an assembly:
 
 - **Links from other entries into those assemblies.** A fourth entry referencing `MyLib.Ef.dll` has no
-  way to know whether you meant `Ef8` or `Ef9`, and `assemblyUidPrefixes` cannot say either, because both
-  share the assembly name. Those references come out unprefixed and lose their links, with no warning.
-  So the override is only safe for assemblies nothing else in the project references — in practice, leaf
-  packages such as per version integrations.
+  way to know whether you meant `Ef8` or `Ef9`. Those references come out unprefixed and lose their links,
+  with no warning. See [Picking a default link target](#picking-a-default-link-target) below.
 - **Two same-named assemblies inside *one* entry.** Every assembly an entry documents gets the same
   prefix, so if one entry's `src` glob matches the same assembly built for several target frameworks,
   those copies still collide and are reported as `Ignore duplicated member`. The fix there is to narrow
   the glob to one target framework, not to add a prefix.
+
+#### Picking a default link target
+
+If other entries do reference an assembly that several entries document, list it in
+`assemblyUidPrefixes` as well, naming the version those references should point at:
+
+```json
+{
+  "assemblyUidPrefixes": {
+    "MyLib": "Core",
+    "MyLib.Ef": "Ef9"
+  },
+  "metadata": [
+    { "src": [ "src/MyLib/MyLib.csproj" ],           "dest": "api/core" },
+    { "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ], "dest": "api/ef8", "uidPrefixOverride": "Ef8" },
+    { "src": [ "src/MyLib.Ef/MyLib.Ef.Ef9.csproj" ], "dest": "api/ef9", "uidPrefixOverride": "Ef9" }
+  ]
+}
+```
+
+The two rules compose in the way you want without any extra option: `uidPrefixOverride` wins for the
+assemblies its own entry documents, so `api/ef8` and `api/ef9` still each get their own pages, while every
+*other* entry falls back to the map and resolves `MyLib.Ef` references to the `Ef9` pages.
+
+The trade-off is that all such links go to one chosen version. There is no way to make a reference resolve
+to "whichever version the referencing assembly was built against", because by the time the UID is minted
+the only thing distinguishing the versions is which entry documented them.
 
 In short:
 
@@ -215,7 +240,8 @@ In short:
 |---|---|
 | the assembly has a name of its own | `assemblyUidPrefixes` |
 | the assembly is referenced by other assemblies in the project | `assemblyUidPrefixes` |
-| several entries build the same assembly name, and nothing else references them | `uidPrefixOverride` |
+| several entries build the same assembly name | `uidPrefixOverride` on each |
+| ... and other entries reference it | also list it in `assemblyUidPrefixes`, naming the default target |
 | one entry matches the same assembly several times | narrow the `src` glob |
 
 > [!NOTE]
