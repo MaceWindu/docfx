@@ -353,7 +353,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithUidPrefixMap()
+    public async Task TestMetadataCommandWithAssemblyUidPrefixes()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -364,7 +364,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                UidPrefix = new Dictionary<string, string> { ["a"] = "A", ["b"] = "B" },
+                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
             }),
             new(), Directory.GetCurrentDirectory());
 
@@ -397,7 +397,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithUidPrefixMapAndNestedToc()
+    public async Task TestMetadataCommandWithAssemblyUidPrefixesAndNestedToc()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -406,7 +406,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                UidPrefix = new Dictionary<string, string> { ["a"] = "A", ["b"] = "B" },
+                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
                 NamespaceLayout = NamespaceLayout.Nested,
             }),
             new(), Directory.GetCurrentDirectory());
@@ -422,12 +422,12 @@ public class MetadataCommandTest : TestBase
     }
 
     /// <summary>
-    /// The string form of `uidPrefix` is scoped to its own metadata item, so two items can use it even
-    /// though the object form could not tell their assemblies apart by name.
+    /// uidPrefixOverride is scoped to its own metadata item, so two items can use it even
+    /// though assemblyUidPrefixes could not tell their assemblies apart by name.
     /// </summary>
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithUidPrefixString()
+    public async Task TestMetadataCommandWithUidPrefixOverride()
     {
         var projects = CreateProjectsSharingANamespace();
         var otherOutputFolder = GetRandomFolder();
@@ -438,13 +438,13 @@ public class MetadataCommandTest : TestBase
                 {
                     Dest = _outputFolder,
                     Src = new(new FileMappingItem(projects[0])) { Expanded = true },
-                    UidPrefix = "First",
+                    UidPrefixOverride = "First",
                 },
                 new MetadataJsonItemConfig
                 {
                     Dest = otherOutputFolder,
                     Src = new(new FileMappingItem(projects[1])) { Expanded = true },
-                    UidPrefix = "Second",
+                    UidPrefixOverride = "Second",
                 }),
             new(), Directory.GetCurrentDirectory());
 

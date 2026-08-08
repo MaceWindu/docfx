@@ -17,27 +17,27 @@ internal static partial class VisitorHelper
     public static string GlobalNamespaceId { get; set; }
 
     /// <summary>
-    /// Maps an assembly name to the prefix prepended to the UID of every API declared in that assembly.
+    /// Maps an assembly name to The prefix prepended to the UID of every API declared in that assembly.
     /// This is assigned once before metadata generation starts and is only read afterwards,
     /// so it is safe to read from the parallel API page generation.
     /// </summary>
     public static IReadOnlyDictionary<string, string> AssemblyUidPrefixes { get; set; }
 
     /// <summary>
-    /// The prefix prepended to the UID of every API declared in <see cref="UidPrefixAssemblies"/>.
+    /// The prefix prepended to the UID of every API declared in <see cref="UidPrefixOverrideAssemblies"/>.
     /// It takes precedence over <see cref="AssemblyUidPrefixes"/>, which lets metadata items that
     /// document assemblies sharing an assembly name give them distinct UIDs.
     /// This is assigned once per metadata item, before its APIs are generated.
     /// </summary>
-    public static string UidPrefix { get; set; }
+    public static string UidPrefixOverride { get; set; }
 
     /// <summary>
-    /// The assemblies <see cref="UidPrefix"/> applies to, i.e. the assemblies documented by the
+    /// The assemblies <see cref="UidPrefixOverride"/> applies to, i.e. the assemblies documented by the
     /// metadata item that is currently being processed.
     /// </summary>
-    public static HashSet<IAssemblySymbol> UidPrefixAssemblies { get; set; }
+    public static HashSet<IAssemblySymbol> UidPrefixOverrideAssemblies { get; set; }
 
-    private static bool IsUidPrefixConfigured => AssemblyUidPrefixes is { Count: > 0 } || !string.IsNullOrEmpty(UidPrefix);
+    private static bool IsUidPrefixConfigured => AssemblyUidPrefixes is { Count: > 0 } || !string.IsNullOrEmpty(UidPrefixOverride);
 
     [GeneratedRegex(@"``\d+$")]
     private static partial Regex GenericMethodPostFix();
@@ -151,9 +151,9 @@ internal static partial class VisitorHelper
 
         // The prefix of the metadata item being processed wins, so that assemblies sharing an
         // assembly name can still be told apart by the item that documents each of them.
-        if (!string.IsNullOrEmpty(UidPrefix) && UidPrefixAssemblies is { } assemblies && assemblies.Contains(assembly))
+        if (!string.IsNullOrEmpty(UidPrefixOverride) && UidPrefixOverrideAssemblies is { } assemblies && assemblies.Contains(assembly))
         {
-            return UidPrefix;
+            return UidPrefixOverride;
         }
 
         return AssemblyUidPrefixes is { } prefixes && prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
