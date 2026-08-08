@@ -630,21 +630,18 @@
             "type": "string",
             "description": "Specify the name to use for the global namespace."
           },
-          "uidPrefix": {
-            "description": "A prefix that is prepended to the UID of every API declared in a given assembly, to disambiguate assemblies that share namespaces. An object maps assembly names to prefixes, and is the form to prefer: the objects of all metadata entries are combined into one before any of them is processed, which is what lets an entry address APIs documented by another entry. A string is a prefix for the assemblies documented by this entry alone, needed only when several entries document assemblies that share an assembly name; it takes precedence over the object form for this entry's own assemblies.",
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
-                }
-              },
-              {
-                "type": "string",
-                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
-              }
-            ]
+          "assemblyUidPrefixes": {
+            "type": "object",
+            "description": "Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly, to disambiguate assemblies that share namespaces. Assemblies that are not listed are left unchanged. This is a project wide setting: the maps of all metadata entries are combined into one before any of them is processed, which is what lets an entry address APIs documented by another entry, so it does not matter which entry declares a given assembly.",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+            }
+          },
+          "uidPrefixOverride": {
+            "type": "string",
+            "description": "Overrides assemblyUidPrefixes for the assemblies documented by this entry. Needed only when several entries document assemblies that share an assembly name, such as per target version builds of one project, which a map keyed by assembly name cannot tell apart. Because it is scoped to its own entry, other entries cannot see it, so an assembly that other entries reference belongs in assemblyUidPrefixes instead.",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
           },
           "properties": {
             "type": "object",

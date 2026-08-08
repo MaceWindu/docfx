@@ -179,23 +179,31 @@ internal class MetadataJsonItemConfig
     public string GlobalNamespaceId { get; set; }
 
     /// <summary>
-    /// A prefix that is prepended to the UID of every API declared in a given assembly, to
-    /// disambiguate assemblies that share namespaces and would otherwise produce colliding UIDs.
+    /// Maps assembly names to a prefix that is prepended to the UID of every API declared in that
+    /// assembly, to disambiguate assemblies that share namespaces and would otherwise produce colliding
+    /// UIDs. Assemblies that are not listed are left unchanged.
     /// <para>
-    /// Accepts two forms. An object maps assembly names to prefixes, and is the form to prefer: the
-    /// objects of all metadata entries are combined into one before any of them is processed, which is
-    /// what lets an entry address APIs documented by another entry. Assemblies that are not listed are
-    /// left unchanged.
-    /// </para>
-    /// <para>
-    /// A string is a prefix for the assemblies documented by this entry alone, and is needed only when
-    /// several entries document assemblies that share an assembly name, which the object form cannot
-    /// tell apart. It takes precedence over the object form for this entry's own assemblies.
+    /// This is a project wide setting rather than a per entry one: the maps of all metadata entries are
+    /// combined into one before any of them is processed, which is what lets an entry address APIs
+    /// documented by another entry. It therefore does not matter which entry declares a given assembly.
     /// </para>
     /// </summary>
-    [JsonProperty("uidPrefix")]
-    [JsonPropertyName("uidPrefix")]
-    public UidPrefixSetting UidPrefix { get; set; }
+    [JsonProperty("assemblyUidPrefixes")]
+    [JsonPropertyName("assemblyUidPrefixes")]
+    public Dictionary<string, string> AssemblyUidPrefixes { get; set; }
+
+    /// <summary>
+    /// Overrides <see cref="AssemblyUidPrefixes"/> for the assemblies documented by this entry.
+    /// Needed only when several entries document assemblies that share an assembly name, such as per
+    /// target version builds of one project, which a map keyed by assembly name cannot tell apart.
+    /// <para>
+    /// Because it is scoped to its own entry, other entries cannot see it, so an assembly that other
+    /// entries reference belongs in <see cref="AssemblyUidPrefixes"/> instead.
+    /// </para>
+    /// </summary>
+    [JsonProperty("uidPrefixOverride")]
+    [JsonPropertyName("uidPrefixOverride")]
+    public string UidPrefixOverride { get; set; }
 
     /// <summary>
     /// An optional set of MSBuild properties used when interpreting project files. These

@@ -25,7 +25,7 @@
     "includePrivateMembers": true,
     "includeExplicitInterfaceImplementations": true,
     "globalNamespaceId": "Global",
-    "uidPrefix": {
+    "assemblyUidPrefixes": {
       "MyLib": "MyLib",
       "MyLib.Extensions": "MyLib.V2"
     },

@@ -63,8 +63,8 @@ public static partial class DotnetApiCatalog
 
         var originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
         var originalAssemblyUidPrefixes = VisitorHelper.AssemblyUidPrefixes;
-        var originalUidPrefix = VisitorHelper.UidPrefix;
-        var originalUidPrefixAssemblies = VisitorHelper.UidPrefixAssemblies;
+        var originalUidPrefixOverride = VisitorHelper.UidPrefixOverride;
+        var originalUidPrefixOverrideAssemblies = VisitorHelper.UidPrefixOverrideAssemblies;
 
         try
         {
@@ -87,8 +87,8 @@ public static partial class DotnetApiCatalog
         {
             VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
             VisitorHelper.AssemblyUidPrefixes = originalAssemblyUidPrefixes;
-            VisitorHelper.UidPrefix = originalUidPrefix;
-            VisitorHelper.UidPrefixAssemblies = originalUidPrefixAssemblies;
+            VisitorHelper.UidPrefixOverride = originalUidPrefixOverride;
+            VisitorHelper.UidPrefixOverrideAssemblies = originalUidPrefixOverrideAssemblies;
             EnvironmentContext.Clean();
         }
 
@@ -98,11 +98,11 @@ public static partial class DotnetApiCatalog
         {
             var assemblies = await Compile(config);
 
-            // `uidPrefix` applies to the assemblies this metadata item documents, which are only
+            // `uidPrefixOverride` applies to the assemblies this metadata item documents, which are only
             // known once they are compiled. It stays constant for the whole item, so the parallel
             // API page generation can read it safely.
-            VisitorHelper.UidPrefix = config.UidPrefix;
-            VisitorHelper.UidPrefixAssemblies = string.IsNullOrEmpty(config.UidPrefix)
+            VisitorHelper.UidPrefixOverride = config.UidPrefixOverride;
+            VisitorHelper.UidPrefixOverrideAssemblies = string.IsNullOrEmpty(config.UidPrefixOverride)
                 ? null
                 : new HashSet<IAssemblySymbol>(assemblies.Select(a => a.symbol), SymbolEqualityComparer.Default);
 
@@ -144,8 +144,8 @@ public static partial class DotnetApiCatalog
     }
 
     /// <summary>
-    /// Combines the object form of <c>uidPrefix</c> of every metadata item into a single
-    /// assembly name to prefix map, and validates the string form in place.
+    /// Combines the <c>assemblyUidPrefixes</c> maps of every metadata item into a single map, and
+    /// validates each item's <c>uidPrefixOverride</c> in place.
     /// </summary>
     private static Dictionary<string, string> GetAssemblyUidPrefixes(MetadataJsonConfig config)
     {
@@ -153,15 +153,15 @@ public static partial class DotnetApiCatalog
 
         foreach (var item in config)
         {
-            if (item.UidPrefix?.Prefix is { } itemPrefix && !IsValidUidPrefix(itemPrefix))
+            if (item.UidPrefixOverride is not null && !IsValidUidPrefix(item.UidPrefixOverride))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{itemPrefix}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    $"Ignoring invalid UID prefix '{item.UidPrefixOverride}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
                     code: "InvalidUidPrefix");
-                item.UidPrefix = null;
+                item.UidPrefixOverride = null;
             }
 
-            if (item.UidPrefix?.AssemblyPrefixes is not { } assemblyPrefixes)
+            if (item.AssemblyUidPrefixes is not { } assemblyPrefixes)
             {
                 continue;
             }
@@ -170,7 +170,7 @@ public static partial class DotnetApiCatalog
             {
                 if (string.IsNullOrWhiteSpace(assemblyName))
                 {
-                    Logger.LogWarning("Ignoring 'uidPrefix' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                    Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
                     continue;
                 }
 
@@ -223,7 +223,7 @@ public static partial class DotnetApiCatalog
             IncludePrivateMembers = configModel?.IncludePrivateMembers ?? false,
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
-            UidPrefix = configModel?.UidPrefix?.Prefix,
+            UidPrefixOverride = configModel?.UidPrefixOverride,
             MSBuildProperties = configModel?.Properties,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,

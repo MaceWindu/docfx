@@ -8,7 +8,7 @@ using Xunit;
 namespace Docfx.Dotnet.Tests;
 
 /// <summary>
-/// Tests for the <c>assemblyUidPrefixes</c> and <c>uidPrefix</c> metadata options, which prefix the
+/// Tests for the <c>assemblyUidPrefixes</c> and <c>uidPrefixOverride</c> metadata options, which prefix the
 /// UID of every API declared in a given assembly so that assemblies sharing a namespace don't collide.
 /// </summary>
 [Collection("docfx STA")]
@@ -34,8 +34,8 @@ public class UidPrefixUnitTest : IDisposable
     public void Dispose()
     {
         VisitorHelper.AssemblyUidPrefixes = null;
-        VisitorHelper.UidPrefix = null;
-        VisitorHelper.UidPrefixAssemblies = null;
+        VisitorHelper.UidPrefixOverride = null;
+        VisitorHelper.UidPrefixOverrideAssemblies = null;
         VisitorHelper.GlobalNamespaceId = null;
     }
 
@@ -338,16 +338,16 @@ public class UidPrefixUnitTest : IDisposable
 
     private static MetadataItem GenerateWithPerItemPrefix(Compilation compilation, string prefix)
     {
-        VisitorHelper.UidPrefix = prefix;
-        VisitorHelper.UidPrefixAssemblies = new(SymbolEqualityComparer.Default) { compilation.Assembly };
+        VisitorHelper.UidPrefixOverride = prefix;
+        VisitorHelper.UidPrefixOverrideAssemblies = new(SymbolEqualityComparer.Default) { compilation.Assembly };
         try
         {
             return compilation.Assembly.GenerateMetadataItem(compilation);
         }
         finally
         {
-            VisitorHelper.UidPrefix = null;
-            VisitorHelper.UidPrefixAssemblies = null;
+            VisitorHelper.UidPrefixOverride = null;
+            VisitorHelper.UidPrefixOverrideAssemblies = null;
         }
     }
 

@@ -38,7 +38,7 @@
     "namespaceLayout": "nested",
     "enumSortOrder": "declaringOrder",
     "outputFormat": "markdown",
-    "uidPrefix": "MyLib.V3",
+    "uidPrefixOverride": "MyLib.V3",
     "output": "obj/md"
   },
   {
