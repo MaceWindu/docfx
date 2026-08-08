@@ -363,10 +363,10 @@ public class MetadataCommandTest : TestBase
             new(new MetadataJsonItemConfig
             {
                 Dest = _outputFolder,
-                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+Src = new(new FileMappingItem([.. projects])) { Expanded = true },
             }),
-            new(), Directory.GetCurrentDirectory());
+            new(), Directory.GetCurrentDirectory(),
+            assemblyUidPrefixes: new() { ["a"] = "A", ["b"] = "B" });
 
         Assert.DoesNotContain(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("Ignore duplicated member"));
 
@@ -405,11 +405,11 @@ public class MetadataCommandTest : TestBase
             new(new MetadataJsonItemConfig
             {
                 Dest = _outputFolder,
-                Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+Src = new(new FileMappingItem([.. projects])) { Expanded = true },
                 NamespaceLayout = NamespaceLayout.Nested,
             }),
-            new(), Directory.GetCurrentDirectory());
+            new(), Directory.GetCurrentDirectory(),
+            assemblyUidPrefixes: new() { ["a"] = "A", ["b"] = "B" });
 
         // The prefix becomes a per assembly root node that groups the namespaces of that assembly.
         var tocViewModel = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml")).Items;

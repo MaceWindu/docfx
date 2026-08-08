@@ -125,20 +125,18 @@ API surface, for example `MyLib.Ef8` and `MyLib.Ef9`.
 ### Give each assembly its own UID prefix
 
 [`assemblyUidPrefixes`](../reference/docfx-json-reference.md#assemblyuidprefixes) maps an assembly name
-to a prefix. List every assembly you want prefixed:
+to a prefix. It sits at the top level of `docfx.json`, next to `metadata` rather than inside it, and
+lists every assembly you want prefixed — however many `src` entries the project has:
 
 ```json
 {
+  "assemblyUidPrefixes": {
+    "MyLib": "Core",
+    "MyLib.Ef8": "Ef8",
+    "MyLib.Ef9": "Ef9"
+  },
   "metadata": [
-    {
-      "src": [ "src/MyLib/MyLib.csproj" ],
-      "dest": "api/core",
-      "assemblyUidPrefixes": {
-        "MyLib": "Core",
-        "MyLib.Ef8": "Ef8",
-        "MyLib.Ef9": "Ef9"
-      }
-    },
+    { "src": [ "src/MyLib/MyLib.csproj" ],         "dest": "api/core" },
     { "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ], "dest": "api/ef8" },
     { "src": [ "src/MyLib.Ef9/MyLib.Ef9.csproj" ], "dest": "api/ef9" }
   ]
@@ -149,44 +147,32 @@ to a prefix. List every assembly you want prefixed:
 own page. `<see cref="..."/>` links and the table of contents follow the prefix, and with
 `"namespaceLayout": "nested"` the prefix groups that assembly's namespaces under a single root node.
 
-### Where to declare `assemblyUidPrefixes`
+It is a project level setting because it has to be. An entry mints UIDs not only for the APIs it
+documents but also for the APIs it *references*: the `Ef8` entry emits reference UIDs for the `MyLib`
+types that appear in its own signatures, and those must come out identical to the UIDs the `MyLib` entry
+produced. If each entry carried its own list, an entry could not see the others' and those references
+would come out unprefixed, point at UIDs no page has, and **render as plain text with no link and no
+warning**.
 
-Anywhere. The maps of all `metadata` entries are combined into one before any entry is processed, so
-these three layouts behave identically:
-
-- the whole map on the first entry, as above — **recommended**, because it reads as one table of the
-  project's prefixes
-- the whole map repeated on every entry
-- each entry declaring only the assembly it documents
-
-That is deliberate, not a convenience. An entry mints UIDs not only for the APIs it documents but also
-for the APIs it *references*: the `Ef8` entry emits reference UIDs for the `MyLib` types that appear in
-its own signatures, and those must come out identical to the UIDs the `MyLib` entry produced. A per entry
-setting cannot do that, because an entry cannot see another entry's settings — the references would come
-out unprefixed, point at UIDs no page has, and **render as plain text with no link and no warning**.
-
-So the rule of thumb with many entries: if an assembly is referenced by any other entry, it belongs in
-`assemblyUidPrefixes`. In practice that is every assembly in the project except leaf ones nothing else
-depends on.
-
-If two entries map the same assembly to *different* prefixes, docfx reports an `InvalidUidPrefix`
-warning and keeps the first.
+The practical consequence: **list every assembly whose APIs appear in another assembly's public
+signatures**, not just the ones you want split up. Leaving out a referenced assembly does not fail the
+build, it quietly drops links to it.
 
 ### When several entries build the same assembly name
 
 Version specific packages are often *one* project built several times, sharing an `AssemblyName` and
 differing only by target framework. A map keyed by assembly name cannot give those different prefixes,
 so those entries use
-[`uidPrefixOverride`](../reference/docfx-json-reference.md#uidprefixoverride) instead, which applies to
-that entry's own assemblies:
+[`uidPrefixOverride`](../reference/docfx-json-reference.md#uidprefixoverride), which names the entry
+instead:
 
 ```json
 {
+  "assemblyUidPrefixes": { "MyLib": "Core" },
   "metadata": [
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
-      "dest": "api/core",
-      "assemblyUidPrefixes": { "MyLib": "Core" }
+      "dest": "api/core"
     },
     {
       "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
@@ -205,17 +191,32 @@ that entry's own assemblies:
 Both `MyLib.Ef` projects build `MyLib.Ef.dll`. `uidPrefixOverride` separates them, and `MyLib` stays in
 `assemblyUidPrefixes` because both of them reference it.
 
-The cost of the override is that other entries cannot see it. If a fourth entry referenced
-`MyLib.Ef.dll`, there would be no way to tell it which of `Ef8` or `Ef9` you meant, since both share the
-assembly name — so reach for the override only when you have to.
+#### What the override does and does not fix
+
+It fixes the collision *between the entries that declare it*: each gets its own pages, table of contents
+entries and file names, and everything inside those pages — references, `<see cref="..."/>` links, member
+anchors — is consistent with them.
+
+It does not fix two things, both following from the fact that it names an entry rather than an assembly:
+
+- **Links from other entries into those assemblies.** A fourth entry referencing `MyLib.Ef.dll` has no
+  way to know whether you meant `Ef8` or `Ef9`, and `assemblyUidPrefixes` cannot say either, because both
+  share the assembly name. Those references come out unprefixed and lose their links, with no warning.
+  So the override is only safe for assemblies nothing else in the project references — in practice, leaf
+  packages such as per version integrations.
+- **Two same-named assemblies inside *one* entry.** Every assembly an entry documents gets the same
+  prefix, so if one entry's `src` glob matches the same assembly built for several target frameworks,
+  those copies still collide and are reported as `Ignore duplicated member`. The fix there is to narrow
+  the glob to one target framework, not to add a prefix.
 
 In short:
 
 | situation | option |
 |---|---|
 | the assembly has a name of its own | `assemblyUidPrefixes` |
-| the assembly is referenced by other entries | `assemblyUidPrefixes` |
-| several entries build the same assembly name | `uidPrefixOverride` on each of those entries |
+| the assembly is referenced by other assemblies in the project | `assemblyUidPrefixes` |
+| several entries build the same assembly name, and nothing else references them | `uidPrefixOverride` |
+| one entry matches the same assembly several times | narrow the `src` glob |
 
 > [!NOTE]
 > Enabling either option changes the UID of every API in the affected assemblies. Update anything that
