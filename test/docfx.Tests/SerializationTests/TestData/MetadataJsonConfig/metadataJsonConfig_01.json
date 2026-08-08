@@ -25,11 +25,10 @@
     "includePrivateMembers": true,
     "includeExplicitInterfaceImplementations": true,
     "globalNamespaceId": "Global",
-    "assemblyUidPrefixes": {
+    "uidPrefix": {
       "MyLib": "MyLib",
       "MyLib.Extensions": "MyLib.V2"
     },
-    "uidPrefix": "MyLib.V3",
     "properties": {
       "DefineConstants": "dummy1, dummy2",
       "TargetFrameworks": "dummy"

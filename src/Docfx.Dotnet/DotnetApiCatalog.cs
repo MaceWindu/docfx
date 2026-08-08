@@ -144,7 +144,8 @@ public static partial class DotnetApiCatalog
     }
 
     /// <summary>
-    /// Combines the <c>assemblyUidPrefixes</c> maps of every metadata item into a single map.
+    /// Combines the object form of <c>uidPrefix</c> of every metadata item into a single
+    /// assembly name to prefix map, and validates the string form in place.
     /// </summary>
     private static Dictionary<string, string> GetAssemblyUidPrefixes(MetadataJsonConfig config)
     {
@@ -152,24 +153,24 @@ public static partial class DotnetApiCatalog
 
         foreach (var item in config)
         {
-            if (item.UidPrefix is not null && !IsValidUidPrefix(item.UidPrefix))
+            if (item.UidPrefix?.Prefix is { } itemPrefix && !IsValidUidPrefix(itemPrefix))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{item.UidPrefix}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    $"Ignoring invalid UID prefix '{itemPrefix}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
                     code: "InvalidUidPrefix");
                 item.UidPrefix = null;
             }
 
-            if (item.AssemblyUidPrefixes is null)
+            if (item.UidPrefix?.AssemblyPrefixes is not { } assemblyPrefixes)
             {
                 continue;
             }
 
-            foreach (var (assemblyName, prefix) in item.AssemblyUidPrefixes)
+            foreach (var (assemblyName, prefix) in assemblyPrefixes)
             {
                 if (string.IsNullOrWhiteSpace(assemblyName))
                 {
-                    Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                    Logger.LogWarning("Ignoring 'uidPrefix' entry with an empty assembly name.", code: "InvalidUidPrefix");
                     continue;
                 }
 
@@ -222,7 +223,7 @@ public static partial class DotnetApiCatalog
             IncludePrivateMembers = configModel?.IncludePrivateMembers ?? false,
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
-            UidPrefix = configModel?.UidPrefix,
+            UidPrefix = configModel?.UidPrefix?.Prefix,
             MSBuildProperties = configModel?.Properties,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,

@@ -353,7 +353,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithAssemblyUidPrefixes()
+    public async Task TestMetadataCommandWithUidPrefixMap()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -364,7 +364,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+                UidPrefix = new Dictionary<string, string> { ["a"] = "A", ["b"] = "B" },
             }),
             new(), Directory.GetCurrentDirectory());
 
@@ -397,7 +397,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithAssemblyUidPrefixesAndNestedToc()
+    public async Task TestMetadataCommandWithUidPrefixMapAndNestedToc()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -406,7 +406,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+                UidPrefix = new Dictionary<string, string> { ["a"] = "A", ["b"] = "B" },
                 NamespaceLayout = NamespaceLayout.Nested,
             }),
             new(), Directory.GetCurrentDirectory());
@@ -419,6 +419,41 @@ public class MetadataCommandTest : TestBase
         Assert.Equal(["B.Other", "B.Shared"], tocViewModel[1].Items.Select(x => x.Uid));
         Assert.Equal("A.Shared.Widget", tocViewModel[0].Items[1].Items[0].Uid);
         Assert.Equal("B.Shared.Widget", tocViewModel[1].Items[1].Items[0].Uid);
+    }
+
+    /// <summary>
+    /// The string form of `uidPrefix` is scoped to its own metadata item, so two items can use it even
+    /// though the object form could not tell their assemblies apart by name.
+    /// </summary>
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TestMetadataCommandWithUidPrefixString()
+    {
+        var projects = CreateProjectsSharingANamespace();
+        var otherOutputFolder = GetRandomFolder();
+
+        await DotnetApiCatalog.Exec(
+            new(
+                new MetadataJsonItemConfig
+                {
+                    Dest = _outputFolder,
+                    Src = new(new FileMappingItem(projects[0])) { Expanded = true },
+                    UidPrefix = "First",
+                },
+                new MetadataJsonItemConfig
+                {
+                    Dest = otherOutputFolder,
+                    Src = new(new FileMappingItem(projects[1])) { Expanded = true },
+                    UidPrefix = "Second",
+                }),
+            new(), Directory.GetCurrentDirectory());
+
+        foreach (var (folder, prefix) in new[] { (_outputFolder, "First"), (otherOutputFolder, "Second") })
+        {
+            var file = Path.Combine(folder, $"{prefix}.Shared.Widget.yml");
+            Assert.True(File.Exists(file), $"{file} is missing.");
+            Assert.Equal($"{prefix}.Shared.Widget", YamlUtility.Deserialize<PageViewModel>(file).Items[0].Uid);
+        }
     }
 
     /// <summary>

@@ -179,27 +179,23 @@ internal class MetadataJsonItemConfig
     public string GlobalNamespaceId { get; set; }
 
     /// <summary>
-    /// Maps assembly names to a prefix that is prepended to the UID of every API declared in that
-    /// assembly. Use it to disambiguate assemblies that share namespaces, which would otherwise
-    /// produce colliding UIDs and cross-linked pages.
-    /// The maps of all metadata entries are combined into one before any of them is processed, which
-    /// is what lets an entry address APIs documented by another entry.
-    /// Assemblies that are not listed are left unchanged.
-    /// </summary>
-    [JsonProperty("assemblyUidPrefixes")]
-    [JsonPropertyName("assemblyUidPrefixes")]
-    public Dictionary<string, string> AssemblyUidPrefixes { get; set; }
-
-    /// <summary>
-    /// A prefix that is prepended to the UID of every API declared in the assemblies documented by
-    /// this entry. Use it only when several entries document assemblies that share an assembly name,
-    /// such as per target version builds of one project, which
-    /// <see cref="AssemblyUidPrefixes"/> cannot tell apart.
-    /// It takes precedence over <see cref="AssemblyUidPrefixes"/> for this entry's own assemblies.
+    /// A prefix that is prepended to the UID of every API declared in a given assembly, to
+    /// disambiguate assemblies that share namespaces and would otherwise produce colliding UIDs.
+    /// <para>
+    /// Accepts two forms. An object maps assembly names to prefixes, and is the form to prefer: the
+    /// objects of all metadata entries are combined into one before any of them is processed, which is
+    /// what lets an entry address APIs documented by another entry. Assemblies that are not listed are
+    /// left unchanged.
+    /// </para>
+    /// <para>
+    /// A string is a prefix for the assemblies documented by this entry alone, and is needed only when
+    /// several entries document assemblies that share an assembly name, which the object form cannot
+    /// tell apart. It takes precedence over the object form for this entry's own assemblies.
+    /// </para>
     /// </summary>
     [JsonProperty("uidPrefix")]
     [JsonPropertyName("uidPrefix")]
-    public string UidPrefix { get; set; }
+    public UidPrefixSetting UidPrefix { get; set; }
 
     /// <summary>
     /// An optional set of MSBuild properties used when interpreting project files. These
