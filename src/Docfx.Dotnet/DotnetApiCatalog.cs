@@ -62,7 +62,7 @@ public static partial class DotnetApiCatalog
         var stopwatch = Stopwatch.StartNew();
 
         var originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
-        var originalUidPrefixes = VisitorHelper.UidPrefixes;
+        var originalAssemblyUidPrefixes = VisitorHelper.AssemblyUidPrefixes;
         var originalUidPrefix = VisitorHelper.UidPrefix;
         var originalUidPrefixAssemblies = VisitorHelper.UidPrefixAssemblies;
 
@@ -73,7 +73,7 @@ public static partial class DotnetApiCatalog
             // A UID prefix is a property of the assembly, not of the metadata item that documents it,
             // so the maps of all metadata items are combined before any of them is processed. This keeps
             // references between metadata items resolvable regardless of the order they are declared in.
-            VisitorHelper.UidPrefixes = GetUidPrefixes(config);
+            VisitorHelper.AssemblyUidPrefixes = GetAssemblyUidPrefixes(config);
 
             foreach (var item in config)
             {
@@ -86,7 +86,7 @@ public static partial class DotnetApiCatalog
         finally
         {
             VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
-            VisitorHelper.UidPrefixes = originalUidPrefixes;
+            VisitorHelper.AssemblyUidPrefixes = originalAssemblyUidPrefixes;
             VisitorHelper.UidPrefix = originalUidPrefix;
             VisitorHelper.UidPrefixAssemblies = originalUidPrefixAssemblies;
             EnvironmentContext.Clean();
@@ -144,9 +144,9 @@ public static partial class DotnetApiCatalog
     }
 
     /// <summary>
-    /// Combines the <c>uidPrefixes</c> maps of every metadata item into a single assembly name to prefix map.
+    /// Combines the <c>assemblyUidPrefixes</c> maps of every metadata item into a single map.
     /// </summary>
-    private static Dictionary<string, string> GetUidPrefixes(MetadataJsonConfig config)
+    private static Dictionary<string, string> GetAssemblyUidPrefixes(MetadataJsonConfig config)
     {
         Dictionary<string, string> result = null;
 
@@ -160,16 +160,16 @@ public static partial class DotnetApiCatalog
                 item.UidPrefix = null;
             }
 
-            if (item.UidPrefixes is null)
+            if (item.AssemblyUidPrefixes is null)
             {
                 continue;
             }
 
-            foreach (var (assemblyName, prefix) in item.UidPrefixes)
+            foreach (var (assemblyName, prefix) in item.AssemblyUidPrefixes)
             {
                 if (string.IsNullOrWhiteSpace(assemblyName))
                 {
-                    Logger.LogWarning("Ignoring 'uidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                    Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
                     continue;
                 }
 

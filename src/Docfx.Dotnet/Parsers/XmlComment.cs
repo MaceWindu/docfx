@@ -134,7 +134,7 @@ internal partial class XmlComment
 
     /// <summary>
     /// Prepends the UID prefix of the API <paramref name="commentId"/> points to, so that crefs
-    /// keep resolving when the target assembly is configured with a `uidPrefixes` entry.
+    /// keep resolving when the target assembly is configured with a UID prefix.
     /// </summary>
     private string ApplyUidPrefix(string id, string commentId)
     {

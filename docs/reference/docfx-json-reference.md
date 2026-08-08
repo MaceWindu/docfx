@@ -480,35 +480,11 @@ Specifies whether explicit interface implementations are included in the generat
 
 Specify the name to use for the global namespace. The default value is an empty string.
 
-### `uidPrefix`
+### `assemblyUidPrefixes`
 
-A prefix that is prepended to the UID of every API declared in the assemblies documented by this
-entry. Use it when a single docfx project documents several assemblies that share namespaces, which
-would otherwise produce colliding UIDs.
-
-```json
-{
-  "metadata": [
-    {
-      "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
-      "dest": "api/ef8",
-      "uidPrefix": "Ef8"
-    }
-  ]
-}
-```
-
-`MyLib.Widget` then gets the UID `Ef8.MyLib.Widget`, so it keeps its own page, TOC entry and cross
-references. A prefix must be a dot separated identifier, e.g. `Ef8` or `MyLib.V2`.
-
-Because it is scoped to the entry, `uidPrefix` also works when two entries document assemblies that
-share the same *assembly* name, such as per target version builds of one project.
-
-### `uidPrefixes`
-
-Maps assembly names to a prefix, for addressing APIs documented by a *different* `metadata` entry,
-whose [`uidPrefix`](#uidprefix) is not visible from this one. Assemblies that are not listed are left
-unchanged.
+Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
+Use it when a single docfx project documents several assemblies that share namespaces, which would
+otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged.
 
 ```json
 {
@@ -516,23 +492,64 @@ unchanged.
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
       "dest": "api/core",
-      "uidPrefixes": { "MyLib": "Core" }
+      "assemblyUidPrefixes": {
+        "MyLib": "Core",
+        "MyLib.Ef8": "Ef8"
+      }
     },
     {
       "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
-      "dest": "api/ef8",
-      "uidPrefix": "Ef8"
+      "dest": "api/ef8"
     }
   ]
 }
 ```
 
-Here the second entry documents `MyLib.Ef8` as `Ef8.*`, and references it makes to `MyLib` resolve to
-`Core.MyLib.*` because of the shared map. The maps of all `metadata` entries are combined into one, so
-each assembly only needs to be listed once regardless of the order the entries are declared in.
-`uidPrefix` takes precedence over `uidPrefixes` for the assemblies of its own entry.
+`MyLib.Widget` from `MyLib.dll` gets the UID `Core.MyLib.Widget` and the same type name from
+`MyLib.Ef8.dll` gets `Ef8.MyLib.Widget`, so each keeps its own page, TOC entry and cross references.
+A prefix must be a dot separated identifier, e.g. `Core` or `MyLib.V2`.
 
-See [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces).
+The maps of all `metadata` entries are combined into one before any of them is processed. That is what
+makes the map, rather than a per entry setting, the primary option: an entry mints UIDs not only for
+the APIs it documents but also for the APIs it *references*, and those must come out identical to the
+UIDs the entry documenting them produced. Because the map is shared, each assembly only needs to be
+listed once, in any entry, and the result does not depend on the order the entries are declared in.
+
+### `uidPrefix`
+
+A prefix that is prepended to the UID of every API declared in the assemblies documented by this
+entry, taking precedence over [`assemblyUidPrefixes`](#assemblyuidprefixes) for those assemblies.
+
+Use this **only** when several entries document assemblies that share an *assembly name* and so cannot
+be told apart by `assemblyUidPrefixes` — most often per target version builds of one project, which
+share an `AssemblyName` and differ only by target framework:
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
+      "dest": "api/ef8",
+      "uidPrefix": "Ef8"
+    },
+    {
+      "src": [ "src/MyLib.Ef/MyLib.Ef.Ef9.csproj" ],
+      "dest": "api/ef9",
+      "uidPrefix": "Ef9"
+    }
+  ]
+}
+```
+
+Both projects build `MyLib.Ef.dll`, so a single map cannot give them different prefixes, while the per
+entry setting can.
+
+Note the trade-off: because `uidPrefix` is scoped to its own entry, other entries cannot see it. If a
+third entry references these assemblies, add them to `assemblyUidPrefixes` as well — and if they share
+an assembly name, only one of the two prefixes can be addressed that way.
+
+See [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces)
+for a worked example of the two options together.
 
 ## File Mappings
 

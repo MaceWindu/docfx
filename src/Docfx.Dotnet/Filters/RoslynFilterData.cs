@@ -12,7 +12,7 @@ internal class RoslynFilterData
         return new SymbolFilterData
         {
             // Filter rules are written against the actual API surface, so they see the id
-            // without the prefix configured by `uidPrefixes`.
+            // without the prefix configured by `assemblyUidPrefixes`/`uidPrefix`.
             Id = VisitorHelper.GetRawId(symbol),
             Kind = GetExtendedSymbolKindFromSymbol(symbol),
             Attributes = symbol.GetAttributes().Select(GetAttributeFilterData)

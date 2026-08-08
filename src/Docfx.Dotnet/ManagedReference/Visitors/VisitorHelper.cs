@@ -21,12 +21,12 @@ internal static partial class VisitorHelper
     /// This is assigned once before metadata generation starts and is only read afterwards,
     /// so it is safe to read from the parallel API page generation.
     /// </summary>
-    public static IReadOnlyDictionary<string, string> UidPrefixes { get; set; }
+    public static IReadOnlyDictionary<string, string> AssemblyUidPrefixes { get; set; }
 
     /// <summary>
     /// The prefix prepended to the UID of every API declared in <see cref="UidPrefixAssemblies"/>.
-    /// It takes precedence over <see cref="UidPrefixes"/>, which lets metadata items that document
-    /// assemblies sharing an assembly name give them distinct UIDs.
+    /// It takes precedence over <see cref="AssemblyUidPrefixes"/>, which lets metadata items that
+    /// document assemblies sharing an assembly name give them distinct UIDs.
     /// This is assigned once per metadata item, before its APIs are generated.
     /// </summary>
     public static string UidPrefix { get; set; }
@@ -36,6 +36,8 @@ internal static partial class VisitorHelper
     /// metadata item that is currently being processed.
     /// </summary>
     public static HashSet<IAssemblySymbol> UidPrefixAssemblies { get; set; }
+
+    private static bool IsUidPrefixConfigured => AssemblyUidPrefixes is { Count: > 0 } || !string.IsNullOrEmpty(UidPrefix);
 
     [GeneratedRegex(@"``\d+$")]
     private static partial Regex GenericMethodPostFix();
@@ -51,7 +53,7 @@ internal static partial class VisitorHelper
     }
 
     /// <summary>
-    /// Gets the id of a symbol without applying <see cref="UidPrefixes"/>.
+    /// Gets the id of a symbol without applying any configured UID prefix.
     /// API filters use this so that filter rules keep matching the actual API surface
     /// regardless of the configured UID prefixes.
     /// </summary>
@@ -128,7 +130,7 @@ internal static partial class VisitorHelper
     /// </summary>
     public static string GetUidPrefix(ISymbol symbol)
     {
-        if (symbol is null || (UidPrefixes is not { Count: > 0 } && string.IsNullOrEmpty(UidPrefix)))
+        if (symbol is null || !IsUidPrefixConfigured)
         {
             return null;
         }
@@ -154,7 +156,7 @@ internal static partial class VisitorHelper
             return UidPrefix;
         }
 
-        return UidPrefixes is { } prefixes && prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
+        return AssemblyUidPrefixes is { } prefixes && prefixes.TryGetValue(assembly.Name, out var prefix) ? prefix : null;
     }
 
     /// <summary>
@@ -163,7 +165,7 @@ internal static partial class VisitorHelper
     /// </summary>
     public static string GetUidPrefixForCommentId(string commentId, Compilation compilation)
     {
-        if (UidPrefixes is not { Count: > 0 } || string.IsNullOrEmpty(commentId))
+        if (string.IsNullOrEmpty(commentId) || !IsUidPrefixConfigured)
         {
             return null;
         }

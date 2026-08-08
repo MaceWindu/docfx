@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Docfx.Common;
@@ -334,7 +334,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithoutUidPrefixesDropsDuplicatedApis()
+    public async Task TestMetadataCommandWithoutUidPrefixDropsDuplicatedApis()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -353,7 +353,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithUidPrefixes()
+    public async Task TestMetadataCommandWithAssemblyUidPrefixes()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -364,7 +364,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                UidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
             }),
             new(), Directory.GetCurrentDirectory());
 
@@ -397,7 +397,7 @@ public class MetadataCommandTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
-    public async Task TestMetadataCommandWithUidPrefixesAndNestedToc()
+    public async Task TestMetadataCommandWithAssemblyUidPrefixesAndNestedToc()
     {
         var projects = CreateProjectsSharingANamespace();
 
@@ -406,7 +406,7 @@ public class MetadataCommandTest : TestBase
             {
                 Dest = _outputFolder,
                 Src = new(new FileMappingItem([.. projects])) { Expanded = true },
-                UidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
+                AssemblyUidPrefixes = new() { ["a"] = "A", ["b"] = "B" },
                 NamespaceLayout = NamespaceLayout.Nested,
             }),
             new(), Directory.GetCurrentDirectory());
