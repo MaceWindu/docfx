@@ -122,8 +122,10 @@ reported, and every link to a shared namespace resolves to whichever assembly ha
 This is common when shipping platform or version specific packages that intentionally expose the same
 API surface, for example `MyLib.Ef8` and `MyLib.Ef9`.
 
-Use the [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix) option to give each entry its own
-UID namespace:
+### Give each assembly its own UID prefix
+
+[`assemblyUidPrefixes`](../reference/docfx-json-reference.md#assemblyuidprefixes) maps an assembly name
+to a prefix. Declare it once, listing every assembly you want prefixed:
 
 ```json
 {
@@ -131,16 +133,49 @@ UID namespace:
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
       "dest": "api/core",
-      "uidPrefix": "Core",
-      "uidPrefixes": { "MyLib": "Core" }
+      "assemblyUidPrefixes": {
+        "MyLib": "Core",
+        "MyLib.Ef8": "Ef8",
+        "MyLib.Ef9": "Ef9"
+      }
+    },
+    { "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ], "dest": "api/ef8" },
+    { "src": [ "src/MyLib.Ef9/MyLib.Ef9.csproj" ], "dest": "api/ef9" }
+  ]
+}
+```
+
+`MyLib.Widget` becomes `Core.MyLib.Widget`, `Ef8.MyLib.Widget` and `Ef9.MyLib.Widget`, so each keeps its
+own page. `<see cref="..."/>` links and the table of contents follow the prefix, and with
+`"namespaceLayout": "nested"` the prefix groups that assembly's namespaces under a single root node.
+
+The map is shared by every `metadata` entry, which is the point. An entry mints UIDs not only for the
+APIs it documents but also for the APIs it *references* — the `Ef8` entry produces reference UIDs for
+the `MyLib` types in its own signatures — and those have to come out identical to the UIDs the `MyLib`
+entry produced, or the links dangle. A shared map guarantees that; it also means each assembly is listed
+once, in any entry, and the order of entries does not matter.
+
+### When several entries build the same assembly name
+
+Version specific packages are often *one* project built several times, sharing an `AssemblyName` and
+differing only by target framework. A map keyed by assembly name cannot give those different prefixes,
+so use [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix), which is scoped to its own entry:
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ "src/MyLib/MyLib.csproj" ],
+      "dest": "api/core",
+      "assemblyUidPrefixes": { "MyLib": "Core" }
     },
     {
-      "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
+      "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
       "dest": "api/ef8",
       "uidPrefix": "Ef8"
     },
     {
-      "src": [ "src/MyLib.Ef9/MyLib.Ef9.csproj" ],
+      "src": [ "src/MyLib.Ef/MyLib.Ef.Ef9.csproj" ],
       "dest": "api/ef9",
       "uidPrefix": "Ef9"
     }
@@ -148,19 +183,19 @@ UID namespace:
 }
 ```
 
-`MyLib.Widget` then becomes `Ef8.MyLib.Widget` and `Ef9.MyLib.Widget`. `<see cref="..."/>` links and the
-table of contents follow the prefix, and with `"namespaceLayout": "nested"` the prefix groups that
-assembly's namespaces under a single root node.
+Both `MyLib.Ef` projects build `MyLib.Ef.dll`. `uidPrefix` separates them, and `MyLib` stays in the map
+because both of them reference it.
 
-`uidPrefix` is scoped to its own entry, so it also handles the common case of per target version builds
-of one project, which all produce the *same* assembly name and therefore cannot be told apart by name.
+In short:
 
-Add [`uidPrefixes`](../reference/docfx-json-reference.md#uidprefixes) for any assembly that other
-entries reference, as in the `MyLib` entry above: an entry cannot see another entry's `uidPrefix`, so
-that map is what makes references *between* entries resolve.
+| situation | option |
+|---|---|
+| the assembly has a name of its own | `assemblyUidPrefixes` |
+| several entries build the same assembly name | `uidPrefix` on each of those entries |
+| an assembly is referenced by other entries | it must be in `assemblyUidPrefixes` |
 
 > [!NOTE]
-> Enabling this option changes the UID of every API in the listed assemblies. Update anything that
+> Enabling either option changes the UID of every API in the affected assemblies. Update anything that
 > refers to those UIDs by hand, such as `<xref>` links in markdown, overwrite files and external xref
 > maps. Filter rules in [`filter`](#filter-apis) configs are unaffected: they keep matching the
 > unprefixed API surface.

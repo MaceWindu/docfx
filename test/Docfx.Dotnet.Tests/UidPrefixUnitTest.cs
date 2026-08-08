@@ -8,8 +8,8 @@ using Xunit;
 namespace Docfx.Dotnet.Tests;
 
 /// <summary>
-/// Tests for the <c>uidPrefixes</c> metadata option, which prefixes the UID of every API declared
-/// in a given assembly so that assemblies sharing a namespace don't collide.
+/// Tests for the <c>assemblyUidPrefixes</c> and <c>uidPrefix</c> metadata options, which prefix the
+/// UID of every API declared in a given assembly so that assemblies sharing a namespace don't collide.
 /// </summary>
 [Collection("docfx STA")]
 public class UidPrefixUnitTest : IDisposable
@@ -33,7 +33,7 @@ public class UidPrefixUnitTest : IDisposable
 
     public void Dispose()
     {
-        VisitorHelper.UidPrefixes = null;
+        VisitorHelper.AssemblyUidPrefixes = null;
         VisitorHelper.UidPrefix = null;
         VisitorHelper.UidPrefixAssemblies = null;
         VisitorHelper.GlobalNamespaceId = null;
@@ -41,7 +41,7 @@ public class UidPrefixUnitTest : IDisposable
 
     private static void UsePrefixes(params (string assembly, string prefix)[] prefixes)
     {
-        VisitorHelper.UidPrefixes = prefixes.ToDictionary(x => x.assembly, x => x.prefix, StringComparer.OrdinalIgnoreCase);
+        VisitorHelper.AssemblyUidPrefixes = prefixes.ToDictionary(x => x.assembly, x => x.prefix, StringComparer.OrdinalIgnoreCase);
     }
 
     private static MetadataItem Verify(string code, string assemblyName = "test.dll", ExtractMetadataConfig config = null, params MetadataReference[] references)
@@ -311,6 +311,29 @@ public class UidPrefixUnitTest : IDisposable
 
         Assert.Equal("B.Other.Gadget", type.Name);
         Assert.Equal(["System.Object", "A.Shared.Widget"], type.Inheritance);
+    }
+
+    [Fact]
+    public void CrefsArePrefixedByThePerItemPrefixToo()
+    {
+        var compilation = CompilationHelper.CreateCompilationFromCSharpCode(
+            """
+            namespace Shared;
+
+            /// <summary>A widget.</summary>
+            public class Widget { }
+
+            /// <summary>Wraps a <see cref="Widget"/>.</summary>
+            /// <seealso cref="Widget"/>
+            public class Gadget { }
+            """,
+            EmptyMSBuildProperties, "test.dll");
+
+        var type = GenerateWithPerItemPrefix(compilation, "Pkg").Items[0].Items.Single(x => x.Name.EndsWith("Gadget"));
+
+        Assert.Equal("Pkg.Shared.Gadget", type.Name);
+        Assert.Contains("<xref href=\"Pkg.Shared.Widget\"", type.Summary);
+        Assert.Equal(["Pkg.Shared.Widget"], type.SeeAlsos.Select(x => x.LinkId));
     }
 
     private static MetadataItem GenerateWithPerItemPrefix(Compilation compilation, string prefix)
