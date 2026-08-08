@@ -46,7 +46,11 @@ public static partial class DotnetApiCatalog
             if (config.TryGetValue("metadata", out var value))
             {
                 Logger.Rules = config["rules"]?.ToObject<Dictionary<string, LogLevel>>();
-                await Exec(value.ToObject<MetadataJsonConfig>(NewtonsoftJsonUtility.DefaultSerializer.Value), options, configDirectory);
+                await Exec(
+                    value.ToObject<MetadataJsonConfig>(NewtonsoftJsonUtility.DefaultSerializer.Value),
+                    options,
+                    configDirectory,
+                    assemblyUidPrefixes: config["assemblyUidPrefixes"]?.ToObject<Dictionary<string, string>>());
             }
         }
         finally
@@ -57,7 +61,13 @@ public static partial class DotnetApiCatalog
         }
     }
 
-    internal static async Task Exec(MetadataJsonConfig config, DotnetApiOptions options, string configDirectory, string outputDirectory = null, CancellationToken cancellationToken = default)
+    internal static async Task Exec(
+        MetadataJsonConfig config,
+        DotnetApiOptions options,
+        string configDirectory,
+        string outputDirectory = null,
+        CancellationToken cancellationToken = default,
+        Dictionary<string, string> assemblyUidPrefixes = null)
     {
         var stopwatch = Stopwatch.StartNew();
 
@@ -71,9 +81,10 @@ public static partial class DotnetApiCatalog
             EnvironmentContext.SetBaseDirectory(configDirectory);
 
             // A UID prefix is a property of the assembly, not of the metadata item that documents it,
-            // so the maps of all metadata items are combined before any of them is processed. This keeps
-            // references between metadata items resolvable regardless of the order they are declared in.
-            VisitorHelper.AssemblyUidPrefixes = GetAssemblyUidPrefixes(config);
+            // which is why the map is a project level setting: every item has to agree on the prefixes
+            // for the references it makes into assemblies documented by another item to resolve.
+            VisitorHelper.AssemblyUidPrefixes = ValidateAssemblyUidPrefixes(assemblyUidPrefixes);
+            ValidateUidPrefixOverrides(config);
 
             foreach (var item in config)
             {
@@ -144,13 +155,56 @@ public static partial class DotnetApiCatalog
     }
 
     /// <summary>
-    /// Combines the <c>assemblyUidPrefixes</c> maps of every metadata item into a single map, and
-    /// validates each item's <c>uidPrefixOverride</c> in place.
+    /// Drops invalid entries from the project level <c>assemblyUidPrefixes</c> map and makes lookups by
+    /// assembly name case insensitive, as assembly names are.
     /// </summary>
-    private static Dictionary<string, string> GetAssemblyUidPrefixes(MetadataJsonConfig config)
+    private static Dictionary<string, string> ValidateAssemblyUidPrefixes(Dictionary<string, string> assemblyUidPrefixes)
     {
-        Dictionary<string, string> result = null;
+        if (assemblyUidPrefixes is null)
+        {
+            return null;
+        }
 
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (assemblyName, prefix) in assemblyUidPrefixes)
+        {
+            if (string.IsNullOrWhiteSpace(assemblyName))
+            {
+                Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                continue;
+            }
+
+            if (!IsValidUidPrefix(prefix))
+            {
+                Logger.LogWarning(
+                    $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
+                    code: "InvalidUidPrefix");
+                continue;
+            }
+
+            if (result.TryGetValue(assemblyName, out var existingPrefix))
+            {
+                if (existingPrefix != prefix)
+                {
+                    Logger.LogWarning(
+                        $"Assembly '{assemblyName}' is mapped to both UID prefix '{existingPrefix}' and '{prefix}', '{existingPrefix}' is used.",
+                        code: "InvalidUidPrefix");
+                }
+                continue;
+            }
+
+            result.Add(assemblyName, prefix);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Drops each metadata item's <c>uidPrefixOverride</c> if it isn't a usable prefix.
+    /// </summary>
+    private static void ValidateUidPrefixOverrides(MetadataJsonConfig config)
+    {
         foreach (var item in config)
         {
             if (item.UidPrefixOverride is not null && !IsValidUidPrefix(item.UidPrefixOverride))
@@ -160,46 +214,7 @@ public static partial class DotnetApiCatalog
                     code: "InvalidUidPrefix");
                 item.UidPrefixOverride = null;
             }
-
-            if (item.AssemblyUidPrefixes is not { } assemblyPrefixes)
-            {
-                continue;
-            }
-
-            foreach (var (assemblyName, prefix) in assemblyPrefixes)
-            {
-                if (string.IsNullOrWhiteSpace(assemblyName))
-                {
-                    Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
-                    continue;
-                }
-
-                if (!IsValidUidPrefix(prefix))
-                {
-                    Logger.LogWarning(
-                        $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must be a dot separated identifier, e.g. 'MyLib' or 'MyLib.V2'.",
-                        code: "InvalidUidPrefix");
-                    continue;
-                }
-
-                result ??= new(StringComparer.OrdinalIgnoreCase);
-
-                if (result.TryGetValue(assemblyName, out var existingPrefix))
-                {
-                    if (existingPrefix != prefix)
-                    {
-                        Logger.LogWarning(
-                            $"Assembly '{assemblyName}' is mapped to both UID prefix '{existingPrefix}' and '{prefix}', '{existingPrefix}' is used.",
-                            code: "InvalidUidPrefix");
-                    }
-                    continue;
-                }
-
-                result.Add(assemblyName, prefix);
-            }
         }
-
-        return result;
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)

@@ -27,6 +27,38 @@ Overrides default log message severity level. Key is the log code, supported val
 }
 ```
 
+## `assemblyUidPrefixes`
+
+Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
+Use it when a single docfx project documents several assemblies that share namespaces, which would
+otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged. A prefix must be a
+dot separated identifier, e.g. `Core` or `MyLib.V2`.
+
+```json
+{
+  "assemblyUidPrefixes": {
+    "MyLib": "Core",
+    "MyLib.Ef8": "Ef8"
+  },
+  "metadata": [
+    { "src": [ "src/MyLib/MyLib.csproj" ],         "dest": "api/core" },
+    { "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ], "dest": "api/ef8" }
+  ]
+}
+```
+
+`MyLib.Widget` from `MyLib.dll` gets the UID `Core.MyLib.Widget` and the same type name from
+`MyLib.Ef8.dll` gets `Ef8.MyLib.Widget`, so each keeps its own page, TOC entry and cross references.
+
+**It is a project level setting, not a per `metadata` entry one, and it has to be.** An entry mints UIDs
+not only for the APIs it documents but also for the APIs it *references*, and those must come out
+identical to the UIDs produced by the entry that documents them, or the links break — so every entry has
+to agree on the prefixes. Declaring the same assembly twice with different prefixes is reported as an
+`InvalidUidPrefix` warning and the first one wins.
+
+Only affects the `docfx metadata` stage. See
+[Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces).
+
 ## `build`
 
 Configuration options that are applied for `docfx build` command:
@@ -480,45 +512,10 @@ Specifies whether explicit interface implementations are included in the generat
 
 Specify the name to use for the global namespace. The default value is an empty string.
 
-### `assemblyUidPrefixes`
-
-Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
-Use it when a single docfx project documents several assemblies that share namespaces, which would
-otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged. A prefix must be a
-dot separated identifier, e.g. `Core` or `MyLib.V2`.
-
-```json
-{
-  "metadata": [
-    {
-      "src": [ "src/MyLib/MyLib.csproj" ],
-      "dest": "api/core",
-      "assemblyUidPrefixes": {
-        "MyLib": "Core",
-        "MyLib.Ef8": "Ef8"
-      }
-    },
-    {
-      "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ],
-      "dest": "api/ef8"
-    }
-  ]
-}
-```
-
-`MyLib.Widget` from `MyLib.dll` gets the UID `Core.MyLib.Widget` and the same type name from
-`MyLib.Ef8.dll` gets `Ef8.MyLib.Widget`, so each keeps its own page, TOC entry and cross references.
-
-**This is a project wide setting even though it is written inside a `metadata` entry.** The maps of all
-entries are combined into one before any of them is processed, so it does not matter which entry
-declares a given assembly — see
-[Where to declare it](../docs/dotnet-api-docs.md#where-to-declare-assemblyuidprefixes). Declaring the
-same assembly twice with different prefixes is reported as an `InvalidUidPrefix` warning and the first
-one wins.
-
 ### `uidPrefixOverride`
 
-Overrides [`assemblyUidPrefixes`](#assemblyuidprefixes) for the assemblies documented by this entry.
+Overrides the project level [`assemblyUidPrefixes`](#assemblyuidprefixes) for the assemblies documented
+by this entry.
 
 Use it **only** when several entries document assemblies that share an *assembly name* and so cannot be
 keyed by name — most often per target version builds of one project, which share an `AssemblyName` and
@@ -526,11 +523,11 @@ differ only by target framework:
 
 ```json
 {
+  "assemblyUidPrefixes": { "MyLib": "Core" },
   "metadata": [
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
-      "dest": "api/core",
-      "assemblyUidPrefixes": { "MyLib": "Core" }
+      "dest": "api/core"
     },
     {
       "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
@@ -546,11 +543,18 @@ differ only by target framework:
 }
 ```
 
-Both `MyLib.Ef` projects build `MyLib.Ef.dll`, so one map cannot give them different prefixes.
+Both `MyLib.Ef` projects build `MyLib.Ef.dll`, so one map keyed by assembly name cannot give them
+different prefixes.
 
-Note the trade-off: because it is scoped to its own entry, other entries cannot see it. Any assembly
-that other entries reference — `MyLib` above — belongs in `assemblyUidPrefixes`, and if two entries
-share an assembly name, only one of their prefixes can be addressed from elsewhere.
+The override has two limits, both following from the fact that it names an *entry* rather than an
+assembly:
+
+- **Other entries cannot see it.** An entry referencing `MyLib.Ef.dll` has no way to know whether you
+  meant `Ef8` or `Ef9`, so its references come out unprefixed and silently render without a link. Only
+  use the override for assemblies nothing else in the project references.
+- **It does not disambiguate within one entry.** All the assemblies an entry documents get the same
+  prefix, so if one entry compiles two assemblies with the same name — a glob matching several target
+  framework folders, for instance — they still collide.
 
 See [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces)
 for a worked example.

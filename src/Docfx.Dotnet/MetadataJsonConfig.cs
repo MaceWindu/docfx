@@ -179,26 +179,12 @@ internal class MetadataJsonItemConfig
     public string GlobalNamespaceId { get; set; }
 
     /// <summary>
-    /// Maps assembly names to a prefix that is prepended to the UID of every API declared in that
-    /// assembly, to disambiguate assemblies that share namespaces and would otherwise produce colliding
-    /// UIDs. Assemblies that are not listed are left unchanged.
-    /// <para>
-    /// This is a project wide setting rather than a per entry one: the maps of all metadata entries are
-    /// combined into one before any of them is processed, which is what lets an entry address APIs
-    /// documented by another entry. It therefore does not matter which entry declares a given assembly.
-    /// </para>
-    /// </summary>
-    [JsonProperty("assemblyUidPrefixes")]
-    [JsonPropertyName("assemblyUidPrefixes")]
-    public Dictionary<string, string> AssemblyUidPrefixes { get; set; }
-
-    /// <summary>
-    /// Overrides <see cref="AssemblyUidPrefixes"/> for the assemblies documented by this entry.
-    /// Needed only when several entries document assemblies that share an assembly name, such as per
-    /// target version builds of one project, which a map keyed by assembly name cannot tell apart.
+    /// Overrides the project level <c>assemblyUidPrefixes</c> for the assemblies documented by this
+    /// entry. Needed only when several entries document assemblies that share an assembly name, such as
+    /// per target version builds of one project, which a map keyed by assembly name cannot tell apart.
     /// <para>
     /// Because it is scoped to its own entry, other entries cannot see it, so an assembly that other
-    /// entries reference belongs in <see cref="AssemblyUidPrefixes"/> instead.
+    /// entries reference belongs in <c>assemblyUidPrefixes</c> instead.
     /// </para>
     /// </summary>
     [JsonProperty("uidPrefixOverride")]
