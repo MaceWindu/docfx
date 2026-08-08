@@ -124,8 +124,8 @@ API surface, for example `MyLib.Ef8` and `MyLib.Ef9`.
 
 ### Give each assembly its own UID prefix
 
-[`assemblyUidPrefixes`](../reference/docfx-json-reference.md#assemblyuidprefixes) maps an assembly name
-to a prefix. Declare it once, listing every assembly you want prefixed:
+[`uidPrefix`](../reference/docfx-json-reference.md#uidprefix) as an object maps an assembly name to a
+prefix. Declare it once, listing every assembly you want prefixed:
 
 ```json
 {
@@ -133,7 +133,7 @@ to a prefix. Declare it once, listing every assembly you want prefixed:
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
       "dest": "api/core",
-      "assemblyUidPrefixes": {
+      "uidPrefix": {
         "MyLib": "Core",
         "MyLib.Ef8": "Ef8",
         "MyLib.Ef9": "Ef9"
@@ -149,17 +149,17 @@ to a prefix. Declare it once, listing every assembly you want prefixed:
 own page. `<see cref="..."/>` links and the table of contents follow the prefix, and with
 `"namespaceLayout": "nested"` the prefix groups that assembly's namespaces under a single root node.
 
-The map is shared by every `metadata` entry, which is the point. An entry mints UIDs not only for the
-APIs it documents but also for the APIs it *references* — the `Ef8` entry produces reference UIDs for
+The mapping is shared by every `metadata` entry, and that is the point. An entry mints UIDs not only for
+the APIs it documents but also for the APIs it *references* — the `Ef8` entry produces reference UIDs for
 the `MyLib` types in its own signatures — and those have to come out identical to the UIDs the `MyLib`
-entry produced, or the links dangle. A shared map guarantees that; it also means each assembly is listed
-once, in any entry, and the order of entries does not matter.
+entry produced, or the links silently render as plain text. A shared mapping guarantees that; it also
+means each assembly is listed once, in any entry, and the order of entries does not matter.
 
 ### When several entries build the same assembly name
 
 Version specific packages are often *one* project built several times, sharing an `AssemblyName` and
-differing only by target framework. A map keyed by assembly name cannot give those different prefixes,
-so use [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix), which is scoped to its own entry:
+differing only by target framework. A mapping keyed by assembly name cannot give those different
+prefixes, so give `uidPrefix` a plain string instead, which applies to that entry's own assemblies:
 
 ```json
 {
@@ -167,7 +167,7 @@ so use [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix), which is s
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
       "dest": "api/core",
-      "assemblyUidPrefixes": { "MyLib": "Core" }
+      "uidPrefix": { "MyLib": "Core" }
     },
     {
       "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
@@ -183,19 +183,19 @@ so use [`uidPrefix`](../reference/docfx-json-reference.md#uidprefix), which is s
 }
 ```
 
-Both `MyLib.Ef` projects build `MyLib.Ef.dll`. `uidPrefix` separates them, and `MyLib` stays in the map
-because both of them reference it.
+Both `MyLib.Ef` projects build `MyLib.Ef.dll`. The string form separates them, and `MyLib` stays in the
+object form because both of them reference it.
 
 In short:
 
-| situation | option |
+| situation | form |
 |---|---|
-| the assembly has a name of its own | `assemblyUidPrefixes` |
-| several entries build the same assembly name | `uidPrefix` on each of those entries |
-| an assembly is referenced by other entries | it must be in `assemblyUidPrefixes` |
+| the assembly has a name of its own | object, keyed by assembly name |
+| several entries build the same assembly name | string, on each of those entries |
+| an assembly is referenced by other entries | it must appear in the object form |
 
 > [!NOTE]
-> Enabling either option changes the UID of every API in the affected assemblies. Update anything that
+> Enabling this option changes the UID of every API in the affected assemblies. Update anything that
 > refers to those UIDs by hand, such as `<xref>` links in markdown, overwrite files and external xref
 > maps. Filter rules in [`filter`](#filter-apis) configs are unaffected: they keep matching the
 > unprefixed API surface.
