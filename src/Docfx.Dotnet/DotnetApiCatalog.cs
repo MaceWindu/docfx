@@ -66,8 +66,8 @@ public static partial class DotnetApiCatalog
         DotnetApiOptions options,
         string configDirectory,
         string outputDirectory = null,
-        CancellationToken cancellationToken = default,
-        Dictionary<string, string> assemblyUidPrefixes = null)
+        Dictionary<string, string> assemblyUidPrefixes = null,
+        CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
 
