@@ -43,12 +43,14 @@ internal static partial class SymbolUrlResolver
         if (commentId is null)
             return null;
 
-        // The file names and anchors this method builds come from VisitorHelper, so the UID prefix
+        // The file names and anchors this method builds come from VisitorHelper, so the assembly component
         // has to be applied here as well, otherwise the generated links miss the pages they target.
-        if (VisitorHelper.GetUidPrefix(symbol) is { } uidPrefix)
-            commentId = commentId.Insert(2, uidPrefix + ".");
+        if (VisitorHelper.GetAssemblyUid(symbol) is { } assemblyUid)
+            commentId = commentId.Insert(2, assemblyUid + VisitorHelper.AssemblyUidSeparator);
 
-        var parts = commentId.Split(':');
+        // Only the first colon separates the declaration kind from the id, as the id itself contains the
+        // `::` of the assembly component.
+        var parts = commentId.Split(':', 2);
         var type = parts[0];
         var uid = parts[1];
         var ext = urlKind switch

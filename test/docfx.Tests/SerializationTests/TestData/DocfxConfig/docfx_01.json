@@ -55,8 +55,8 @@
       "template"
     ]
   },
-  "assemblyUidPrefixes": {
-    "MyLib": "MyLib",
+  "assemblyUids": {
+    "MyLib": null,
     "MyLib.Extensions": "MyLib.V2"
   }
 }

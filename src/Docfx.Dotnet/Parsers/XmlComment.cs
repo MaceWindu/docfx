@@ -133,12 +133,14 @@ internal partial class XmlComment
     }
 
     /// <summary>
-    /// Prepends the UID prefix of the API <paramref name="commentId"/> points to, so that crefs
-    /// keep resolving when the target assembly is configured with a UID prefix.
+    /// Prepends the assembly component of the API <paramref name="commentId"/> points to, so that crefs
+    /// keep resolving when the target assembly is configured to carry one.
     /// </summary>
-    private string ApplyUidPrefix(string id, string commentId)
+    private string ApplyAssemblyUid(string id, string commentId)
     {
-        return _context?.ResolveUidPrefix?.Invoke(commentId) is { } prefix ? $"{prefix}.{id}" : id;
+        return _context?.ResolveAssemblyUid?.Invoke(commentId) is { } assemblyUid
+            ? $"{assemblyUid}{VisitorHelper.AssemblyUidSeparator}{id}"
+            : id;
     }
 
     public string GetParameter(string name)
@@ -344,7 +346,7 @@ internal partial class XmlComment
                     id += '*';
                 }
 
-                id = ApplyUidPrefix(id, cref);
+                id = ApplyAssemblyUid(id, cref);
 
                 // When see and seealso are top level nodes in triple slash comments, do not convert it into xref node
                 if (item.Parent?.Parent != null)
@@ -450,7 +452,7 @@ internal partial class XmlComment
                     yield return new ExceptionInfo
                     {
                         Description = description,
-                        Type = ApplyUidPrefix(id, commentId),
+                        Type = ApplyAssemblyUid(id, commentId),
                         CommentId = commentId,
                     };
                 }
@@ -501,7 +503,7 @@ internal partial class XmlComment
                     yield return new LinkInfo
                     {
                         AltText = altText,
-                        LinkId = ApplyUidPrefix(id, commentId),
+                        LinkId = ApplyAssemblyUid(id, commentId),
                         CommentId = commentId,
                         LinkType = LinkType.CRef
                     };

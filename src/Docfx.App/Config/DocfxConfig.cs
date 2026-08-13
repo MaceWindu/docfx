@@ -18,10 +18,10 @@ class DocfxConfig
     public Dictionary<string, LogLevel>? rules { get; init; }
 
     /// <summary>
-    /// Maps assembly names to a prefix that is prepended to the UID of every API declared in that
-    /// assembly, to disambiguate assemblies that share namespaces. It lives here rather than inside a
-    /// `metadata` entry because it applies to the whole project: an entry mints UIDs for the APIs it
-    /// references as well as the ones it documents, so all entries have to agree on the prefixes.
+    /// The assemblies whose APIs carry their assembly in their UID, to disambiguate assemblies that share
+    /// namespaces. It lives here rather than inside a `metadata` entry because it applies to the whole
+    /// project: an entry mints UIDs for the APIs it references as well as the ones it documents, so all
+    /// entries have to agree on which assemblies are qualified.
     /// </summary>
-    public Dictionary<string, string>? assemblyUidPrefixes { get; init; }
+    public AssemblyUidConfig? assemblyUids { get; init; }
 }

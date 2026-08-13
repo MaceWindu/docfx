@@ -50,7 +50,7 @@ public static partial class DotnetApiCatalog
                     value.ToObject<MetadataJsonConfig>(NewtonsoftJsonUtility.DefaultSerializer.Value),
                     options,
                     configDirectory,
-                    assemblyUidPrefixes: config["assemblyUidPrefixes"]?.ToObject<Dictionary<string, string>>());
+                    assemblyUids: config["assemblyUids"]?.ToObject<AssemblyUidConfig>(NewtonsoftJsonUtility.DefaultSerializer.Value));
             }
         }
         finally
@@ -66,25 +66,25 @@ public static partial class DotnetApiCatalog
         DotnetApiOptions options,
         string configDirectory,
         string outputDirectory = null,
-        Dictionary<string, string> assemblyUidPrefixes = null,
+        AssemblyUidConfig assemblyUids = null,
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
 
         var originalGlobalNamespaceId = VisitorHelper.GlobalNamespaceId;
-        var originalAssemblyUidPrefixes = VisitorHelper.AssemblyUidPrefixes;
-        var originalUidPrefixOverride = VisitorHelper.UidPrefixOverride;
-        var originalUidPrefixOverrideAssemblies = VisitorHelper.UidPrefixOverrideAssemblies;
+        var originalAssemblyUids = VisitorHelper.AssemblyUids;
+        var originalAssemblyUidOverride = VisitorHelper.AssemblyUidOverride;
+        var originalAssemblyUidOverrideAssemblies = VisitorHelper.AssemblyUidOverrideAssemblies;
 
         try
         {
             EnvironmentContext.SetBaseDirectory(configDirectory);
 
-            // A UID prefix is a property of the assembly, not of the metadata item that documents it,
-            // which is why the map is a project level setting: every item has to agree on the prefixes
-            // for the references it makes into assemblies documented by another item to resolve.
-            VisitorHelper.AssemblyUidPrefixes = ValidateAssemblyUidPrefixes(assemblyUidPrefixes);
-            ValidateUidPrefixOverrides(config);
+            // Whether an assembly is qualified is a property of the assembly, not of the metadata item that
+            // documents it, which is why this is a project level setting: every item has to agree for the
+            // references it makes into assemblies documented by another item to resolve.
+            VisitorHelper.AssemblyUids = ValidateAssemblyUids(assemblyUids);
+            ValidateAssemblyUidOverrides(config);
 
             foreach (var item in config)
             {
@@ -97,9 +97,9 @@ public static partial class DotnetApiCatalog
         finally
         {
             VisitorHelper.GlobalNamespaceId = originalGlobalNamespaceId;
-            VisitorHelper.AssemblyUidPrefixes = originalAssemblyUidPrefixes;
-            VisitorHelper.UidPrefixOverride = originalUidPrefixOverride;
-            VisitorHelper.UidPrefixOverrideAssemblies = originalUidPrefixOverrideAssemblies;
+            VisitorHelper.AssemblyUids = originalAssemblyUids;
+            VisitorHelper.AssemblyUidOverride = originalAssemblyUidOverride;
+            VisitorHelper.AssemblyUidOverrideAssemblies = originalAssemblyUidOverrideAssemblies;
             EnvironmentContext.Clean();
         }
 
@@ -109,11 +109,11 @@ public static partial class DotnetApiCatalog
         {
             var assemblies = await Compile(config);
 
-            // `uidPrefixOverride` applies to the assemblies this metadata item documents, which are only
+            // `assemblyUidOverride` applies to the assemblies this metadata item documents, which are only
             // known once they are compiled. It stays constant for the whole item, so the parallel
             // API page generation can read it safely.
-            VisitorHelper.UidPrefixOverride = config.UidPrefixOverride;
-            VisitorHelper.UidPrefixOverrideAssemblies = string.IsNullOrEmpty(config.UidPrefixOverride)
+            VisitorHelper.AssemblyUidOverride = config.AssemblyUidOverride;
+            VisitorHelper.AssemblyUidOverrideAssemblies = string.IsNullOrEmpty(config.AssemblyUidOverride)
                 ? null
                 : new HashSet<IAssemblySymbol>(assemblies.Select(a => a.symbol), SymbolEqualityComparer.Default);
 
@@ -146,77 +146,86 @@ public static partial class DotnetApiCatalog
         }
     }
 
-    // A UID ends up as a file name, an xref key and an HTML anchor, so a prefix is restricted to the
-    // characters that are safe in all three: letters, digits, underscores, and dots as separators.
-    // Unlike a namespace, a segment may start with a digit, so target framework style prefixes such as
-    // `net8.0` work.
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$")]
-    private static partial Regex UidPrefixRegex();
+    // A UID ends up as a file name, an xref key and an HTML anchor, so the assembly component is
+    // restricted to the characters that are safe in all three: letters, digits, underscores and dashes,
+    // with dots as separators. Dashes are allowed because assembly names, which are the components in the
+    // normal case, often contain them. Unlike a namespace, a segment may start with a digit, so both
+    // `7zip.Net` style assembly names and `net8.0` style components work.
+    [GeneratedRegex(@"^[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*$")]
+    private static partial Regex AssemblyUidRegex();
 
-    private static bool IsValidUidPrefix(string prefix)
+    private const string AssemblyUidGrammar =
+        "An assembly component may contain letters, digits, underscores and dashes, separated by dots, e.g. 'MyLib', 'MyLib.V2' or 'net8.0'.";
+
+    private static bool IsValidAssemblyUid(string assemblyUid)
     {
-        return !string.IsNullOrEmpty(prefix) && UidPrefixRegex().IsMatch(prefix);
+        return !string.IsNullOrEmpty(assemblyUid) && AssemblyUidRegex().IsMatch(assemblyUid);
     }
 
     /// <summary>
-    /// Drops invalid entries from the project level <c>assemblyUidPrefixes</c> map and makes lookups by
-    /// assembly name case insensitive, as assembly names are.
+    /// Drops invalid entries from the project level <c>assemblyUids</c> and makes lookups by assembly name
+    /// case insensitive, as assembly names are.
     /// </summary>
-    private static Dictionary<string, string> ValidateAssemblyUidPrefixes(Dictionary<string, string> assemblyUidPrefixes)
+    private static Dictionary<string, string> ValidateAssemblyUids(AssemblyUidConfig assemblyUids)
     {
-        if (assemblyUidPrefixes is null)
+        if (assemblyUids is null)
         {
             return null;
         }
 
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (assemblyName, prefix) in assemblyUidPrefixes)
+        foreach (var (assemblyName, component) in assemblyUids)
         {
             if (string.IsNullOrWhiteSpace(assemblyName))
             {
-                Logger.LogWarning("Ignoring 'assemblyUidPrefixes' entry with an empty assembly name.", code: "InvalidUidPrefix");
+                Logger.LogWarning("Ignoring 'assemblyUids' entry with an empty assembly name.", code: "InvalidAssemblyUid");
                 continue;
             }
 
-            if (!IsValidUidPrefix(prefix))
+            // A null component means the assembly is qualified by its own name, so the name itself has to
+            // be usable as a component. It is checked here rather than once per symbol, as the configured
+            // name and the real one differ at most in casing.
+            if (!IsValidAssemblyUid(component ?? assemblyName))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{prefix}' for assembly '{assemblyName}'. A UID prefix must start with a letter or underscore and may contain letters, digits, underscores and dots, e.g. 'MyLib', 'MyLib.V2' or 'net8.0'.",
-                    code: "InvalidUidPrefix");
+                    component is null
+                        ? $"Ignoring 'assemblyUids' entry '{assemblyName}', which cannot be used as an assembly component. {AssemblyUidGrammar}"
+                        : $"Ignoring invalid assembly component '{component}' for assembly '{assemblyName}'. {AssemblyUidGrammar}",
+                    code: "InvalidAssemblyUid");
                 continue;
             }
 
-            if (result.TryGetValue(assemblyName, out var existingPrefix))
+            if (result.TryGetValue(assemblyName, out var existingComponent))
             {
-                if (existingPrefix != prefix)
+                if (existingComponent != component)
                 {
                     Logger.LogWarning(
-                        $"Assembly '{assemblyName}' is mapped to both UID prefix '{existingPrefix}' and '{prefix}', '{existingPrefix}' is used.",
-                        code: "InvalidUidPrefix");
+                        $"Assembly '{assemblyName}' is mapped to both assembly component '{existingComponent}' and '{component}', '{existingComponent}' is used.",
+                        code: "InvalidAssemblyUid");
                 }
                 continue;
             }
 
-            result.Add(assemblyName, prefix);
+            result.Add(assemblyName, component);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Drops each metadata item's <c>uidPrefixOverride</c> if it isn't a usable prefix.
+    /// Drops each metadata item's <c>assemblyUidOverride</c> if it isn't a usable assembly component.
     /// </summary>
-    private static void ValidateUidPrefixOverrides(MetadataJsonConfig config)
+    private static void ValidateAssemblyUidOverrides(MetadataJsonConfig config)
     {
         foreach (var item in config)
         {
-            if (item.UidPrefixOverride is not null && !IsValidUidPrefix(item.UidPrefixOverride))
+            if (item.AssemblyUidOverride is not null && !IsValidAssemblyUid(item.AssemblyUidOverride))
             {
                 Logger.LogWarning(
-                    $"Ignoring invalid UID prefix '{item.UidPrefixOverride}'. A UID prefix must start with a letter or underscore and may contain letters, digits, underscores and dots, e.g. 'MyLib', 'MyLib.V2' or 'net8.0'.",
-                    code: "InvalidUidPrefix");
-                item.UidPrefixOverride = null;
+                    $"Ignoring invalid assembly component '{item.AssemblyUidOverride}'. {AssemblyUidGrammar}",
+                    code: "InvalidAssemblyUid");
+                item.AssemblyUidOverride = null;
             }
         }
     }
@@ -242,7 +251,8 @@ public static partial class DotnetApiCatalog
             IncludePrivateMembers = configModel?.IncludePrivateMembers ?? false,
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
-            UidPrefixOverride = configModel?.UidPrefixOverride,
+            AssemblyUidOverride = configModel?.AssemblyUidOverride,
+            AssemblyLabel = configModel?.AssemblyLabel ?? default,
             MSBuildProperties = configModel?.Properties,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,

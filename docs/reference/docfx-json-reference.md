@@ -27,23 +27,18 @@ Overrides default log message severity level. Key is the log code, supported val
 }
 ```
 
-## `assemblyUidPrefixes`
+## `assemblyUids`
 
-Maps assembly names to a prefix that is prepended to the UID of every API declared in that assembly.
-Use it when a single docfx project documents several assemblies that share namespaces, which would
-otherwise produce colliding UIDs. Assemblies that are not listed are left unchanged.
+The assemblies whose APIs carry the assembly they are declared in as a component of their UID, separated
+from the namespace qualified name by `::`. Use it when a single docfx project documents several assemblies
+that share namespaces, which would otherwise produce colliding UIDs. Assemblies that are not listed are
+left unchanged.
 
-A prefix must start with a letter or underscore and may contain letters, digits, underscores and dots,
-e.g. `Core`, `MyLib.V2` or `net8.0`. Dots separate it into segments the same way a namespace is
-separated, so with `"namespaceLayout": "nested"` a multi segment prefix becomes nested TOC nodes. Unlike
-a namespace, a segment may start with a digit.
+An array qualifies each assembly by its own name:
 
 ```json
 {
-  "assemblyUidPrefixes": {
-    "MyLib": "Core",
-    "MyLib.Ef8": "Ef8"
-  },
+  "assemblyUids": [ "MyLib", "MyLib.Ef8" ],
   "metadata": [
     { "src": [ "src/MyLib/MyLib.csproj" ],         "dest": "api/core" },
     { "src": [ "src/MyLib.Ef8/MyLib.Ef8.csproj" ], "dest": "api/ef8" }
@@ -51,14 +46,31 @@ a namespace, a segment may start with a digit.
 }
 ```
 
-`MyLib.Widget` from `MyLib.dll` gets the UID `Core.MyLib.Widget` and the same type name from
-`MyLib.Ef8.dll` gets `Ef8.MyLib.Widget`, so each keeps its own page, TOC entry and cross references.
+`MyLib.Widget` from `MyLib.dll` gets the UID `MyLib::MyLib.Widget` and the same type name from
+`MyLib.Ef8.dll` gets `MyLib.Ef8::MyLib.Widget`, so each keeps its own page, TOC entry and cross
+references. In the output file name the `::` becomes `--`, as `:` is not a legal file name character:
+`MyLib--MyLib.Widget.html`.
+
+An object names the component to use instead, where `null` means the assembly's own name:
+
+```json
+{
+  "assemblyUids": {
+    "MyLib": null,
+    "MyLib.Ef8": "Ef8"
+  }
+}
+```
+
+A component may contain letters, digits, underscores and dashes, separated by dots, e.g. `MyLib.Tools`,
+`my-lib` or `net8.0`. Unlike a namespace, it may start with a digit, and it is never displayed as part of
+a namespace — see [`assemblyLabel`](#assemblylabel) for how the assembly is shown.
 
 **It is a project level setting, not a per `metadata` entry one, and it has to be.** An entry mints UIDs
 not only for the APIs it documents but also for the APIs it *references*, and those must come out
 identical to the UIDs produced by the entry that documents them, or the links break — so every entry has
-to agree on the prefixes. Declaring the same assembly twice with different prefixes is reported as an
-`InvalidUidPrefix` warning and the first one wins.
+to agree on which assemblies are qualified. Declaring the same assembly twice with different components is
+reported as an `InvalidAssemblyUid` warning and the first one wins.
 
 Only affects the `docfx metadata` stage. See
 [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces).
@@ -516,18 +528,18 @@ Specifies whether explicit interface implementations are included in the generat
 
 Specify the name to use for the global namespace. The default value is an empty string.
 
-### `uidPrefixOverride`
+### `assemblyUidOverride`
 
-Overrides the project level [`assemblyUidPrefixes`](#assemblyuidprefixes) for the assemblies documented
-by this entry.
+The assembly component to use in the UIDs of the assemblies documented by this entry, instead of their
+assembly name.
 
 Use it **only** when several entries document assemblies that share an *assembly name* and so cannot be
-keyed by name — most often per target version builds of one project, which share an `AssemblyName` and
-differ only by target framework:
+told apart by name — most often per target version builds of one project, which share an `AssemblyName`
+and differ only by target framework:
 
 ```json
 {
-  "assemblyUidPrefixes": { "MyLib": "Core" },
+  "assemblyUids": [ "MyLib" ],
   "metadata": [
     {
       "src": [ "src/MyLib/MyLib.csproj" ],
@@ -536,36 +548,55 @@ differ only by target framework:
     {
       "src": [ "src/MyLib.Ef/MyLib.Ef.Ef8.csproj" ],
       "dest": "api/ef8",
-      "uidPrefixOverride": "Ef8"
+      "assemblyUidOverride": "Ef8"
     },
     {
       "src": [ "src/MyLib.Ef/MyLib.Ef.Ef9.csproj" ],
       "dest": "api/ef9",
-      "uidPrefixOverride": "Ef9"
+      "assemblyUidOverride": "Ef9"
     }
   ]
 }
 ```
 
-Both `MyLib.Ef` projects build `MyLib.Ef.dll`, so one map keyed by assembly name cannot give them
-different prefixes.
+Both `MyLib.Ef` projects build `MyLib.Ef.dll`, so qualifying by assembly name cannot give them different
+components.
 
 The override has two limits, both following from the fact that it names an *entry* rather than an
 assembly:
 
 - **Other entries cannot see it.** An entry referencing `MyLib.Ef.dll` has no way to know whether you
-  meant `Ef8` or `Ef9`, so its references come out unprefixed and silently render without a link. To give
-  those references somewhere to go, also list the assembly in
-  [`assemblyUidPrefixes`](#assemblyuidprefixes) with the prefix of the version they should point at. The
-  two settings compose, because the override only applies to the assemblies its own entry documents — see
+  meant `Ef8` or `Ef9`, so its references come out unqualified and silently render without a link. To give
+  those references somewhere to go, also give the assembly a component in
+  [`assemblyUids`](#assemblyuids), naming the version they should point at. The two settings compose,
+  because the override only applies to the assemblies its own entry documents — see
   [Nominate a default version for links from
   elsewhere](../docs/dotnet-api-docs.md#nominate-a-default-version-for-links-from-elsewhere).
 - **It does not disambiguate within one entry.** All the assemblies an entry documents get the same
-  prefix, so if one entry compiles two assemblies with the same name — a glob matching several target
+  component, so if one entry compiles two assemblies with the same name — a glob matching several target
   framework folders, for instance — they still collide.
 
 See [Assemblies that share namespaces](../docs/dotnet-api-docs.md#assemblies-that-share-namespaces)
 for a worked example.
+
+### `assemblyLabel`
+
+Specifies how the assembly of a namespace is shown, for assemblies listed in
+[`assemblyUids`](#assemblyuids). Assemblies that are not listed there are unaffected.
+
+| value | what a namespace looks like |
+|---|---|
+| `auto` (default) | `suffix` with `"namespaceLayout": "flattened"`, `none` with `"nested"` |
+| `suffix` | `MyLib (MyLib.Ef8)` — the assembly is appended to the label and the page title |
+| `none` | `MyLib` — the namespace alone |
+| `page` | `MyLib`, with `Assembly: MyLib.Ef8.dll` named on the page, the way type pages do |
+
+The assembly is never part of the namespace itself: a page always names the namespace as it is declared in
+the source, whatever this is set to. Only the UID carries the assembly.
+
+With `"namespaceLayout": "nested"` the namespaces of each qualified assembly are grouped under a node
+naming that assembly, so `auto` leaves the labels alone there. A flattened layout has nothing else to tell
+two assemblies apart, so `auto` appends the assembly.
 
 ## File Mappings
 
