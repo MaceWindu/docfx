@@ -1,0 +1,71 @@
+# Builds the docfx used by the linq2db documentation (https://github.com/linq2db/linq2db, Docs/README.md)
+# and attaches it to a release of the pushed tag. Lives on custom/linq2db-* branches only.
+#
+# Tag scheme: linq2db-<yyyymmdd>-<sha7>. linq2db pins the asset URL and the hash from docfx.zip.sha256
+# in Docs/docfx-version.json.
+name: linq2db-build
+
+on:
+  push:
+    tags: ['linq2db-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # gh release create
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.x
+
+      - name: Build templates
+        shell: pwsh
+        working-directory: templates
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'npm run build failed' }
+
+      - name: Publish docfx
+        shell: pwsh
+        run: |
+          dotnet publish src/docfx/docfx.csproj -c Release -f net10.0 -o out
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+          dotnet out/docfx.dll --version
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path out/* -DestinationPath docfx.zip
+          $hash = (Get-FileHash docfx.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path docfx.zip.sha256 -Value $hash -NoNewline
+          Write-Host "docfx.zip SHA-256: $hash"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docfx
+          path: |
+            docfx.zip
+            docfx.zip.sha256
+          if-no-files-found: error
+
+      - name: Create release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $hash = Get-Content docfx.zip.sha256 -Raw
+          gh release create $env:GITHUB_REF_NAME docfx.zip docfx.zip.sha256 --title $env:GITHUB_REF_NAME --notes "docfx for linq2db docs. Source: $env:GITHUB_SHA. docfx.zip SHA-256: $hash"
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
