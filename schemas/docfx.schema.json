@@ -678,6 +678,10 @@
               "type": "string"
             }
           },
+          "targetFramework": {
+            "type": "string",
+            "description": "The target framework to document projects at, e.g. `net8.0`. Unlike the `TargetFramework` MSBuild property in `properties`, it applies only to the projects this metadata item documents, not to the projects they reference."
+          },
           "disableGitFeatures": {
             "type": "boolean",
             "default": false,

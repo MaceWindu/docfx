@@ -2,13 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Docfx.Common;
+using Docfx.DataContracts.ManagedReference;
 using Docfx.Dotnet;
 using Docfx.Tests.Common;
 
 namespace Docfx.Tests;
 
 /// <summary>
-/// How a multi-targeted project is documented, end to end over real projects.
+/// End to end coverage of the <c>targetFramework</c> metadata option over real multi-targeted projects.
 /// </summary>
 [Collection("docfx STA")]
 public class TargetFrameworkTest : TestBase
@@ -42,6 +43,24 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworkSelectsTheFrameworkToDocument()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "netstandard2.0" });
+
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNetStandard.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+        AssertWarnings(listener);
+
+        // The summary comes from the selected framework's side of the `#if`.
+        var shared = YamlUtility.Deserialize<PageViewModel>(Path.Combine(_outputFolder, "Lib.Shared.yml"));
+        Assert.Equal("netstandard2.0", shared.Items[0].Summary.Trim());
+    }
+
+    [Fact]
     public async Task TargetFrameworkPropertyRetargetsReferencedProjects()
     {
         var project = CreateProjectReferencingNetStandardLibrary();
@@ -67,10 +86,76 @@ public class TargetFrameworkTest : TestBase
 
         await Exec(new() { Src = Src(project) });
 
-        var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).ToList();
-        Assert.True(
-            warnings.Count == 0,
-            $"Expected no warnings, got:{Environment.NewLine}" + string.Join(Environment.NewLine, warnings.Select(w => $"  {w.Code}: {w.Message}")));
+        AssertWarnings(listener);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkLeavesReferencedProjectsAlone()
+    {
+        var project = CreateProjectReferencingNetStandardLibrary();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "net8.0" });
+
+        AssertWarnings(listener);
+
+        var derived = YamlUtility.Deserialize<PageViewModel>(Path.Combine(_outputFolder, "App.Derived.yml"));
+        Assert.Contains("Dep.Base", derived.Items[0].Inheritance);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkTheProjectDoesNotTargetFallsBackToItsDefault()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "net9.0" });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("'net8.0', 'netstandard2.0'", warning.Message);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
+    [Theory]
+    [InlineData("net8.0", false)]
+    [InlineData("NET8.0", false)]
+    [InlineData("netstandard2.0", true)]
+    public async Task TargetFrameworkOnASingleTargetProject(string targetFramework, bool expectWarning)
+    {
+        var project = CreateProject("Single", "<TargetFramework>net8.0</TargetFramework>", "namespace Single { public class Widget { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        if (expectWarning)
+        {
+            AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Single.Widget.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkAndTheTargetFrameworkPropertyTogetherWarn()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new()
+        {
+            Src = Src(project),
+            TargetFramework = "net8.0",
+            Properties = new() { ["targetframework"] = "net8.0" },
+        });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Code == WarningCodes.Metadata.ConflictingTargetFramework);
     }
 
     private Task Exec(MetadataJsonItemConfig config)
@@ -79,10 +164,25 @@ public class TargetFrameworkTest : TestBase
         return DotnetApiCatalog.Exec(new(config), new(), Directory.GetCurrentDirectory(), cancellationToken: TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// Asserts the warnings logged are exactly one per code given, and returns the first, reporting the
+    /// full text of every warning on failure.
+    /// </summary>
+    private static ILogItem AssertWarnings(TestListenerScope listener, params string[] codes)
+    {
+        var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).ToList();
+        Assert.True(
+            warnings.Select(w => w.Code).SequenceEqual(codes),
+            $"Expected warnings [{string.Join(", ", codes)}], got:{Environment.NewLine}"
+            + string.Join(Environment.NewLine, warnings.Select(w => $"  {w.Code}: {w.Message}")));
+        return warnings.FirstOrDefault();
+    }
+
     private static FileMapping Src(string project) => new(new FileMappingItem(project)) { Expanded = true };
 
     /// <summary>
-    /// A project targeting <c>net8.0;netstandard2.0</c> with one type per framework.
+    /// A project targeting <c>net8.0;netstandard2.0</c> with one type per framework, and a type whose
+    /// documentation differs between them.
     /// </summary>
     private string CreateMultiTargetedProject()
     {
@@ -91,8 +191,14 @@ public class TargetFrameworkTest : TestBase
             {
             #if NET8_0
                 public class OnlyNet8 { }
+
+                /// <summary>net8.0</summary>
+                public class Shared { }
             #else
                 public class OnlyNetStandard { }
+
+                /// <summary>netstandard2.0</summary>
+                public class Shared { }
             #endif
             }
             """);
