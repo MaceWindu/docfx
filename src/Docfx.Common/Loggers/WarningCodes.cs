@@ -29,6 +29,8 @@ public static class WarningCodes
     {
         public const string FailedToResolveAnalyzer = "FailedToResolveAnalyzer";
         public const string FailedToLoadAnalyzer = "FailedToLoadAnalyzer";
+        public const string TargetFrameworkNotFound = "TargetFrameworkNotFound";
+        public const string ConflictingTargetFramework = "ConflictingTargetFramework";
     }
 
     public static class Markdown

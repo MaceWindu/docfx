@@ -27,6 +27,15 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
+        if (config.TargetFramework is not null &&
+            msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
+        {
+            Logger.LogWarning(
+                $"Both 'targetFramework' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
+                + "so it also applies to every referenced project and leaves only one target framework to select from. Remove it from 'properties'.",
+                code: WarningCodes.Metadata.ConflictingTargetFramework);
+        }
+
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
         // logger parameter is not works when using Roslyn 4.9.0 or later.
@@ -148,6 +157,7 @@ partial class DotnetApiCatalog
             var project = workspace.CurrentSolution.Projects.FirstOrDefault(
                 p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path));
 
+            var isNewlyLoaded = project is null;
             if (project is null)
             {
                 Logger.LogInfo($"Loading project {path}");
@@ -161,7 +171,17 @@ partial class DotnetApiCatalog
                     }
                 }
                 project = await workspace.OpenProjectAsync(path, msbuildLogger);
+            }
 
+            // Selected after loading rather than passed to MSBuild as a global property: a global
+            // `TargetFramework` would also retarget every project this one references.
+            if (config.TargetFramework is { } targetFramework)
+            {
+                project = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework);
+            }
+
+            if (isNewlyLoaded)
+            {
                 foreach (var unresolvedAnalyzer in project.AnalyzerReferences.OfType<UnresolvedAnalyzerReference>())
                 {
                     Logger.LogWarning($"There is .NET Analyzer that can't be resolved. "

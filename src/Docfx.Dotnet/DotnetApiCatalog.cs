@@ -137,6 +137,7 @@ public static partial class DotnetApiCatalog
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
             MSBuildProperties = configModel?.Properties,
+            TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,
