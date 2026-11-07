@@ -527,18 +527,60 @@
       "description": "Markdig extension setting.",
       "anyOf": [
         {
-          "type": "string",
-          "description": "String"
+          "$ref": "#/$defs/markdigExtensionName"
         },
         {
           "type": "object",
           "properties": {
             "name": {
-              "type": "string",
-              "description": "markdig extension name",
-              "additionalProperties": {}
+              "$ref": "#/$defs/markdigExtensionName"
             }
           }
+        }
+      ]
+    },
+    "markdigExtensionName": {
+      "description": "Markdig extension name. Known extensions are suggested, but other names are also allowed.",
+      "anyOf": [
+        {
+          "enum": [
+            "abbreviations",
+            "advanced",
+            "alerts",
+            "attributes",
+            "autoidentifiers",
+            "autolinks",
+            "bootstrap",
+            "citations",
+            "common",
+            "customcontainers",
+            "definitionlists",
+            "diagrams",
+            "emojis",
+            "emphasisextras",
+            "figures",
+            "footers",
+            "footnotes",
+            "gfm-pipetables",
+            "globalization",
+            "gridtables",
+            "hardlinebreak",
+            "listextras",
+            "mathematics",
+            "medialinks",
+            "nohtml",
+            "nofollowlinks",
+            "nonascii-noescape",
+            "noopenerlinks",
+            "noreferrerlinks",
+            "pipetables",
+            "smartypants",
+            "tasklists",
+            "yaml"
+          ]
+        },
+        {
+          "type": "string"
         }
       ]
     },
@@ -670,6 +712,16 @@
             "type": "boolean",
             "default": false,
             "description": "Disables generation of view source links."
+          },
+          "sourceLinkExclude": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "description": "Hides View Source links by matching compiler source paths or paths recorded in portable PDBs. Does not scan directories, match URLs, or exclude APIs. Patterns are not relative to docfx.json or metadata.src; use **/ for any directory prefix. Defaults to no additional exclusions."
           },
           "codeSourceBasePath": {
             "type": "string",

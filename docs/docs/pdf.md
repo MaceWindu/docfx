@@ -34,6 +34,15 @@ items:
   href: getting-started.md
 ```
 
+For TOCs, the metadata precedence is `fileMetadata` > values in `toc.yml` > `globalMetadata`.
+For example, set `pdf: false` in a TOC to exclude it when PDF generation is enabled globally,
+unless matching `fileMetadata` explicitly enables it. Likewise, `fileMetadata` can disable PDF
+for a TOC that declares `pdf: true`.
+
+Metadata values are selected per key, not deep-merged. Omit a key from the TOC to inherit its
+global value when no file metadata matches; an explicit value, including `false` or `null`,
+is not treated as an omitted key.
+
 In case the TOC file is auto-generated, use [file metadata](./config.md#metadata) to configure PDF per TOC file:
 
 ```json
@@ -75,6 +84,33 @@ Sets the PDF output file name. The default value is `toc.pdf`.
 
 Indicates whether to include a "Table of Contents" pages at the beginning.
 
+### `pdfTocSource`
+
+Controls the source for the PDF Table of Contents. Possible values:
+
+- `toc` (default): Generates TOC from the `toc.yml` structure.
+- `headings`: Generates TOC from headings (h1, h2, h3, etc.) extracted from document content.
+
+When set to `headings`, the TOC reflects the actual heading structure within each document rather than the navigation defined in `toc.yml`. This is useful for single-document or small documentation sets where you want the PDF TOC to show the internal sections of each document.
+
+```yaml
+pdf: true
+pdfTocPage: true
+pdfTocSource: headings
+items:
+- name: My Document
+  href: my-document.md
+```
+
+### `pdfTocHeadingDepth`
+
+Maximum heading level to include in the PDF TOC when `pdfTocSource` is `headings`. Default is `3`, which includes h1, h2, and h3 headings. Set to a higher value (up to 6) to include deeper heading levels.
+
+```yaml
+pdfTocSource: headings
+pdfTocHeadingDepth: 4  # Include h1-h4 headings
+```
+
 ### `pdfCoverPage`
 
 A path to an HTML page relative to the root of the output directory. The HTML page will be inserted at the beginning of the PDF file as cover page.
@@ -108,6 +144,31 @@ HTML template for the print footer, or a path to an HTML page relative to the ro
 > [!NOTE]
 > For the cover page to appear in PDF, it needs to be included in build.
 > For instance, if `cover.md` is outputted to `_site/cover.html`, you should set `pdfCoverPage` to `cover.html`.
+
+### `pdfHeaderFooterOnCover`
+
+Indicates whether to include the header and footer on the cover page. Defaults to `false`. Set to `true` to use the configured header and footer templates (or the default footer) on the page specified by `pdfCoverPage`.
+
+### `pdfHeaderFooterOnToc`
+
+Indicates whether to include the header and footer on all table of contents (TOC) pages. Defaults to `false`. Set to `true` to use the configured header and footer templates (or the default footer) on the pages enabled by `pdfTocPage`.
+
+These options are independent and do not add a cover or TOC by themselves. For example, to include headers and footers on both:
+
+```yaml
+pdf: true
+pdfCoverPage: cover.html
+pdfTocPage: true
+pdfHeaderFooterOnCover: true
+pdfHeaderFooterOnToc: true
+items:
+- name: Getting Started
+  href: getting-started.md
+```
+
+Cover and TOC pages count toward `pageNumber` and `totalPages` whether or not their headers and footers are shown.
+
+Headers and footers use each page's size and orientation, so a landscape cover can be combined with portrait TOC and article pages.
 
 ## Customize PDF Pages
 

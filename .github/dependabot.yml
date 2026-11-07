@@ -1,52 +1,56 @@
 version: 2
+# Zero PR limits disable version updates; security updates remain enabled.
 updates:
 - package-ecosystem: nuget
+  open-pull-requests-limit: 0
   target-branch: main
   directory: "/"
   schedule:
-    interval: daily
+    interval: monthly
+  ignore:
+    # Verify updates are manual; overlapping NuGet update blocks are not supported.
+    - dependency-name: "Verify.*"
+    # Roslyn minor/major upgrades need per-TFM review.
+    - dependency-name: "Microsoft.CodeAnalysis"
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-major"
+    - dependency-name: "Microsoft.CodeAnalysis.*"
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-major"
   groups:
-    roslyn:
+    nuget-dependencies:
+      applies-to: version-updates
       patterns:
-      - "Microsoft.CodeAnalysis"
-      - "Microsoft.CodeAnalysis.*"
-    spectre:
-      patterns:
-      - "Spectre.Console"
-      - "Spectre.Console.*"
-    xunit:
-      patterns:
-      - "xunit"
-      - "xunit.*"
-      - "xunit.v3"
-      - "xunit.v3.*"
-
-  - package-ecosystem: "nuget"
-    target-branch: main
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    allow:
-      - dependency-name: "Verify.*"
+      - "*"
 
 - package-ecosystem: npm
+  open-pull-requests-limit: 0
   target-branch: main
   directory: "/templates"
   schedule:
-    interval: daily
+    interval: monthly
   cooldown:
     default-days: 14
   groups:
-    typescript-eslint:
+    npm-dependencies:
+      applies-to: version-updates
       patterns:
-      - "@typescript-eslint/*"
+      - "*"
   ignore:
      # Ignore default template dependency update due to missing tests
   - dependency-name: '@default/*'
   - dependency-name: 'jquery'
 
 - package-ecosystem: "github-actions"
+  open-pull-requests-limit: 0
   directory: "/"
   schedule: 
-    interval: daily
+    interval: monthly
   target-branch: main
+  groups:
+    github-actions:
+      applies-to: version-updates
+      patterns:
+      - "*"

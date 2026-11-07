@@ -6,8 +6,117 @@ on:
     branches: [ main, feature/*, hotfix/* ]
   workflow_dispatch:
 
+env:
+  NO_COLOR: true
+
 jobs:
-  test:
+  unit-test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        framework: [net10.0]
+        include:
+        - os: ubuntu-latest
+          framework: net11.0
+        - os: ubuntu-latest
+          framework: net9.0
+        - os: ubuntu-latest
+          framework: net8.0
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        lfs: true
+
+    - uses: ./.github/actions/build
+      with:
+        framework: ${{ matrix.framework }}
+        cache: 'true'
+
+    - run: npm run lint
+      if: matrix.framework == 'net10.0'
+      shell: bash
+      working-directory: templates
+
+    - run: npm test
+      if: matrix.framework == 'net10.0'
+      shell: bash
+      working-directory: templates
+
+    - run: echo "DOTNET_DbgEnableMiniDump=1" >> $GITHUB_ENV
+      if: matrix.os == 'ubuntu-latest'
+
+    - name: Install Chromium headless shell
+      shell: pwsh
+      working-directory: src/docfx/bin/Release/${{ matrix.framework }}
+      run: |
+        $env:PLAYWRIGHT_NODEJS_PATH = (Get-Command node).Path
+        ./playwright.ps1 install chromium --only-shell
+
+    - name: Install dotnet-coverage
+      if: matrix.os == 'ubuntu-latest'
+      run: dotnet tool install -g dotnet-coverage
+
+    - name: Start coverage collection
+      if: matrix.os == 'ubuntu-latest'
+      id: coverage
+      run: dotnet coverage collect --session-id docfx_coverage --settings test/CodeCoverage.config --output test/TestResults/coverage.cobertura.xml --output-format cobertura --server-mode --background
+
+    - name: Test with coverage
+      if: matrix.os == 'ubuntu-latest'
+      run: dotnet coverage connect docfx_coverage "dotnet test -c Release -f ${{ matrix.framework }} --no-build"
+
+    - name: Test
+      if: matrix.os != 'ubuntu-latest'
+      run: dotnet test -c Release -f ${{ matrix.framework }} --no-build
+
+    - name: Stop coverage collection
+      if: always() && steps.coverage.outcome == 'success'
+      run: dotnet coverage shutdown docfx_coverage --timeout 60000
+
+    - uses: codecov/codecov-action@v7
+      if: matrix.os == 'ubuntu-latest'
+      with:
+        cleanup: true
+        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: test/TestResults/coverage.cobertura.xml
+        disable_search: true
+
+    - run: npm i -g @percy/cli
+      if: matrix.os == 'ubuntu-latest' && matrix.framework == 'net10.0'
+
+    - name: Percy snapshots
+      if: matrix.os == 'ubuntu-latest' && matrix.framework == 'net10.0'
+      run: percy exec -- dotnet run --project test/docfx.Snapshot.Tests/docfx.Snapshot.Tests.csproj -c Release -f net10.0 --no-build -- --filter-trait Stage=Percy
+      env:
+        PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+        PERCY_TESTS: 'true'
+
+    - name: Upload Logs
+      uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() }}
+      with:
+        name: logs-${{ matrix.os }}-${{ matrix.framework }}
+        path: |
+          msbuild.binlog
+          test/**/TestResults/*.log
+          test/**/TestResults/*.trx
+          test/**/TestResults/*.html
+          test/**/TestResults/*.ctrf
+          test/**/TestResults/coverage.cobertura.xml
+
+    - uses: actions/upload-artifact@v7
+      if: ${{ failure() && matrix.os == 'ubuntu-latest' }}
+      with:
+        name: dump-${{ matrix.framework }}
+        path: /tmp/coredump*
+
+  package:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -15,85 +124,109 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
-        ref: ${{github.event.pull_request.head.ref}}
+        ref: ${{ github.event.pull_request.head.ref }}
         repository: ${{ github.event.pull_request.head.repo.full_name }}
         lfs: true
 
     - uses: ./.github/actions/build
-
-    - run: npm run lint
-      shell: bash
-      working-directory: templates
-
-    - run: npm test
-      shell: bash
-      working-directory: templates
-
-    - run: dotnet test -c Release -f net10.0 --no-build --collect:"XPlat Code Coverage" --consoleLoggerParameters:"Summary;Verbosity=Minimal"
-      id: test-net100
-
-    - run: dotnet test -c Release -f net9.0 --no-build --collect:"XPlat Code Coverage" --consoleLoggerParameters:"Summary;Verbosity=Minimal"
-      if: matrix.os == 'ubuntu-latest'
-      id: test-net90
-
-    - run: dotnet test -c Release -f net8.0 --no-build --collect:"XPlat Code Coverage" --consoleLoggerParameters:"Summary;Verbosity=Minimal"
-      if: matrix.os == 'ubuntu-latest'
-      id: test-net80
-
-    - run: npm i -g @percy/cli
-      if: matrix.os == 'ubuntu-latest'
-
-    - run: percy exec -- dotnet test -c Release -f net10.0 --filter Stage=Percy --no-build --collect:"XPlat Code Coverage"
-      if: matrix.os == 'ubuntu-latest'
-      env:
-        PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
-
-    - uses: codecov/codecov-action@v5
-      if: matrix.os == 'ubuntu-latest'
       with:
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
+        project: src/docfx/docfx.csproj
+        cache: 'true'
 
-    - run: echo "DOTNET_DbgEnableMiniDump=1" >> $GITHUB_ENV
+    - name: Test compatibility reporting
       if: matrix.os == 'ubuntu-latest'
+      run: node --test test/compatibility/report.test.mjs
 
-    - run: dotnet run -c Release --no-build -f net10.0 --project src/docfx -- docs/docfx.json
-    - run: dotnet run -c Release --no-build -f net10.0 --project src/docfx -- samples/seed/docfx.json --output docs/_site/seed
+    # Work around MSBuild hanging in ResolveProjectReferences during dotnet pack.
+    - name: Shutdown MSBuild server
+      run: dotnet build-server shutdown --msbuild
 
-    - uses: actions/upload-pages-artifact@v4
+    - name: Pack tool for distribution tests
+      run: dotnet pack src/docfx -c Release --no-restore /p:Version=0.0.0-packaging-test /p:BaseOutputPath=bin/package-test/ -o drop/package-test
+
+    - name: Publish tool for distribution tests
+      run: dotnet publish src/docfx -c Release -f net10.0 --no-build --no-restore --no-self-contained /p:Version=0.0.0-packaging-test /p:BaseOutputPath=bin/package-test/ -o drop/publish-test
+
+    - name: Repack tool without rebuilding
+      run: dotnet pack src/docfx -c Release --no-build --no-restore /p:Version=0.0.0-packaging-test /p:BaseOutputPath=bin/package-test/ -o drop/package-test
+
+    - name: Verify distributed templates
+      shell: pwsh
+      run: ./test/VerifyToolPackage.ps1 -PackagePath drop/package-test/docfx.0.0.0-packaging-test.nupkg -PublishDirectory drop/publish-test
+
+    - name: Packaged SDK compatibility smoke
       if: matrix.os == 'ubuntu-latest'
-      with:
-        path: docs/_site
+      shell: pwsh
+      run: |
+        $sdk = (dotnet --list-sdks | Where-Object { $_ -match '^10\.0\.\d+ ' } | Select-Object -Last 1).Split(' ')[0]
+        ConvertTo-Json -InputObject @(@{ sdk = $sdk; projectTfm = 'net10.0' }) | Set-Content drop/package-test/matrix.json
+        ./test/compatibility/Measure-Compatibility.ps1 -MatrixPath drop/package-test/matrix.json -OutputDirectory drop/compatibility-smoke -NightlyPackage drop/package-test/docfx.0.0.0-packaging-test.nupkg -SkipStable -FailOnIncompatible
 
-    - name: Upload Logs
+    - name: Upload compatibility smoke evidence
+      if: ${{ always() && matrix.os == 'ubuntu-latest' }}
       uses: actions/upload-artifact@v7
-      if: ${{ !cancelled() }}
       with:
-        name: logs-${{ matrix.os }}
-        path: |
-          msbuild.binlog
-          test/**/TestResults/*.trx
-          test/**/TestResults/*.html
+        name: sdk-compatibility-smoke
+        path: drop/compatibility-smoke
+        retention-days: 7
+
+    - name: Upload build log
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: package-build-${{ matrix.os }}
+        path: msbuild.binlog
+
+  docs:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        lfs: true
+
+    - uses: ./.github/actions/build
+      with:
+        project: src/docfx/docfx.csproj
+        framework: net10.0
+        cache: 'true'
+
+    - uses: ./.github/actions/build-docs
 
     - uses: actions/upload-artifact@v7
-      if: ${{ failure() && matrix.os == 'ubuntu-latest' }}
+      if: matrix.os == 'ubuntu-latest'
       with:
-        name: dump
-        path: /tmp/coredump*
+        name: docs-site
+        path: docs/_site
+        retention-days: 14
+        include-hidden-files: true
 
-  publish-docs:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test]
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    - name: Upload build log
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: docs-build-${{ matrix.os }}
+        path: msbuild.binlog
+
+  # Preserve the required branch-protection checks and include every split job.
+  test:
+    if: always()
+    needs: [unit-test, package, docs]
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      pages: write
-      id-token: write
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
-    - id: deployment
-      uses: actions/deploy-pages@v5
+    - name: Check all CI jobs
+      env:
+        RESULTS: ${{ join(needs.*.result, ',') }}
+      run: test "$RESULTS" = 'success,success,success'

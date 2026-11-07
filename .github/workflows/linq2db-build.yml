@@ -24,9 +24,12 @@ jobs:
         with:
           node-version: 24
 
+      # 11.x: docfx also targets net11.0, and restoring that target needs the .NET 11 SDK
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: 10.x
+          dotnet-version: |
+            11.x
+            10.x
 
       - name: Build templates
         shell: pwsh
