@@ -47,6 +47,8 @@ internal class ExtractMetadataConfig
 
     public Dictionary<string, string> MSBuildProperties { get; init; }
 
+    public string TargetFramework { get; init; }
+
     public bool AllowCompilationErrors { get; init; }
 
     public static bool UseClrTypeNames { get; set; }

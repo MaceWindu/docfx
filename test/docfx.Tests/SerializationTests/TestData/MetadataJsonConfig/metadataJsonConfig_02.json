@@ -38,6 +38,7 @@
     "namespaceLayout": "nested",
     "enumSortOrder": "declaringOrder",
     "outputFormat": "markdown",
+    "targetFramework": "net8.0",
     "assemblyUidOverride": "MyLib.V3",
     "assemblyLabel": "page",
     "output": "obj/md"

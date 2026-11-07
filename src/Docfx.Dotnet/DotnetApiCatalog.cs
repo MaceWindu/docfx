@@ -254,6 +254,7 @@ public static partial class DotnetApiCatalog
             AssemblyUidOverride = configModel?.AssemblyUidOverride,
             AssemblyLabel = configModel?.AssemblyLabel ?? default,
             MSBuildProperties = configModel?.Properties,
+            TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,
