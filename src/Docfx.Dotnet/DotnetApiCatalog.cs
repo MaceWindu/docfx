@@ -84,7 +84,21 @@ public static partial class DotnetApiCatalog
 
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
-            var assemblies = await Compile(config);
+            var (assemblies, frameworks) = await Compile(config);
+
+            // A single framework has nothing to merge, and its output must not differ from plain selection.
+            if (frameworks?.Values.Distinct(StringComparer.OrdinalIgnoreCase).Skip(1).Any() != true)
+            {
+                frameworks = null;
+            }
+
+            if (frameworks is not null && config.OutputFormat is not MetadataOutputFormat.Mref)
+            {
+                Logger.LogError(
+                    $"'targetFrameworks' with more than one framework is only supported by the 'mref' output format, not '{config.OutputFormat}'.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
 
             switch (config.OutputFormat)
             {
@@ -109,7 +123,7 @@ public static partial class DotnetApiCatalog
                     break;
 
                 case MetadataOutputFormat.Mref:
-                    CreateManagedReference(assemblies, config, options);
+                    CreateManagedReference(assemblies, config, options, frameworks);
                     break;
             }
         }
@@ -138,6 +152,11 @@ public static partial class DotnetApiCatalog
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
             MSBuildProperties = configModel?.Properties,
             TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
+            TargetFrameworks = configModel?.TargetFrameworks?
+                .Where(framework => !string.IsNullOrWhiteSpace(framework))
+                .Select(framework => framework.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() is { Count: > 0 } targetFrameworks ? targetFrameworks : null,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,

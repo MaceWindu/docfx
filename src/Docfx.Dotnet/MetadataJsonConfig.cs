@@ -197,6 +197,17 @@ internal class MetadataJsonItemConfig
     public string TargetFramework { get; set; }
 
     /// <summary>
+    /// The target frameworks to document together, e.g. `["net8.0", "netstandard2.0"]`, or `"*"` for every
+    /// framework a project targets. Each API gets one page, which states the frameworks it exists in; the
+    /// first framework listed provides the content of an API that exists in several.
+    /// </summary>
+    [JsonProperty("targetFrameworks")]
+    [JsonPropertyName("targetFrameworks")]
+    [Newtonsoft.Json.JsonConverter(typeof(StringOrListJsonConverter.NewtonsoftJson))]
+    [System.Text.Json.Serialization.JsonConverter(typeof(StringOrListJsonConverter.SystemTextJson))]
+    public List<string> TargetFrameworks { get; set; }
+
+    /// <summary>
     /// Disables generation of view source links.
     /// </summary>
     [JsonProperty("disableGitFeatures")]

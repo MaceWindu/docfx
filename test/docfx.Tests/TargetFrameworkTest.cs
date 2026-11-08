@@ -300,6 +300,159 @@ public class TargetFrameworkTest : TestBase
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Code == WarningCodes.Metadata.ConflictingTargetFramework);
     }
 
+    [Fact]
+    public async Task TargetFrameworksMergesEveryFrameworkOfAProject()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["*"] });
+
+        AssertWarnings(listener);
+        Assert.Equal(["net8.0"], AppliesTo("Lib.OnlyNet8.yml"));
+        Assert.Equal(["netstandard2.0"], AppliesTo("Lib.OnlyNetStandard.yml"));
+        Assert.Equal(["net8.0", "netstandard2.0"], AppliesTo("Lib.Shared.yml"));
+
+        // "*" keeps the framework the project is documented at by default as the one providing the content.
+        Assert.Equal("net8.0", Page("Lib.Shared.yml").Items[0].Summary.Trim());
+    }
+
+    [Fact]
+    public async Task TargetFrameworksFirstListedFrameworkProvidesTheContent()
+    {
+        var project = CreateMultiTargetedProject();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["netstandard2.0", "net8.0"] });
+
+        Assert.Equal(["netstandard2.0", "net8.0"], AppliesTo("Lib.Shared.yml"));
+        Assert.Equal("netstandard2.0", Page("Lib.Shared.yml").Items[0].Summary.Trim());
+    }
+
+    [Fact]
+    public async Task TargetFrameworksWithOneFrameworkIsPlainSelection()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["netstandard2.0"] });
+
+        AssertWarnings(listener);
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+        Assert.Null(Page("Lib.Shared.yml").Items[0].AppliesTo);
+    }
+
+    [Fact]
+    public async Task TargetFrameworksAProjectDoesNotTargetWarnsAndTheOthersAreDocumented()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net9.0", "net8.0", "netstandard2.0"] });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("'net9.0'", warning.Message);
+        Assert.Equal(["net8.0", "netstandard2.0"], AppliesTo("Lib.Shared.yml"));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksTakesAProjectOnlyAtListedFrameworks()
+    {
+        var project = CreateMultiTargetedProject();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net9.0"] });
+
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.Shared.yml")));
+    }
+
+    [Theory]
+    [InlineData("net8.0", "Dep.OnlyNet8")]
+    [InlineData("netstandard2.0", "Dep.OnlyNetStandard")]
+    public async Task TargetFrameworksResolvesAMultiTargetedReferenceAtTheSameFramework(string primary, string expectedBase)
+    {
+        var project = CreateProjectReferencingMultiTargetedLibrary();
+        var other = primary == "net8.0" ? "netstandard2.0" : "net8.0";
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = [primary, other] });
+
+        AssertWarnings(listener);
+        Assert.Equal([primary, other], AppliesTo("App.Derived.yml"));
+        Assert.Contains(expectedBase, Page("App.Derived.yml").Items[0].Inheritance);
+    }
+
+    [Fact]
+    public async Task TargetFrameworksFindsExtensionMethodsWithinEachFramework()
+    {
+        var project = CreateProject("Ext", "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>", """
+            namespace Ext
+            {
+                public class Target { }
+
+                public static class Extensions
+                {
+            #if NET8_0
+                    public static void OnlyNet8(this Target target) { }
+            #else
+                    public static void OnlyNetStandard(this Target target) { }
+            #endif
+                }
+            }
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net8.0", "netstandard2.0"] });
+
+        AssertWarnings(listener);
+        var extensions = Page("Ext.Target.yml").Items[0].ExtensionMethods;
+        Assert.Contains(extensions, x => x.Contains("OnlyNet8"));
+        Assert.DoesNotContain(extensions, x => x.Contains("OnlyNetStandard"));
+        Assert.Equal(["netstandard2.0"], AppliesTo("Ext.Extensions.yml", "Ext.Extensions.OnlyNetStandard(Ext.Target)"));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksAndTargetFrameworkTogetherWarnAndTheSingleOneWins()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "netstandard2.0", TargetFrameworks = ["*"] });
+
+        AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+        Assert.Null(Page("Lib.Shared.yml").Items[0].AppliesTo);
+    }
+
+    [Theory]
+    [InlineData(nameof(MetadataOutputFormat.Markdown))]
+    [InlineData(nameof(MetadataOutputFormat.ApiPage))]
+    public async Task TargetFrameworksIsAnErrorForOutputFormatsThatCannotMerge(string outputFormat)
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["*"], OutputFormat = Enum.Parse<MetadataOutputFormat>(outputFormat) });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.TargetFrameworksNotSupported);
+    }
+
+    private PageViewModel Page(string fileName)
+    {
+        return YamlUtility.Deserialize<PageViewModel>(Path.Combine(_outputFolder, fileName));
+    }
+
+    private List<string> AppliesTo(string fileName, string uid = null)
+    {
+        var page = Page(fileName);
+        return (uid is null ? page.Items[0] : page.Items.Single(i => i.Uid == uid)).AppliesTo.Single().Frameworks;
+    }
+
     private Task Exec(MetadataJsonItemConfig config)
     {
         config.Dest = _outputFolder;
@@ -402,6 +555,42 @@ public class TargetFrameworkTest : TestBase
             EndGlobal
             """);
         return solution;
+    }
+
+    /// <summary>
+    /// A multi-targeted project deriving from a type that exists only in the matching framework of a
+    /// multi-targeted library, so it compiles only if each framework resolves the reference to its own.
+    /// </summary>
+    private string CreateProjectReferencingMultiTargetedLibrary()
+    {
+        var library = CreateProject(
+            "Dep",
+            "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks><ProduceReferenceAssembly>true</ProduceReferenceAssembly>",
+            """
+            namespace Dep
+            {
+            #if NET8_0
+                public class OnlyNet8 { }
+            #else
+                public class OnlyNetStandard { }
+            #endif
+            }
+            """);
+
+        return CreateProject(
+            "App",
+            "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>",
+            """
+            namespace App
+            {
+            #if NET8_0
+                public class Derived : Dep.OnlyNet8 { }
+            #else
+                public class Derived : Dep.OnlyNetStandard { }
+            #endif
+            }
+            """,
+            $"""<ItemGroup><ProjectReference Include="{Path.GetFullPath(library)}" /></ItemGroup>""");
     }
 
     private string CreateProject(string name, string targetFrameworks, string source, string items = "")

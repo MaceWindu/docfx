@@ -158,6 +158,14 @@ internal class MetadataItem : ICloneable
     [JsonPropertyName("items")]
     public List<MetadataItem> Items { get; set; }
 
+    /// <summary>
+    /// The target frameworks this item exists in, set only when several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> AppliesTo { get; set; }
+
     [YamlMember(Alias = "references")]
     [JsonProperty("references")]
     [JsonPropertyName("references")]

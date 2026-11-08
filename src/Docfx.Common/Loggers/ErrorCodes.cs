@@ -22,6 +22,11 @@ public static class ErrorCodes
         public const string FatalError = "FatalError";
     }
 
+    public static class Metadata
+    {
+        public const string TargetFrameworksNotSupported = "TargetFrameworksNotSupported";
+    }
+
     public static class Toc
     {
         public const string InvalidMarkdownToc = "InvalidMarkdownToc";

@@ -682,6 +682,20 @@
             "type": "string",
             "description": "The target framework to document projects at, e.g. `net8.0`. Unlike the `TargetFramework` MSBuild property in `properties`, it applies only to the projects this metadata item documents, not to the projects they reference."
           },
+          "targetFrameworks": {
+            "description": "The target frameworks to document together, or `*` for every framework a project targets. Each API gets one page, which states the frameworks it exists in; the first framework listed provides the content of an API that exists in several. Mutually exclusive with `targetFramework`.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
           "disableGitFeatures": {
             "type": "boolean",
             "default": false,
