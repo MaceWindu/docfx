@@ -60,6 +60,10 @@
     "namespaceLayout": "nested",
     "enumSortOrder": "declaringOrder",
     "outputFormat": "apiPage",
+    "targetFrameworks": [
+      "net8.0",
+      "netstandard2.0"
+    ],
     "output": "obj/apipage"
   }
 ]

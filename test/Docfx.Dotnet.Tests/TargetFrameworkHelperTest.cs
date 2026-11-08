@@ -70,19 +70,35 @@ public class TargetFrameworkHelperTest
     }
 
     [Theory]
-    [InlineData("net8.0", true)]
-    [InlineData("net8.0-windows", true)]
-    [InlineData("net8.0-windows10.0.19041.0", true)]
-    [InlineData("net8.0-android34", true)]
-    [InlineData("modern", true)]
-    [InlineData("net", true)]
-    // a platform version that is not one would otherwise match every version of its platform
-    [InlineData("net8.0-windows10.0.19041.O", false)]
-    [InlineData("net8.0-windows10.0.19041.0.1", false)]
-    [InlineData("net8.0-windows10..0", false)]
-    public void IsValid(string targetFramework, bool expected)
+    [InlineData("net8.0", "NET", "NETCOREAPP", "NET8_0", "NET8_0_OR_GREATER", "NET7_0_OR_GREATER")]
+    [InlineData("net10.0", "NET10_0_OR_GREATER", "NET10_0")]
+    [InlineData("netstandard2.0", "NETSTANDARD", "NETSTANDARD2_0", "NETSTANDARD1_6_OR_GREATER")]
+    [InlineData("netcoreapp3.1", "NETCOREAPP", "NETCOREAPP3_1")]
+    [InlineData("net462", "NETFRAMEWORK", "NET462", "NET461_OR_GREATER")]
+    [InlineData(null, "NET", "NETFRAMEWORK", "DEBUG", "NET8_0_OR_GREATER")]
+    public void GetTargetFrameworkFromSymbols(string expected, params string[] symbols)
     {
-        TargetFrameworkHelper.IsValid(targetFramework).Should().Be(expected);
+        TargetFrameworkHelper.GetTargetFrameworkFromSymbols(symbols).Should().Be(expected);
+    }
+
+    [Fact]
+    public void GetTargetFrameworkFromAttribute()
+    {
+        var compilation = CompilationHelper.CreateCompilationFromCSharpCode(
+            """[assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.1")]""",
+            new Dictionary<string, string>(),
+            "Lib");
+
+        TargetFrameworkHelper.GetTargetFrameworkFromAttribute(compilation.Assembly).Should().Be("netstandard2.1");
+    }
+
+    [Theory]
+    [InlineData("""{ "targetFrameworks": "*" }""", new[] { "*" })]
+    [InlineData("""{ "targetFrameworks": [ "net8.0", "net462" ] }""", new[] { "net8.0", "net462" })]
+    public void TargetFrameworksIsReadFromAStringOrAnArray(string json, string[] expected)
+    {
+        Newtonsoft.Json.JsonConvert.DeserializeObject<MetadataJsonItemConfig>(json).TargetFrameworks.Should().Equal(expected);
+        System.Text.Json.JsonSerializer.Deserialize<MetadataJsonItemConfig>(json).TargetFrameworks.Should().Equal(expected);
     }
 
     [Theory]

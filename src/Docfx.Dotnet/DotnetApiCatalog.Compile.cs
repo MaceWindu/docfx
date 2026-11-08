@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
@@ -19,7 +19,7 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static async Task<List<(IAssemblySymbol symbol, Compilation compilation)>> Compile(ExtractMetadataConfig config)
+    private static async Task<(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, Dictionary<Compilation, string>? frameworks)> Compile(ExtractMetadataConfig config)
     {
         var files = config.Files?.Select(s => new FileInformation(s))
             .GroupBy(f => f.Type)
@@ -38,18 +38,19 @@ partial class DotnetApiCatalog
         }
 
         var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
-        if (config.TargetFramework is not null && !hasProjectInput)
+        var targetFrameworkOption = config.TargetFramework is not null ? "targetFramework" : config.TargetFrameworks is not null ? "targetFrameworks" : null;
+        if (targetFrameworkOption is not null && !hasProjectInput)
         {
-            Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
+            Logger.LogInfo($"'{targetFrameworkOption}' applies to project and solution input only, and this metadata item has none.");
         }
 
         // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
-        if (config.TargetFramework is not null && hasProjectInput &&
+        if (targetFrameworkOption is not null && hasProjectInput &&
             msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
         {
             var onlyOne = propertyName.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) ? " and leaves only one target framework to select from" : "";
             Logger.LogWarning(
-                $"Both 'targetFramework' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
+                $"Both '{targetFrameworkOption}' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
                 + $"so it also applies to every referenced project{onlyOne}. Remove it from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
@@ -68,6 +69,16 @@ partial class DotnetApiCatalog
             ? listed.Select(f => f.NormalizedPath).ToHashSet(FilePathComparer.OSPlatformSensitiveComparer)
             : [];
         var reportedProjects = new HashSet<string>(FilePathComparer.OSPlatformSensitiveComparer);
+
+        if (config.TargetFramework is not null && config.TargetFrameworks is not null)
+        {
+            Logger.LogWarning(
+                "Both 'targetFramework' and 'targetFrameworks' are set. They are mutually exclusive, 'targetFrameworks' is ignored.",
+                code: WarningCodes.Metadata.ConflictingTargetFramework);
+        }
+
+        var targetFrameworks = config.TargetFramework is null ? config.TargetFrameworks : null;
+        var frameworks = targetFrameworks is null ? null : new Dictionary<Compilation, string>();
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -113,10 +124,9 @@ partial class DotnetApiCatalog
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
-                        (filtered is null || filtered.Contains(Path.GetFullPath(project.AbsolutePath))) &&
-                        await LoadCompilationFromProject(project.AbsolutePath, fromSolution: true) is { } compilation)
+                        (filtered is null || filtered.Contains(Path.GetFullPath(project.AbsolutePath))))
                     {
-                        projectCompilations.Add(compilation);
+                        projectCompilations.UnionWith(await LoadCompilationsFromProject(project.AbsolutePath, fromSolution: true));
                     }
                 }
 
@@ -133,10 +143,7 @@ partial class DotnetApiCatalog
         {
             foreach (var projectFile in projectFiles)
             {
-                if (await LoadCompilationFromProject(projectFile.NormalizedPath) is { } compilation)
-                {
-                    projectCompilations.Add(compilation);
-                }
+                projectCompilations.UnionWith(await LoadCompilationsFromProject(projectFile.NormalizedPath));
             }
         }
 
@@ -188,7 +195,7 @@ partial class DotnetApiCatalog
 
         if (hasCompilationError)
         {
-            return [];
+            return ([], null);
         }
 
         if (assemblies.Count <= 0)
@@ -196,9 +203,9 @@ partial class DotnetApiCatalog
             Logger.LogWarning("No .NET API project detected.");
         }
 
-        return assemblies;
+        return (assemblies, frameworks);
 
-        async Task<Compilation?> LoadCompilationFromProject(string path, bool fromSolution = false)
+        async Task<List<Compilation>> LoadCompilationsFromProject(string path, bool fromSolution = false)
         {
             var project = workspace.CurrentSolution.Projects.FirstOrDefault(
                 p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path));
@@ -229,7 +236,7 @@ partial class DotnetApiCatalog
                 }
 
                 Logger.LogInfo($"Skip unsupported project {project.FilePath}.");
-                return null;
+                return [];
             }
 
             // Selected after loading rather than passed to MSBuild as a global property: a global
@@ -250,13 +257,32 @@ partial class DotnetApiCatalog
                 }
             }
 
-            // the analyzers of the framework documented
-            if (isNewlyLoaded)
+            if (targetFrameworks is null)
             {
-                ReportAnalyzers(project);
+                return await project.GetCompilationAsync() is { } single ? [single] : [];
             }
 
-            return await project.GetCompilationAsync();
+            var compilations = new List<Compilation>();
+            foreach (var (selected, selectedFramework) in TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks))
+            {
+                if (await selected.GetCompilationAsync() is not { } compilation)
+                {
+                    continue;
+                }
+
+                if ((selectedFramework ?? TargetFrameworkHelper.GetTargetFrameworkFromAttribute(compilation.Assembly)) is not { } framework)
+                {
+                    Logger.LogWarning(
+                        $"The target framework of project '{selected.FilePath}' cannot be determined, so it is not documented.",
+                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                    continue;
+                }
+
+                frameworks![compilation] = framework;
+                compilations.Add(compilation);
+            }
+
+            return compilations;
         }
 
         // Before the project is compiled: source generators run in the compilation, and a load failure is

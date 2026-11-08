@@ -484,6 +484,22 @@ Unlike the `TargetFramework` property in [`properties`](#properties), it applies
 - **Solutions.** For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, a project that does not target the framework is logged as information. The warning is logged for each solution none of whose projects is known to target the framework, unless an earlier solution already reported all of them. A project that a listed solution also holds is reported once, as a project `src` lists.
 - **Conflict.** For project and solution input, setting `targetFramework` together with the `TargetFramework` or `TargetFrameworks` property in `properties` logs a `ConflictingTargetFramework` warning.
 
+### `targetFrameworks`
+
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": [ "net8.0", "netstandard2.0" ]
+    }
+  ]
+}
+```
+
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
+
 ### `noRestore`
 
 Do not run `dotnet restore` before building the projects. Use this option when the projects have already been restored.
