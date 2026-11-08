@@ -261,6 +261,7 @@ internal static class YamlViewModelExtensions
             Source = model.Source,
             Documentation = model.Documentation,
             AssemblyNameList = model.AssemblyNameList,
+            AppliesTo = model.AppliesTo is null ? null : [new() { Frameworks = model.AppliesTo }],
             NamespaceName = model.NamespaceName,
             Summary = model.Summary,
             Remarks = model.Remarks,

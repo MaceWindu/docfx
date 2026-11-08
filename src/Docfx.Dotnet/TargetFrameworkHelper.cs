@@ -19,12 +19,101 @@ namespace Docfx.Dotnet;
 /// </remarks>
 internal static partial class TargetFrameworkHelper
 {
-    // `net8.0` is `NET8_0`, `net462` is `NET462`: the frameworks whose names say which framework they are.
-    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$")]
+    // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows, of the
+    // platforms it ships. It defines one for any other platform too, which only the framework asked for tells
+    // apart from a project's own symbol.
+    private static readonly string[] s_platformSymbols = ["ANDROID", "BROWSER", "IOS", "MACCATALYST", "MACOS", "TIZEN", "TVOS", "WASI", "WINDOWS"];
+
+    // The platforms whose frameworks have no version, `net8.0-browser`: the SDK defines no `_OR_GREATER` symbol for
+    // them, so their symbol alone names the platform.
+    private static readonly string[] s_versionlessPlatformSymbols = ["BROWSER", "WASI"];
+
+    // The symbols the .NET SDK defines for every framework of a family; a project without any of them
+    // (a non-SDK project, or `DisableImplicitFrameworkDefines`) does not say which framework it targets.
+    private static readonly string[] s_frameworkFamilySymbols = ["NET", "NETCOREAPP", "NETFRAMEWORK", "NETSTANDARD"];
+
+    private const string AllTargetFrameworks = "*";
+
+    // The exact-version symbols only: `NET8_0_OR_GREATER`, `NET` and `NETFRAMEWORK` name no single framework.
+    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$", RegexOptions.IgnoreCase)]
     private static partial Regex TargetFrameworkSymbolRegex();
 
     [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
     private static partial Regex FrameworkNameRegex();
+
+    // `WINDOWS10_0_19041_0_OR_GREATER`: the SDK defines one for every platform version up to the one targeted.
+    [GeneratedRegex(@"^([A-Z]+)(\d+(?:_\d+)*)_OR_GREATER$")]
+    private static partial Regex PlatformVersionSymbolRegex();
+
+    /// <summary>
+    /// Returns the projects, among those loaded from the same file as <paramref name="project"/>, for each
+    /// of <paramref name="targetFrameworks"/> in that order, with the framework each one targets.
+    /// </summary>
+    /// <returns>
+    /// The projects found, which is none when the file targets none of the frameworks: unlike a single
+    /// framework, a list states what to include, so nothing else is documented in place of a missing one.
+    /// A framework is <see langword="null"/> when it can only be read from the compilation.
+    /// </returns>
+    public static List<(Project Project, string? Framework)> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks)
+    {
+        var candidates = GetProjectsFromSameFile(solution, project);
+
+        if (targetFrameworks.Contains(AllTargetFrameworks))
+        {
+            // The project the workspace opened goes first, so that the framework a project is documented
+            // at by default stays the one that provides the content.
+            return candidates
+                .OrderBy(p => p.Id == project.Id ? 0 : 1)
+                .Select(p => (p, GetTargetFrameworkFromName(p) ?? GetTargetFrameworkFromSymbols(p.ParseOptions?.PreprocessorSymbolNames ?? [])))
+                .ToList();
+        }
+
+        var selected = new List<(Project, string?)>();
+        var missing = new List<string>();
+        foreach (var targetFramework in targetFrameworks)
+        {
+            if (candidates.FirstOrDefault(p => Targets(p, targetFramework) && !selected.Any(s => s.Item1.Id == p.Id)) is { } match)
+            {
+                selected.Add((match, GetTargetFrameworkFromName(match) ?? targetFramework));
+            }
+            else
+            {
+                missing.Add(targetFramework);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            Logger.LogWarning(
+                $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.",
+                code: WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+
+        return selected;
+    }
+
+    private static List<Project> GetProjectsFromSameFile(Solution solution, Project project)
+    {
+        return solution.Projects
+            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
+            .ToList();
+    }
+
+    private static bool Targets(Project project, string targetFramework)
+    {
+        return GetTargetFrameworkFromName(project) is { } name
+            ? string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase)
+            // a project whose symbols do not say is taken as it is, as by `targetFramework`
+            : TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework) ?? true;
+    }
+
+    /// <summary>
+    /// Reads the framework back from the preprocessor symbol the .NET SDK defines for it.
+    /// </summary>
+    internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
+    {
+        return preprocessorSymbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.');
+    }
 
     /// <summary>
     /// Returns the project, among those loaded from the same file as <paramref name="project"/>, that
@@ -37,9 +126,7 @@ internal static partial class TargetFrameworkHelper
     public static async Task<(Project project, bool matched)> SelectProject(
         Solution solution, Project project, string targetFramework, ProjectFrameworks frameworks, bool fromSolution = false, bool report = true)
     {
-        var candidates = solution.Projects
-            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
-            .ToList();
+        var candidates = GetProjectsFromSameFile(solution, project);
 
         // Why MSBuild cannot say what a framework stands for, reported in the message of the project it leaves
         // unmatched: one project, one warning.
