@@ -527,6 +527,22 @@ The target framework to document projects at, e.g. `net8.0`. When it is not set,
 
 Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
 
+### `targetFrameworks`
+
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": [ "net8.0", "netstandard2.0" ]
+    }
+  ]
+}
+```
+
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
+
 ### `noRestore`
 
 Do not run `dotnet restore` before building the projects. Use this option when the projects have already been restored.

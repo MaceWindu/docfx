@@ -12,27 +12,52 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static void CreateManagedReference(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, ExtractMetadataConfig config, DotnetApiOptions options)
+    private static void CreateManagedReference(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, ExtractMetadataConfig config, DotnetApiOptions options, Dictionary<Compilation, string>? frameworks = null)
     {
         var projectMetadataList = new List<MetadataItem>();
         var filter = new SymbolFilter(config, options);
-        var extensionMethods = assemblies.SelectMany(assembly => assembly.Item1.FindExtensionMethods(filter)).ToArray();
-        var allAssemblies = new HashSet<IAssemblySymbol>(assemblies.Select(a => a.Item1), SymbolEqualityComparer.Default);
 
-        foreach (var (assembly, compilation) in assemblies)
+        // Symbols of different compilations cannot be used together, and each framework is a compilation
+        // of its own, so extension methods and the documented assemblies are worked out per framework.
+        List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
+            ? [assemblies]
+            : assemblies.GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase).Select(group => group.ToList()).ToList();
+
+        foreach (var group in frameworkGroups)
         {
-            Logger.LogInfo($"Processing {assembly.Name}");
-            var projectMetadata = assembly.Accept(new SymbolVisitorAdapter(
-                compilation, new(compilation, config.MemberLayout, allAssemblies), config, filter, extensionMethods));
+            var extensionMethods = group.SelectMany(assembly => assembly.symbol.FindExtensionMethods(filter)).ToArray();
+            var allAssemblies = new HashSet<IAssemblySymbol>(group.Select(a => a.symbol), SymbolEqualityComparer.Default);
 
-            if (projectMetadata != null)
-                projectMetadataList.Add(projectMetadata);
+            foreach (var (assembly, compilation) in group)
+            {
+                Logger.LogInfo($"Processing {assembly.Name}");
+                var projectMetadata = assembly.Accept(new SymbolVisitorAdapter(
+                    compilation, new(compilation, config.MemberLayout, allAssemblies), config, filter, extensionMethods));
+
+                if (projectMetadata != null)
+                {
+                    if (frameworks is not null)
+                    {
+                        TagAppliesTo(projectMetadata, frameworks[compilation]);
+                    }
+
+                    projectMetadataList.Add(projectMetadata);
+                }
+            }
         }
 
         Logger.LogInfo($"Creating output...");
         var allMembers = new Dictionary<string, MetadataItem>();
         var allReferences = new Dictionary<string, ReferenceItem>();
-        MergeMembers(allMembers, projectMetadataList);
+        if (frameworks is null)
+        {
+            MergeMembers(allMembers, projectMetadataList);
+        }
+        else
+        {
+            MergeTargetFrameworks(allMembers, projectMetadataList);
+        }
+
         MergeReferences(allReferences, projectMetadataList);
 
         if (allMembers.Count == 0)
@@ -232,6 +257,77 @@ partial class DotnetApiCatalog
             }
 
             Logger.Log(LogLevel.Warning, $"Ignore duplicated member {node.Type}:{node.Name} from {node.Source?.Path} as it already exists in {existingNode.Source?.Path}.");
+            return false;
+        }
+    }
+
+    internal static void TagAppliesTo(MetadataItem item, string framework)
+    {
+        item.AppliesTo = [framework];
+        foreach (var child in item.Items ?? [])
+        {
+            TagAppliesTo(child, framework);
+        }
+    }
+
+    /// <summary>
+    /// Merges the same APIs compiled for several frameworks into one item per UID, recording the frameworks
+    /// each one exists in. Items must be given primary framework first: the first occurrence of a UID
+    /// provides its content.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="MergeMembers"/>, a repeated UID is expected here for every kind of member, and the
+    /// children of every kind are unioned, as a struct or interface can gain members in one framework too.
+    /// </remarks>
+    internal static void MergeTargetFrameworks(Dictionary<string, MetadataItem> result, List<MetadataItem> items)
+    {
+        foreach (var item in items)
+        {
+            MergeNode(item);
+        }
+
+        bool MergeNode(MetadataItem node)
+        {
+            if (node.Type is MemberType.Assembly)
+            {
+                foreach (var item in node.Items ?? [])
+                {
+                    MergeNode(item);
+                }
+                return false;
+            }
+
+            if (!result.TryGetValue(node.Name, out var existingNode))
+            {
+                result.Add(node.Name, node);
+                foreach (var item in node.Items ?? [])
+                {
+                    MergeNode(item);
+                }
+                return true;
+            }
+
+            var framework = node.AppliesTo[0];
+            var isSameFramework = existingNode.AppliesTo.Contains(framework, StringComparer.OrdinalIgnoreCase);
+            if (isSameFramework && node.Type is not (MemberType.Namespace or MemberType.Class))
+            {
+                Logger.Log(LogLevel.Warning, $"Ignore duplicated member {node.Type}:{node.Name} from {node.Source?.Path} as it already exists in {existingNode.Source?.Path}.");
+                return false;
+            }
+
+            if (!isSameFramework)
+            {
+                existingNode.AppliesTo.Add(framework);
+            }
+
+            foreach (var item in node.Items ?? [])
+            {
+                if (MergeNode(item))
+                {
+                    existingNode.Items ??= [];
+                    existingNode.Items.Add(item);
+                }
+            }
             return false;
         }
     }

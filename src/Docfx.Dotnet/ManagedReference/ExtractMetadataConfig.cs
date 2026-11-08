@@ -49,6 +49,8 @@ internal class ExtractMetadataConfig
 
     public string TargetFramework { get; init; }
 
+    public List<string> TargetFrameworks { get; init; }
+
     public bool AllowCompilationErrors { get; init; }
 
     public static bool UseClrTypeNames { get; set; }

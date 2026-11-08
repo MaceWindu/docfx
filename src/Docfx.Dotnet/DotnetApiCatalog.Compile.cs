@@ -18,7 +18,7 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static async Task<List<(IAssemblySymbol symbol, Compilation compilation)>> Compile(ExtractMetadataConfig config)
+    private static async Task<(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, Dictionary<Compilation, string>? frameworks)> Compile(ExtractMetadataConfig config)
     {
         var files = config.Files?.Select(s => new FileInformation(s))
             .GroupBy(f => f.Type)
@@ -27,14 +27,25 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
-        if (config.TargetFramework is not null &&
+        var targetFrameworkOption = config.TargetFramework is not null ? "targetFramework" : config.TargetFrameworks is not null ? "targetFrameworks" : null;
+        if (targetFrameworkOption is not null &&
             msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
         {
             Logger.LogWarning(
-                $"Both 'targetFramework' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
+                $"Both '{targetFrameworkOption}' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
                 + "so it also applies to every referenced project and leaves only one target framework to select from. Remove it from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
+
+        if (config.TargetFramework is not null && config.TargetFrameworks is not null)
+        {
+            Logger.LogWarning(
+                "Both 'targetFramework' and 'targetFrameworks' are set. They are mutually exclusive, 'targetFrameworks' is ignored.",
+                code: WarningCodes.Metadata.ConflictingTargetFramework);
+        }
+
+        var targetFrameworks = config.TargetFramework is null ? config.TargetFrameworks : null;
+        var frameworks = targetFrameworks is null ? null : new Dictionary<Compilation, string>();
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -74,10 +85,9 @@ partial class DotnetApiCatalog
                 Logger.LogInfo($"Loading solution {solution}");
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
-                    if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
-                        await LoadCompilationFromProject(project.AbsolutePath) is { } compilation)
+                    if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat)
                     {
-                        projectCompilations.Add(compilation);
+                        projectCompilations.UnionWith(await LoadCompilationsFromProject(project.AbsolutePath));
                     }
                 }
             }
@@ -87,10 +97,7 @@ partial class DotnetApiCatalog
         {
             foreach (var projectFile in projectFiles)
             {
-                if (await LoadCompilationFromProject(projectFile.NormalizedPath) is { } compilation)
-                {
-                    projectCompilations.Add(compilation);
-                }
+                projectCompilations.UnionWith(await LoadCompilationsFromProject(projectFile.NormalizedPath));
             }
         }
 
@@ -142,7 +149,7 @@ partial class DotnetApiCatalog
 
         if (hasCompilationError)
         {
-            return [];
+            return ([], null);
         }
 
         if (assemblies.Count <= 0)
@@ -150,9 +157,9 @@ partial class DotnetApiCatalog
             Logger.LogWarning("No .NET API project detected.");
         }
 
-        return assemblies;
+        return (assemblies, frameworks);
 
-        async Task<Compilation?> LoadCompilationFromProject(string path)
+        async Task<List<Compilation>> LoadCompilationsFromProject(string path)
         {
             var project = workspace.CurrentSolution.Projects.FirstOrDefault(
                 p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path));
@@ -208,10 +215,35 @@ partial class DotnetApiCatalog
             if (!project.SupportsCompilation)
             {
                 Logger.LogInfo($"Skip unsupported project {project.FilePath}.");
-                return null;
+                return [];
             }
 
-            return await project.GetCompilationAsync();
+            if (targetFrameworks is null)
+            {
+                return await project.GetCompilationAsync() is { } single ? [single] : [];
+            }
+
+            var compilations = new List<Compilation>();
+            foreach (var (selected, selectedFramework) in TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks))
+            {
+                if (await selected.GetCompilationAsync() is not { } compilation)
+                {
+                    continue;
+                }
+
+                if ((selectedFramework ?? TargetFrameworkHelper.GetTargetFrameworkFromAttribute(compilation.Assembly)) is not { } framework)
+                {
+                    Logger.LogWarning(
+                        $"The target framework of project '{selected.FilePath}' cannot be determined, so it is not documented.",
+                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                    continue;
+                }
+
+                frameworks![compilation] = framework;
+                compilations.Add(compilation);
+            }
+
+            return compilations;
         }
     }
 }

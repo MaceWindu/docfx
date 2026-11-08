@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.RegularExpressions;
 using Docfx.Common;
 using Microsoft.CodeAnalysis;
 
@@ -18,8 +19,116 @@ namespace Docfx.Dotnet;
 /// framework can be read from. A project that targets a single framework is not given the suffix,
 /// and its framework is recognized by the preprocessor symbol the .NET SDK defines for it instead.
 /// </remarks>
-internal static class TargetFrameworkHelper
+internal static partial class TargetFrameworkHelper
 {
+    private const string AllTargetFrameworks = "*";
+
+    // The exact-version symbols only: `NET8_0_OR_GREATER`, `NET` and `NETFRAMEWORK` name no single framework.
+    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$", RegexOptions.IgnoreCase)]
+    private static partial Regex TargetFrameworkSymbolRegex();
+
+    [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
+    private static partial Regex FrameworkNameRegex();
+
+    /// <summary>
+    /// Returns the projects, among those loaded from the same file as <paramref name="project"/>, for each
+    /// of <paramref name="targetFrameworks"/> in that order, with the framework each one targets.
+    /// </summary>
+    /// <returns>
+    /// The projects found, which is none when the file targets none of the frameworks: unlike a single
+    /// framework, a list states what to include, so nothing else is documented in place of a missing one.
+    /// A framework is <see langword="null"/> when it can only be read from the compilation.
+    /// </returns>
+    public static List<(Project Project, string? Framework)> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks)
+    {
+        var candidates = GetProjectsFromSameFile(solution, project);
+
+        if (targetFrameworks.Contains(AllTargetFrameworks))
+        {
+            // The project the workspace opened goes first, so that the framework a project is documented
+            // at by default stays the one that provides the content.
+            return candidates
+                .OrderBy(p => p.Id == project.Id ? 0 : 1)
+                .Select(p => (p, GetTargetFrameworkFromName(p) ?? GetTargetFrameworkFromSymbols(p.ParseOptions?.PreprocessorSymbolNames ?? [])))
+                .ToList();
+        }
+
+        var selected = new List<(Project, string?)>();
+        var missing = new List<string>();
+        foreach (var targetFramework in targetFrameworks)
+        {
+            if (candidates.FirstOrDefault(p => Targets(p, targetFramework)) is { } match)
+            {
+                selected.Add((match, GetTargetFrameworkFromName(match) ?? targetFramework));
+            }
+            else
+            {
+                missing.Add(targetFramework);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            Logger.LogWarning(
+                $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.",
+                code: WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+
+        return selected;
+    }
+
+    private static List<Project> GetProjectsFromSameFile(Solution solution, Project project)
+    {
+        return solution.Projects
+            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
+            .ToList();
+    }
+
+    private static bool Targets(Project project, string targetFramework)
+    {
+        return GetTargetFrameworkFromName(project) is { } name
+            ? string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase)
+            : DefinesTargetFrameworkSymbol(project, targetFramework);
+    }
+
+    /// <summary>
+    /// Reads the framework back from the preprocessor symbol the .NET SDK defines for it.
+    /// </summary>
+    internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
+    {
+        return preprocessorSymbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.');
+    }
+
+    /// <summary>
+    /// Reads the framework from the <c>TargetFrameworkAttribute</c> of an assembly, for a project whose
+    /// preprocessor symbols do not name it.
+    /// </summary>
+    internal static string? GetTargetFrameworkFromAttribute(IAssemblySymbol assembly)
+    {
+        var attribute = assembly.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "System.Runtime.Versioning.TargetFrameworkAttribute");
+        return attribute?.ConstructorArguments.FirstOrDefault().Value is string frameworkName ? ParseFrameworkName(frameworkName) : null;
+    }
+
+    /// <summary>
+    /// Converts a framework name such as <c>.NETCoreApp,Version=v8.0</c> to its moniker, <c>net8.0</c>.
+    /// </summary>
+    internal static string? ParseFrameworkName(string frameworkName)
+    {
+        var match = FrameworkNameRegex().Match(frameworkName);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var (major, minor) = (match.Groups[2].Value, match.Groups[3].Value);
+        return match.Groups[1].Value.ToUpperInvariant() switch
+        {
+            "NETSTANDARD" => $"netstandard{major}.{minor}",
+            "NETCOREAPP" => int.Parse(major) >= 5 ? $"net{major}.{minor}" : $"netcoreapp{major}.{minor}",
+            _ => $"net{major}{minor}{match.Groups[4].Value}",
+        };
+    }
+
     /// <summary>
     /// Returns the project, among those loaded from the same file as <paramref name="project"/>, that
     /// targets <paramref name="targetFramework"/>. Falls back to <paramref name="project"/>, with a
@@ -27,9 +136,7 @@ internal static class TargetFrameworkHelper
     /// </summary>
     public static Project SelectProject(Solution solution, Project project, string targetFramework)
     {
-        var candidates = solution.Projects
-            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
-            .ToList();
+        var candidates = GetProjectsFromSameFile(solution, project);
 
         if (candidates.Count > 1)
         {
