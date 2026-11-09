@@ -662,3 +662,7 @@ Choose the URL pattern of the generated link for `View Source` and `Improve this
 ### `_noindex`
 
 File(s) specified are not returned in search results
+
+### `_disableApiAppliesTo`
+
+Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks).

@@ -14,8 +14,8 @@
 <a id="{{id}}" data-uid="{{uid}}" data-overload></a>
 {{/overload}}
 
-<h3 id="{{id}}" data-uid="{{uid}}">
-  {{name.0.value}}
+<h3 id="{{id}}" data-uid="{{uid}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
+  {{name.0.value}}{{#appliesToBadge}} <span class="badge text-bg-secondary applies-to">{{appliesToBadge}}</span>{{/appliesToBadge}}
   {{#sourceurl}}<a class="header-action link-secondary" title="View source" href="{{sourceurl}}"><i class="bi bi-code-slash"></i></a>{{/sourceurl}}
 </h3>
 
