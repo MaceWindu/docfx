@@ -50,6 +50,7 @@ public static class Constants
         public const string TopicHref = "topicHref";
         public const string TopicUid = "topicUid";
         public const string Platform = "platform";
+        public const string AppliesTo = "appliesTo";
         public const string Parent = "parent";
         public const string Children = "children";
         public const string Namespace = "namespace";
