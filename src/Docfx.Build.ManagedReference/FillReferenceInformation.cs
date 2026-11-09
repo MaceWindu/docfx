@@ -88,6 +88,11 @@ public class FillReferenceInformation : BaseDocumentBuildStep
         r.Additional["summary"] = item.Summary;
         r.Additional["type"] = item.Type;
         r.Additional["platform"] = item.Platform;
+        if (item.AppliesTo != null)
+        {
+            r.Additional[Constants.PropertyName.AppliesTo] = item.AppliesTo;
+        }
+
         r.Additional[Constants.PropertyName.IsEii] = item.IsExplicitInterfaceImplementation;
     }
 
@@ -102,6 +107,7 @@ public class FillReferenceInformation : BaseDocumentBuildStep
                 Type = item.Type,
                 Syntax = item.Syntax,
                 Platform = item.Platform,
+                AppliesTo = item.AppliesTo,
                 File = file,
                 Metadata = item.Metadata,
             };
@@ -126,6 +132,7 @@ public class FillReferenceInformation : BaseDocumentBuildStep
         public MemberType? Type { get; set; }
         public SyntaxDetailViewModel Syntax { get; set; }
         public List<string> Platform { get; set; }
+        public List<AppliesToViewModel> AppliesTo { get; set; }
         public string File { get; set; }
         public Dictionary<string, object> Metadata { get; set; }
         public bool IsExplicitInterfaceImplementation { get; set; }

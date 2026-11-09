@@ -185,6 +185,11 @@ public class ApiBuildOutput
     [JsonPropertyName("platform")]
     public List<string> Platform { get; set; }
 
+    [YamlMember(Alias = Constants.PropertyName.AppliesTo)]
+    [JsonProperty(Constants.PropertyName.AppliesTo)]
+    [JsonPropertyName(Constants.PropertyName.AppliesTo)]
+    public List<AppliesToViewModel> AppliesTo { get; set; }
+
     [YamlMember(Alias = "attributes")]
     [JsonProperty("attributes")]
     [JsonPropertyName("attributes")]
@@ -275,6 +280,7 @@ public class ApiBuildOutput
             ExtensionMethods = GetReferenceList(model.ExtensionMethods, references, model.SupportedLanguages),
             Conceptual = model.Conceptual,
             Platform = model.Platform,
+            AppliesTo = model.AppliesTo,
             Attributes = model.Attributes,
             Metadata = model.Metadata.Concat(metadata.Where(p => !model.Metadata.ContainsKey(p.Key))).ToDictionary(p => p.Key, p => p.Value),
         };

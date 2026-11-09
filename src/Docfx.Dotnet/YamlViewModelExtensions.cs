@@ -41,6 +41,7 @@ internal static class YamlViewModelExtensions
         {
             Name = item.Name,
             DisplayNames = item.DisplayNames,
+            AppliesTo = item.AppliesTo,
             Items = null
         };
         if (item.Items == null)
@@ -79,6 +80,7 @@ internal static class YamlViewModelExtensions
             Name = item.Name,
             DisplayNames = item.DisplayNames,
             Type = item.Type,
+            AppliesTo = item.AppliesTo,
             Items = null
         };
         if (item.Type == MemberType.Toc || item.Type == MemberType.Namespace)
@@ -146,6 +148,11 @@ internal static class YamlViewModelExtensions
             // kind to report. Everything else is one of the API kinds.
             Type = item.Type is MemberType.Toc ? null : item.Type.ToString(),
         };
+
+        if (ToAppliesToViewModel(item) is { } appliesTo)
+        {
+            result.Metadata[Constants.PropertyName.AppliesTo] = appliesTo;
+        }
 
         if (item.Type is MemberType.Namespace)
         {
@@ -243,6 +250,11 @@ internal static class YamlViewModelExtensions
         return result;
     }
 
+    private static List<AppliesToViewModel> ToAppliesToViewModel(MetadataItem model)
+    {
+        return model.AppliesTo is null ? null : [new() { Frameworks = model.AppliesTo }];
+    }
+
     public static ItemViewModel ToItemViewModel(this MetadataItem model, ExtractMetadataConfig config)
     {
         if (model == null)
@@ -267,7 +279,7 @@ internal static class YamlViewModelExtensions
             Source = model.Source,
             Documentation = model.Documentation,
             AssemblyNameList = model.AssemblyNameList,
-            AppliesTo = model.AppliesTo is null ? null : [new() { Frameworks = model.AppliesTo }],
+            AppliesTo = ToAppliesToViewModel(model),
             NamespaceName = model.NamespaceName,
             NamespaceAssembly = model.NamespaceAssembly,
             Summary = model.Summary,
