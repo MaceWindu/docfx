@@ -280,6 +280,11 @@ public class ApiReferenceBuildOutput
         output.Metadata["type"] = vm.Type;
         output.Metadata["summary"] = vm.Summary;
         output.Metadata["platform"] = vm.Platform;
+        if (vm.AppliesTo != null)
+        {
+            output.Metadata[Constants.PropertyName.AppliesTo] = vm.AppliesTo;
+        }
+
         return output;
     }
 

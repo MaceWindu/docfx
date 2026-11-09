@@ -9,10 +9,13 @@ exports.transform = function (model) {
   if (!model) return null;
 
   langs = model.langs;
+  var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
   handleItem(model, model._gitContribute, model._gitUrlPattern);
+  if (showAppliesTo) handleAppliesTo(model);
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
+      if (showAppliesTo) handleAppliesTo(item, model);
     });
   }
 
@@ -67,6 +70,55 @@ exports.getBookmarks = function (model, ignoreChildren) {
 exports.groupChildren = groupChildren;
 exports.getTypePropertyName = getTypePropertyName;
 exports.getCategory = getCategory;
+
+function getAppliesToFrameworks(vm) {
+  var frameworks = [];
+  (vm.appliesTo || []).forEach(function (group) {
+    (group.frameworks || []).forEach(function (framework) {
+      if (frameworks.indexOf(framework) < 0) {
+        frameworks.push(framework);
+      }
+    });
+  });
+  return frameworks;
+}
+
+function getFrameworkLabel(framework) {
+  var match = /^netstandard(\d+\.\d+)$/.exec(framework);
+  if (match) return '.NET Standard ' + match[1];
+
+  match = /^netcoreapp(\d+\.\d+)$/.exec(framework);
+  if (match) return '.NET Core ' + match[1];
+
+  match = /^net(\d+\.\d+)(-.+)?$/.exec(framework);
+  if (match) return '.NET ' + match[1] + (match[2] || '');
+
+  match = /^net(\d)(\d)(\d)?$/.exec(framework);
+  if (match) return '.NET Framework ' + match[1] + '.' + match[2] + (match[3] ? '.' + match[3] : '');
+
+  return framework;
+}
+
+function handleAppliesTo(vm, parent) {
+  // set to empty so that mustache does not look up the values of the enclosing type
+  vm.appliesToData = "";
+  vm.appliesToText = "";
+  vm.appliesToBadge = "";
+
+  var frameworks = getAppliesToFrameworks(vm);
+  if (frameworks.length === 0) {
+    return;
+  }
+
+  var text = frameworks.map(getFrameworkLabel).join(', ');
+  vm.appliesToData = frameworks.join(' ');
+  if (!parent) {
+    vm.appliesToText = text;
+  } else if (frameworks.slice().sort().join(' ') !== getAppliesToFrameworks(parent).sort().join(' ')) {
+    // A member is only marked when it differs from its type, or every member would carry the same badge.
+    vm.appliesToBadge = text;
+  }
+}
 
 function groupChildren(model, category) {
   if (!model || !model.type) {
