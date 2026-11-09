@@ -167,6 +167,14 @@ internal class ResolveReference : IResolverPipeline
                 yield return current.Syntax.Return.Type;
             }
         }
+
+        foreach (var variant in current.Variants ?? [])
+        {
+            foreach (var key in GetReferenceKeys(variant.Content))
+            {
+                yield return key;
+            }
+        }
     }
 
     private static IEnumerable<string> GetReferenceKeys(ReferenceItem reference)

@@ -259,6 +259,12 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [JsonPropertyName(Constants.PropertyName.AppliesTo)]
     public List<AppliesToViewModel> AppliesTo { get; set; }
 
+    [YamlMember(Alias = "variants")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("variants")]
+    [JsonPropertyName("variants")]
+    public List<ItemVariantViewModel> Variants { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.Namespace)]
     [JsonProperty(Constants.PropertyName.Namespace)]
     [JsonPropertyName(Constants.PropertyName.Namespace)]

@@ -2,6 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using AwesomeAssertions;
+using Docfx.Common;
+using Docfx.DataContracts.ManagedReference;
+using Docfx.Tests.Common;
 using Xunit;
 
 namespace Docfx.Dotnet.Tests;
@@ -84,6 +87,99 @@ public class TargetFrameworkMergeTest
 
         result["N.S"].Items.Select(i => i.Name).Should().Equal("N.S.A");
         result.Should().NotContainKey("N.S.B");
+    }
+
+    [Fact]
+    public void IdenticalContentHasNoVariant()
+    {
+        var result = Merge(
+            ("namespace N { /// <summary>same</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>same</summary>\npublic class T { } }", Second));
+
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AVariantHoldsOnlyWhatDiffers()
+    {
+        var result = Merge(
+            ("namespace N { /// <summary>first</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>last</summary>\npublic class T { } }", Second));
+
+        var variant = result["N.T"].Variants.Should().ContainSingle().Subject;
+        variant.Frameworks.Should().Equal(Second);
+        variant.Content.Summary.Should().Contain("last");
+        variant.Content.Syntax.Should().BeNull();
+        variant.Content.Inheritance.Should().BeNull();
+    }
+
+    [Fact]
+    public void FrameworksWithTheSameDifferenceShareAVariant()
+    {
+        var result = Merge(
+            ("namespace N { /// <summary>one</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Third));
+
+        var variant = result["N.T"].Variants.Should().ContainSingle().Subject;
+        variant.Frameworks.Should().Equal(Second, Third);
+    }
+
+    [Fact]
+    public void DifferentDifferencesAreSeparateVariants()
+    {
+        var result = Merge(
+            ("namespace N { /// <summary>one</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second),
+            ("namespace N { /// <summary>three</summary>\npublic class T { } }", Third));
+
+        result["N.T"].Variants.Select(v => v.Frameworks.Single()).Should().Equal(Second, Third);
+    }
+
+    [Fact]
+    public void ADifferentSignatureIsAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public class T { public int M() => 0; } }", First),
+            ("namespace N { public class T { public long M() => 0; } }", Second));
+
+        var variant = result["N.T.M"].Variants.Should().ContainSingle().Subject;
+        variant.Content.Syntax.Return.Type.Should().Be("System.Int64");
+    }
+
+    [Fact]
+    public void ADifferentInheritanceChainIsAVariantNotAUnion()
+    {
+        var result = Merge(
+            ("namespace N { public class B1 { } public class T : B1 { } }", First),
+            ("namespace N { public class B2 { } public class T : B2 { } }", Second));
+
+        result["N.T"].Inheritance.Should().Contain("N.B1").And.NotContain("N.B2");
+        result["N.T"].Variants.Should().ContainSingle().Which.Content.Inheritance.Should().Contain("N.B2");
+    }
+
+    [Fact]
+    public void ImplementedInterfacesAndInheritedMembersAreUnioned()
+    {
+        var result = Merge(
+            ("namespace N { public interface I { } public class B { } public class T : B { } }", First),
+            ("namespace N { public interface I { } public class B { public void Extra() { } } public class T : B, I { } }", Second));
+
+        result["N.T"].Implements.Should().Contain("N.I");
+        result["N.T"].InheritedMembers.Should().Contain("N.B.Extra");
+    }
+
+    [Fact]
+    public void AKindThatDiffersWarnsAndTheFirstFrameworkWins()
+    {
+        using var listener = new TestListenerScope();
+
+        var result = Merge(
+            ("namespace N { public class K { } }", First),
+            ("namespace N { public struct K { } }", Second));
+
+        result["N.K"].Type.Should().Be(MemberType.Class);
+        listener.GetItemsByLogLevel(LogLevel.Warning).Should().ContainSingle(x => x.Code == WarningCodes.Metadata.ApiKindDiffersBetweenFrameworks);
     }
 
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
