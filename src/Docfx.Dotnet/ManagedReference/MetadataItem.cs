@@ -184,6 +184,14 @@ internal class MetadataItem : ICloneable
     [System.Text.Json.Serialization.JsonIgnore]
     public List<string> AppliesTo { get; set; }
 
+    /// <summary>
+    /// What differs in the frameworks that do not share the content of this item.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<MetadataItemVariant> Variants { get; set; }
+
     [YamlMember(Alias = "references")]
     [JsonProperty("references")]
     [JsonPropertyName("references")]

@@ -31,6 +31,7 @@ public static class WarningCodes
         public const string FailedToLoadAnalyzer = "FailedToLoadAnalyzer";
         public const string TargetFrameworkNotFound = "TargetFrameworkNotFound";
         public const string ConflictingTargetFramework = "ConflictingTargetFramework";
+        public const string ApiKindDiffersBetweenFrameworks = "ApiKindDiffersBetweenFrameworks";
     }
 
     public static class Markdown

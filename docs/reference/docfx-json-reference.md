@@ -529,7 +529,7 @@ Unlike the `TargetFramework` property in [`properties`](#properties), it applies
 
 ### `targetFrameworks`
 
-The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several.
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML, and implemented interfaces, inherited members and extension methods are combined.
 
 ```json
 {

@@ -239,7 +239,33 @@ public class TargetFrameworkTest : TestBase
 
         AssertWarnings(listener);
         Assert.Equal([primary, other], AppliesTo("App.Derived.yml"));
-        Assert.Contains(expectedBase, Page("App.Derived.yml").Items[0].Inheritance);
+
+        var page = Page("App.Derived.yml");
+        Assert.Contains(expectedBase, page.Items[0].Inheritance);
+
+        // The base type of the other framework is a difference, and the page keeps a reference to link it.
+        var otherBase = primary == "net8.0" ? "Dep.OnlyNetStandard" : "Dep.OnlyNet8";
+        var variant = Assert.Single(page.Items[0].Variants);
+        Assert.Equal([other], variant.AppliesTo.Single().Frameworks);
+        Assert.Contains(otherBase, variant.Inheritance);
+        Assert.Contains(page.References, r => r.Uid == otherBase);
+    }
+
+    [Fact]
+    public async Task TargetFrameworksRecordsOnlyWhatDiffersAsAVariant()
+    {
+        var project = CreateMultiTargetedProject();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net8.0", "netstandard2.0"] });
+
+        var item = Page("Lib.Shared.yml").Items[0];
+        Assert.Equal("net8.0", item.Summary.Trim());
+
+        var variant = Assert.Single(item.Variants);
+        Assert.Equal(["netstandard2.0"], variant.AppliesTo.Single().Frameworks);
+        Assert.Equal("netstandard2.0", variant.Summary.Trim());
+        Assert.Null(variant.Syntax);
+        Assert.Null(variant.Inheritance);
     }
 
     [Fact]
@@ -268,7 +294,7 @@ public class TargetFrameworkTest : TestBase
         AssertWarnings(listener);
         var extensions = Page("Ext.Target.yml").Items[0].ExtensionMethods;
         Assert.Contains(extensions, x => x.Contains("OnlyNet8"));
-        Assert.DoesNotContain(extensions, x => x.Contains("OnlyNetStandard"));
+        Assert.Contains(extensions, x => x.Contains("OnlyNetStandard"));
         Assert.Equal(["netstandard2.0"], AppliesTo("Ext.Extensions.yml", "Ext.Extensions.OnlyNetStandard(Ext.Target)"));
     }
 

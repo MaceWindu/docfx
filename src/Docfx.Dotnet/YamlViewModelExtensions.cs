@@ -280,6 +280,7 @@ internal static class YamlViewModelExtensions
             Documentation = model.Documentation,
             AssemblyNameList = model.AssemblyNameList,
             AppliesTo = ToAppliesToViewModel(model),
+            Variants = model.Variants?.Select(ToItemVariantViewModel).ToList(),
             NamespaceName = model.NamespaceName,
             NamespaceAssembly = model.NamespaceAssembly,
             Summary = model.Summary,
@@ -344,6 +345,24 @@ internal static class YamlViewModelExtensions
         }
 
         return result;
+    }
+
+    private static ItemVariantViewModel ToItemVariantViewModel(MetadataItemVariant variant)
+    {
+        var content = variant.Content;
+        return new ItemVariantViewModel
+        {
+            AppliesTo = [new() { Frameworks = variant.Frameworks }],
+            Summary = content.Summary,
+            Remarks = content.Remarks,
+            Examples = content.Examples,
+            Syntax = content.Syntax.ToSyntaxDetailViewModel(),
+            Overridden = content.Overridden,
+            Exceptions = content.Exceptions,
+            SeeAlsos = content.SeeAlsos,
+            Inheritance = content.Inheritance,
+            Attributes = content.Attributes,
+        };
     }
 
     public static SyntaxDetailViewModel ToSyntaxDetailViewModel(this SyntaxDetail model)
