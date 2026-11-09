@@ -267,6 +267,14 @@ partial class DotnetApiCatalog
             if (!isSameFramework)
             {
                 existingNode.AppliesTo.Add(framework);
+                TargetFrameworkVariants.Merge(existingNode, node, framework);
+
+                if (node.Type != existingNode.Type)
+                {
+                    Logger.LogWarning(
+                        $"{node.Name} is a {node.Type} in '{framework}' but a {existingNode.Type} in '{existingNode.AppliesTo[0]}'. It is documented as a {existingNode.Type}.",
+                        code: WarningCodes.Metadata.ApiKindDiffersBetweenFrameworks);
+                }
             }
 
             foreach (var item in node.Items ?? [])
