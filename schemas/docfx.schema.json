@@ -696,6 +696,51 @@
               }
             ]
           },
+          "axes": {
+            "description": "An axis besides the target framework along which the projects of this item differ, such as the version of a dependency. Each project gets the first value whose files match it, and APIs that several values share get one page. One axis is supported.",
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [ "name", "values" ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The name of the axis, e.g. `EF Core`."
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "The values of the axis, in the order they are shown.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [ "id", "files" ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "The id of the value, e.g. `ef9`."
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "The name the value is shown with, e.g. `EF Core 9`. Defaults to the id."
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Glob patterns of the project files that have this value, relative to the `src` of the item."
+                      }
+                    }
+                  }
+                },
+                "default": {
+                  "type": "string",
+                  "description": "The id of the value that provides the content of an API that exists in several. Defaults to the first value."
+                }
+              }
+            }
+          },
           "variantIgnore": {
             "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants. Nothing is ignored by default.",
             "anyOf": [

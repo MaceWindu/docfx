@@ -167,6 +167,17 @@ public static partial class DotnetApiCatalog
 
         ExtractMetadataConfig.UseClrTypeNames = configModel?.UseClrTypeNames ?? false;
 
+        // The patterns of an axis are relative to the same folders as the patterns that found the projects.
+        var axis = TargetFrameworkAxis.Create(
+            configModel?.Axes,
+            (projects?.Items ?? []).Select(item => Path.GetFullPath(Path.Combine(EnvironmentContext.BaseDirectory, item.Src ?? ""))).Distinct());
+
+        var targetFrameworks = configModel?.TargetFrameworks?
+            .Where(framework => !string.IsNullOrWhiteSpace(framework))
+            .Select(framework => framework.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() is { Count: > 0 } frameworks ? frameworks : null;
+
         return new ExtractMetadataConfig
         {
             ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
@@ -176,12 +187,11 @@ public static partial class DotnetApiCatalog
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
             MSBuildProperties = configModel?.Properties,
             TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
-            TargetFrameworks = configModel?.TargetFrameworks?
-                .Where(framework => !string.IsNullOrWhiteSpace(framework))
-                .Select(framework => framework.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList() is { Count: > 0 } targetFrameworks ? targetFrameworks : null,
+            // An axis tells apart projects that would otherwise be documented as one, so every framework
+            // of each of them is documented unless the frameworks are given.
+            TargetFrameworks = targetFrameworks ?? (axis is null ? null : ["*"]),
             VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
+            Axis = axis,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,

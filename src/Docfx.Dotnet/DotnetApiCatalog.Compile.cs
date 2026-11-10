@@ -265,6 +265,19 @@ partial class DotnetApiCatalog
                     continue;
                 }
 
+                if (config.Axis is { } axis)
+                {
+                    if (axis.Match(selected.FilePath!) is not { } value)
+                    {
+                        Logger.LogError(
+                            $"Project '{selected.FilePath}' matches none of the values of axis '{axis.Name}', so it is not documented.",
+                            code: ErrorCodes.Metadata.InvalidAxis);
+                        continue;
+                    }
+
+                    framework = TargetFrameworkAxis.GetUnit(value, framework);
+                }
+
                 frameworks![compilation] = framework;
                 compilations.Add(compilation);
             }

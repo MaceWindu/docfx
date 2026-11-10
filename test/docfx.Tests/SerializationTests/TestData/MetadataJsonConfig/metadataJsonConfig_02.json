@@ -67,6 +67,21 @@
     "variantIgnore": [
       "attributes"
     ],
+    "axes": [
+      {
+        "name": "EF Core",
+        "values": [
+          {
+            "id": "ef8",
+            "label": "EF Core 8",
+            "files": [
+              "**/*.EF8.csproj"
+            ]
+          }
+        ],
+        "default": "ef8"
+      }
+    ],
     "output": "obj/apipage"
   }
 ]

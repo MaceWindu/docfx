@@ -197,6 +197,70 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("api-variant", differs);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AnAxisIsShownWithTheLabelsOfItsValues()
+    {
+        foreach (var version in new[] { "V1", "V2" })
+        {
+            var folder = Path.Combine(_projectFolder, version);
+            Directory.CreateDirectory(folder);
+            await File.WriteAllTextAsync(Path.Combine(folder, $"{version}.csproj"), """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net8.0</TargetFramework>
+                    <AssemblyName>Lib</AssemblyName>
+                    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+                  </PropertyGroup>
+                </Project>
+                """, TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(folder, "Lib.cs"), $$"""
+                namespace Lib
+                {
+                    /// <summary>Summary of {{version}}.</summary>
+                    public class Widget { }
+                }
+                """, TestContext.Current.CancellationToken);
+        }
+
+        var configPath = Path.Combine(_projectFolder, "docfx.json");
+        await File.WriteAllTextAsync(configPath, """
+            {
+              "metadata": [
+                {
+                  "src": [ { "files": [ "V1/V1.csproj", "V2/V2.csproj" ] } ],
+                  "axes": [
+                    {
+                      "name": "Version",
+                      "values": [
+                        { "id": "v1", "label": "Version 1", "files": [ "V1/*.csproj" ] },
+                        { "id": "v2", "label": "Version 2", "files": [ "V2/*.csproj" ] }
+                      ],
+                      "default": "v2"
+                    }
+                  ],
+                  "dest": "api"
+                }
+              ],
+              "build": {
+                "content": [ { "files": [ "api/**.yml" ] } ],
+                "template": [ "default", "modern" ],
+                "dest": "_site"
+              }
+            }
+            """, TestContext.Current.CancellationToken);
+
+        await DotnetApiCatalog.GenerateManagedReferenceYamlFiles(configPath);
+        await Docset.Build(configPath);
+
+        var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
+        // Mustache escapes the separator between values, which reads the same.
+        Assert.Contains("<dt>Applies to</dt><dd>Version 1: .NET 8.0 &#183; Version 2: .NET 8.0</dd>", page);
+        Assert.Contains("Summary of V2.", page);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
+        Assert.Contains("<h6 class=\"api-variant-label\">Version 1: .NET 8.0</h6>", page);
+    }
+
     private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
 
     /// <returns>The folder of the generated API pages.</returns>

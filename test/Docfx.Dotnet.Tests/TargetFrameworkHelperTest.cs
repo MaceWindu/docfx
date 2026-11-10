@@ -119,6 +119,37 @@ public class TargetFrameworkHelperTest
         System.Text.Json.JsonSerializer.Deserialize<MetadataJsonItemConfig>(json).TargetFrameworks.Should().Equal(expected);
     }
 
+    [Fact]
+    public void AppliesToIsGroupedByValueInTheOrderOfTheAxis()
+    {
+        var axis = TargetFrameworkAxis.Create(
+            [new() { Name = "EF Core", Values = [new() { Id = "ef3", Label = "EF Core 3.1", Files = ["a"] }, new() { Id = "ef9", Files = ["b"] }] }],
+            [Directory.GetCurrentDirectory()]);
+
+        var groups = YamlViewModelExtensions.ToAppliesToViewModel(["ef9:net8.0", "ef3:netstandard2.0", "ef3:net462"], axis);
+
+        groups.Select(g => g.Version).Should().Equal("ef3", "ef9");
+        groups.Select(g => g.Label).Should().Equal("EF Core 3.1", "ef9");
+        groups[0].Frameworks.Should().Equal("netstandard2.0", "net462");
+    }
+
+    [Fact]
+    public void AppliesToWithoutAnAxisIsOneGroup()
+    {
+        var groups = YamlViewModelExtensions.ToAppliesToViewModel(["net8.0", "net462"], null);
+
+        groups.Should().ContainSingle().Which.Frameworks.Should().Equal("net8.0", "net462");
+        groups[0].Version.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("ef9:net8.0", "ef9", "net8.0")]
+    [InlineData("net8.0", null, "net8.0")]
+    public void SplitUnit(string unit, string value, string framework)
+    {
+        TargetFrameworkAxis.SplitUnit(unit).Should().Be((value, framework));
+    }
+
     [Theory]
     [InlineData("Lib(net8.0)", "net8.0")]
     [InlineData("Lib(netstandard2.0)", "netstandard2.0")]
