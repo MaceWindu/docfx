@@ -100,6 +100,14 @@ public static partial class DotnetApiCatalog
                 return;
             }
 
+            if (frameworks is not null && config.DefaultFramework is { } defaultFramework &&
+                !frameworks.Values.Any(unit => string.Equals(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework, StringComparison.OrdinalIgnoreCase)))
+            {
+                Logger.LogWarning(
+                    $"No project is documented for the default framework '{defaultFramework}', so the nearest framework each project targets provides the content.",
+                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            }
+
             switch (config.OutputFormat)
             {
                 case MetadataOutputFormat.Markdown:
@@ -190,6 +198,7 @@ public static partial class DotnetApiCatalog
             // An axis tells apart projects that would otherwise be documented as one, so every framework
             // of each of them is documented unless the frameworks are given.
             TargetFrameworks = targetFrameworks ?? (axis is null ? null : ["*"]),
+            DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
             VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
             Axis = axis,
             OutputFormat = configModel?.OutputFormat ?? default,

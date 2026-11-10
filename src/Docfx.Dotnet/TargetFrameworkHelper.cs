@@ -37,6 +37,82 @@ internal static partial class TargetFrameworkHelper
     [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
     private static partial Regex FrameworkNameRegex();
 
+    [GeneratedRegex(@"^(netstandard|netcoreapp|net)(\d+(?:\.\d+)*)(?:-([a-z]*))?", RegexOptions.IgnoreCase)]
+    private static partial Regex TargetFrameworkMonikerRegex();
+
+    private enum FrameworkFamily { Standard, Core, Framework }
+
+    // The lowest .NET Framework version implementing each .NET Standard version that it implements at all.
+    private static readonly (Version Standard, Version Framework)[] StandardOnFramework =
+    [
+        (new(1, 1), new(4, 5)),
+        (new(1, 2), new(4, 5, 1)),
+        (new(1, 3), new(4, 6)),
+        (new(2, 0), new(4, 6, 1)),
+    ];
+
+    /// <summary>
+    /// Orders <paramref name="frameworks"/> by how well each one stands in for <paramref name="target"/>:
+    /// the target itself, then the frameworks a project targeting it could reference, nearest first, then
+    /// the others in the order given.
+    /// </summary>
+    /// <remarks>
+    /// A simplified form of the NuGet compatibility rules, which covers the frameworks a library targets.
+    /// NuGet.Frameworks is not used because MSBuildWorkspace loads the copy that comes with the SDK.
+    /// </remarks>
+    internal static List<string> OrderByNearest(string target, IEnumerable<string> frameworks)
+    {
+        var parsedTarget = ParseMoniker(target);
+        return frameworks
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select((framework, index) => (framework, index, parsed: ParseMoniker(framework)))
+            .OrderBy(f => string.Equals(f.framework, target, StringComparison.OrdinalIgnoreCase) ? 0
+                : parsedTarget is not { } t || f.parsed is not { } p || !CanReference(t, p) ? 3
+                : p.Family == t.Family ? 1
+                : 2)
+            .ThenByDescending(f => f.parsed is { } p && parsedTarget is { } t && CanReference(t, p) ? p.Version : null)
+            .ThenBy(f => f.index)
+            .Select(f => f.framework)
+            .ToList();
+    }
+
+    private static (FrameworkFamily Family, Version Version, string? Platform)? ParseMoniker(string moniker)
+    {
+        var match = TargetFrameworkMonikerRegex().Match(moniker);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var digits = match.Groups[2].Value;
+        var platform = match.Groups[3].Success ? match.Groups[3].Value.ToLowerInvariant() : null;
+        return match.Groups[1].Value.ToLowerInvariant() switch
+        {
+            "netstandard" when Version.TryParse(digits, out var version) => (FrameworkFamily.Standard, version, platform),
+            "netcoreapp" when Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            "net" when digits.Contains('.') && Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            // `net462` is .NET Framework 4.6.2, one digit per part.
+            "net" when !digits.Contains('.') && digits.Length is 2 or 3 => (FrameworkFamily.Framework, Version.Parse(string.Join('.', digits.ToCharArray())), platform),
+            _ => null,
+        };
+    }
+
+    private static bool CanReference((FrameworkFamily Family, Version Version, string? Platform) target, (FrameworkFamily Family, Version Version, string? Platform) framework)
+    {
+        if (framework.Platform is not null && framework.Platform != target.Platform)
+        {
+            return false;
+        }
+
+        return (target.Family, framework.Family) switch
+        {
+            _ when target.Family == framework.Family => framework.Version <= target.Version,
+            (FrameworkFamily.Core, FrameworkFamily.Standard) => framework.Version <= (target.Version >= new Version(3, 0) ? new Version(2, 1) : target.Version >= new Version(2, 0) ? new Version(2, 0) : new Version(1, 6)),
+            (FrameworkFamily.Framework, FrameworkFamily.Standard) => StandardOnFramework.Any(s => framework.Version <= s.Standard && target.Version >= s.Framework),
+            _ => false,
+        };
+    }
+
     /// <summary>
     /// Returns the projects, among those loaded from the same file as <paramref name="project"/>, for each
     /// of <paramref name="targetFrameworks"/> in that order, with the framework each one targets.

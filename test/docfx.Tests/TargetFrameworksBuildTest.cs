@@ -197,6 +197,19 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("api-variant", differs);
     }
 
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task FrameworkNamesReplaceTheLabelsOfFrameworks(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"", extraBuild: "\"globalMetadata\": { \"_frameworkNames\": { \"netstandard2.0\": \"Any .NET\" } },");
+
+        Assert.Contains($"{Net8}, Any .NET", await Page(site, "Lib.Shared.html"));
+        Assert.Contains("Any .NET", await Page(site, "Lib.Differs.html"));
+        Assert.DoesNotContain(".NET Standard 2.0", await Page(site, "Lib.Differs.html"));
+    }
+
     [Fact]
     [Trait("Related", "docfx")]
     public async Task AnAxisIsShownWithTheLabelsOfItsValues()

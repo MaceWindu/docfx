@@ -497,6 +497,23 @@ It cannot be combined with [`targetFramework`](#targetframework), which takes pr
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it. Nor is documentation that differs only in whitespace, such as line breaks and indentation.
 
+### `defaultFramework`
+
+The framework of [`targetFrameworks`](#targetframeworks) that provides the content of an API that exists in several, instead of the first one listed. It is also listed first in `appliesTo`. This is useful with `"*"`, where the order is that of the project's `TargetFrameworks`.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": "*",
+      "defaultFramework": "net8.0"
+    }
+  ]
+}
+```
+
+A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements, then the project's first framework. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged.
+
 ### `axes`
 
 An axis besides the target framework along which the projects of this metadata item differ, such as the version of a dependency they are built against. Each project gets the first value whose `files` match it, relative to the `src` of the item, and the APIs that several values share get one page, which lists the frameworks it exists in for each value. The `default` value, or the first one, provides the content of an API that exists in several.
@@ -712,3 +729,17 @@ File(s) specified are not returned in search results
 ### `_disableApiAppliesTo`
 
 Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks).
+
+### `_frameworkNames`
+
+The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0`.
+
+```json
+{
+  "build": {
+    "globalMetadata": {
+      "_frameworkNames": { "netstandard2.0": "Any .NET" }
+    }
+  }
+}
+```
