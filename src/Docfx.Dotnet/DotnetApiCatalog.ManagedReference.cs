@@ -20,12 +20,16 @@ partial class DotnetApiCatalog
         // Symbols of different compilations cannot be used together, and each framework is a compilation
         // of its own, so extension methods and the documented assemblies are worked out per framework.
         // The first group provides the content of an API that several share, so the default value of an
-        // axis goes first; the order is otherwise kept.
+        // axis goes first, then the default framework and those nearest to it; the order is otherwise kept.
+        var frameworkOrder = config.DefaultFramework is { } defaultFramework && frameworks is not null
+            ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))
+            : [];
         List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
             ? [assemblies]
             : assemblies
                 .GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase)
                 .OrderBy(group => config.Axis is { } axis && TargetFrameworkAxis.SplitUnit(group.Key).Value != axis.Default ? 1 : 0)
+                .ThenBy(group => frameworkOrder.FindIndex(f => string.Equals(f, TargetFrameworkAxis.SplitUnit(group.Key).Framework, StringComparison.OrdinalIgnoreCase)))
                 .Select(group => group.ToList())
                 .ToList();
 

@@ -696,6 +696,10 @@
               }
             ]
           },
+          "defaultFramework": {
+            "description": "The framework of `targetFrameworks` that provides the content of an API that exists in several, instead of the first one listed. A project that does not target it uses the nearest framework it targets that can stand in for it, else its first one.",
+            "type": "string"
+          },
           "axes": {
             "description": "An axis besides the target framework along which the projects of this item differ, such as the version of a dependency. Each project gets the first value whose files match it, and APIs that several values share get one page. One axis is supported.",
             "type": "array",
