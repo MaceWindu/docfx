@@ -394,6 +394,32 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task VariantIgnoreIsReadFromTheConfig()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net8.0", "netstandard2.0"], VariantIgnore = ["documentation"] });
+
+        AssertWarnings(listener);
+        Assert.Null(Page("Lib.Shared.yml").Items[0].Variants);
+    }
+
+    [Fact]
+    public async Task VariantIgnoreWarnsAboutAnUnknownValue()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net8.0", "netstandard2.0"], VariantIgnore = ["nullability"] });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.InvalidVariantIgnore);
+        Assert.Contains("'nullability'", warning.Message);
+    }
+
+    [Fact]
     public async Task TargetFrameworksRecordsOnlyWhatDiffersAsAVariant()
     {
         var project = CreateMultiTargetedProject();

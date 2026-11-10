@@ -129,6 +129,30 @@ public static partial class DotnetApiCatalog
         }
     }
 
+    private static VariantIgnore ParseVariantIgnore(List<string> values)
+    {
+        var result = VariantIgnore.None;
+        foreach (var value in values ?? [])
+        {
+            switch (value?.Trim().ToLowerInvariant())
+            {
+                case "attributes":
+                    result |= VariantIgnore.Attributes;
+                    break;
+                case "documentation":
+                    result |= VariantIgnore.Documentation;
+                    break;
+                default:
+                    Logger.LogWarning(
+                        $"Unknown 'variantIgnore' value '{value}'. The supported values are 'attributes' and 'documentation'.",
+                        code: WarningCodes.Metadata.InvalidVariantIgnore);
+                    break;
+            }
+        }
+
+        return result;
+    }
+
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)
     {
         var projects = configModel.Src;
@@ -157,6 +181,7 @@ public static partial class DotnetApiCatalog
                 .Select(framework => framework.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList() is { Count: > 0 } targetFrameworks ? targetFrameworks : null,
+            VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,
