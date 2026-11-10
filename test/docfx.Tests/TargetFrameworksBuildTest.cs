@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.RegularExpressions;
 using Docfx.Dotnet;
 using Docfx.Tests.Common;
 using Newtonsoft.Json.Linq;
@@ -51,6 +52,18 @@ public class TargetFrameworksBuildTest : TestBase
                 }
             #if NET8_0
                 public class OnlyNet8 { }
+
+                /// <summary>Described for net8.</summary>
+                public class Differs
+                {
+                    public int Value() => 0;
+                }
+            #else
+                /// <summary>Described for older, see <see cref="Shared"/>.</summary>
+                public class Differs
+                {
+                    public long Value() => 0;
+                }
             #endif
             }
             """);
@@ -122,6 +135,41 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
+    public async Task WhatDiffersInAnotherFrameworkIsShownWithItsLabel(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Differs.html");
+
+        Assert.Contains("Described for net8.", page);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", page);
+        Assert.Contains("<h6 class=\"api-variant-label\">.NET Standard 2.0</h6>", page);
+        Assert.Contains("Described for older", page);
+
+        // The summary went through the same markup and link resolution as the item's own.
+        Assert.Contains("href=\"Lib.Shared.html\"", page);
+
+        // A member shows its own difference, and not the one of its type.
+        Assert.Contains("public long Value()", page);
+        Assert.Equal(1, Regex.Count(page, "Described for older"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AVariantDoesNotRepeatWhatIsTheSame(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Differs.html");
+
+        var variant = Regex.Match(page, "<div class=\"api-variant\"[\\s\\S]*?Described for older[\\s\\S]*?</div>\\s*</div>").Value;
+        Assert.DoesNotContain("Described for net8.", variant);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
     public async Task NothingIsRenderedWithoutTheOption(string template)
     {
         var site = await Build(template, targetFrameworks: null);
@@ -129,6 +177,7 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.DoesNotContain("Applies to", page);
         Assert.DoesNotContain("data-applies-to", page);
+        Assert.DoesNotContain("api-variant", page);
     }
 
     [Theory]
@@ -143,6 +192,9 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Applies to", page);
         Assert.DoesNotContain("data-applies-to", page);
         Assert.DoesNotContain("applies-to\">", page);
+
+        var differs = await Page(site, "Lib.Differs.html");
+        Assert.DoesNotContain("api-variant", differs);
     }
 
     private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));

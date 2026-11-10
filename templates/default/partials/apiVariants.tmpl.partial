@@ -1,0 +1,21 @@
+{{!Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license.}}
+{{#variants}}
+<div class="api-variant" data-applies-to="{{appliesToData}}">
+  <h6 class="api-variant-label">{{appliesToText}}</h6>
+  {{#summary}}<div class="markdown summary">{{{summary}}}</div>{{/summary}}
+  {{#syntax}}
+  <div class="codewrapper">
+    <pre><code class="lang-csharp hljs">{{syntax.content.0.value}}</code></pre>
+  </div>
+  {{/syntax}}
+  {{#inheritance.0}}
+  <div class="inheritance">
+    <h5>{{__global.inheritance}}</h5>
+    {{#inheritance}}
+    <div>{{{specName.0.value}}}</div>
+    {{/inheritance}}
+  </div>
+  {{/inheritance.0}}
+  {{#remarks}}<div class="markdown remarks">{{{remarks}}}</div>{{/remarks}}
+</div>
+{{/variants}}

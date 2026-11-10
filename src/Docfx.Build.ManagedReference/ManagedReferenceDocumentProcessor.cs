@@ -51,6 +51,7 @@ public class ManagedReferenceDocumentProcessor : ReferenceDocumentProcessorBase
         "conceptual",
         "platform",
         Constants.PropertyName.AppliesTo,
+        "variants",
         "attributes",
         Constants.PropertyName.AdditionalNotes
     ];
