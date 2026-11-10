@@ -182,7 +182,70 @@ public class TargetFrameworkMergeTest
         listener.GetItemsByLogLevel(LogLevel.Warning).Should().ContainSingle(x => x.Code == WarningCodes.Metadata.ApiKindDiffersBetweenFrameworks);
     }
 
+    [Fact]
+    public void DocumentationMissingInOneFrameworkIsNotADifference()
+    {
+        var result = Merge(
+            ("namespace N { public class T { /// <summary>sum</summary><param name=\"x\">the x</param><returns>a value</returns>\npublic int M(int x) => x; } }", First),
+            ("namespace N { public class T { public int M(int x) => x; } }", Second));
+
+        result["N.T.M(System.Int32)"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AFrameworkWithoutDocumentationTakesItFromAnother()
+    {
+        var result = Merge(
+            ("namespace N { public class T { } }", First),
+            ("namespace N { /// <summary>from the second</summary>\npublic class T { } }", Second));
+
+        result["N.T"].Summary.Should().Contain("from the second");
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void EmptyAndMissingAreTheSame()
+    {
+        var primary = new MetadataItem { Name = "N.T", Examples = [], Exceptions = [] };
+        var other = new MetadataItem { Name = "N.T" };
+
+        TargetFrameworkVariants.Merge(primary, other, Second);
+
+        primary.Variants.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(nameof(VariantIgnore.None), true)]
+    [InlineData(nameof(VariantIgnore.Attributes), false)]
+    public void AttributesCanBeIgnored(string ignore, bool expectVariant)
+    {
+        var result = MergeIgnoring(
+            Enum.Parse<VariantIgnore>(ignore),
+            ("namespace N { [System.Obsolete] public class T { } }", First),
+            ("namespace N { public class T { } }", Second));
+
+        (result["N.T"].Variants is not null).Should().Be(expectVariant);
+    }
+
+    [Theory]
+    [InlineData(nameof(VariantIgnore.None), true)]
+    [InlineData(nameof(VariantIgnore.Documentation), false)]
+    public void DocumentationCanBeIgnored(string ignore, bool expectVariant)
+    {
+        var result = MergeIgnoring(
+            Enum.Parse<VariantIgnore>(ignore),
+            ("namespace N { /// <summary>one</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second));
+
+        (result["N.T"].Variants is not null).Should().Be(expectVariant);
+    }
+
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
+    {
+        return MergeIgnoring(VariantIgnore.None, units);
+    }
+
+    private static Dictionary<string, MetadataItem> MergeIgnoring(VariantIgnore ignore, params (string Code, string Framework)[] units)
     {
         var items = units.Select(unit =>
         {
@@ -193,7 +256,7 @@ public class TargetFrameworkMergeTest
         }).ToList();
 
         var result = new Dictionary<string, MetadataItem>();
-        DotnetApiCatalog.MergeTargetFrameworks(result, items);
+        DotnetApiCatalog.MergeTargetFrameworks(result, items, ignore);
         return result;
     }
 }

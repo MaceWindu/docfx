@@ -208,6 +208,16 @@ internal class MetadataJsonItemConfig
     public List<string> TargetFrameworks { get; set; }
 
     /// <summary>
+    /// The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as
+    /// variants: `attributes`, `documentation`, or both.
+    /// </summary>
+    [JsonProperty("variantIgnore")]
+    [JsonPropertyName("variantIgnore")]
+    [Newtonsoft.Json.JsonConverter(typeof(StringOrListJsonConverter.NewtonsoftJson))]
+    [System.Text.Json.Serialization.JsonConverter(typeof(StringOrListJsonConverter.SystemTextJson))]
+    public List<string> VariantIgnore { get; set; }
+
+    /// <summary>
     /// Disables generation of view source links.
     /// </summary>
     [JsonProperty("disableGitFeatures")]

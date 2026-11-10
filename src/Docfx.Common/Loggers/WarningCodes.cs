@@ -32,6 +32,7 @@ public static class WarningCodes
         public const string TargetFrameworkNotFound = "TargetFrameworkNotFound";
         public const string ConflictingTargetFramework = "ConflictingTargetFramework";
         public const string ApiKindDiffersBetweenFrameworks = "ApiKindDiffersBetweenFrameworks";
+        public const string InvalidVariantIgnore = "InvalidVariantIgnore";
     }
 
     public static class Markdown

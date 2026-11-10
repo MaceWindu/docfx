@@ -55,7 +55,7 @@ partial class DotnetApiCatalog
         }
         else
         {
-            MergeTargetFrameworks(allMembers, projectMetadataList);
+            MergeTargetFrameworks(allMembers, projectMetadataList, config.VariantIgnore);
         }
 
         MergeReferences(allReferences, projectMetadataList);
@@ -228,7 +228,7 @@ partial class DotnetApiCatalog
     /// Unlike <see cref="MergeMembers"/>, a repeated UID is expected here for every kind of member, and the
     /// children of every kind are unioned, as a struct or interface can gain members in one framework too.
     /// </remarks>
-    internal static void MergeTargetFrameworks(Dictionary<string, MetadataItem> result, List<MetadataItem> items)
+    internal static void MergeTargetFrameworks(Dictionary<string, MetadataItem> result, List<MetadataItem> items, VariantIgnore ignore = VariantIgnore.None)
     {
         foreach (var item in items)
         {
@@ -267,7 +267,7 @@ partial class DotnetApiCatalog
             if (!isSameFramework)
             {
                 existingNode.AppliesTo.Add(framework);
-                TargetFrameworkVariants.Merge(existingNode, node, framework);
+                TargetFrameworkVariants.Merge(existingNode, node, framework, ignore);
 
                 if (node.Type != existingNode.Type)
                 {
