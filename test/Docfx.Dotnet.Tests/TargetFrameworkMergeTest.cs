@@ -204,6 +204,39 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void DocumentationThatDiffersOnlyInWhitespaceIsNotADifference()
+    {
+        var result = Merge(
+            ("namespace N { public class T { /// <summary>one two</summary><param name=\"x\">the x</param>\npublic int M(int x) => x; } }", First),
+            ("namespace N { public class T { /// <summary>\n/// one\n///     two\n/// </summary><param name=\"x\">the\n/// x</param>\npublic int M(int x) => x; } }", Second));
+
+        result["N.T.M(System.Int32)"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void WhitespaceOutsideDocumentationIsADifference()
+    {
+        var primary = new MetadataItem { Name = "N.T", Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public class T" } } };
+        var other = new MetadataItem { Name = "N.T", Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public  class T" } } };
+
+        TargetFrameworkVariants.Merge(primary, other, Second);
+
+        primary.Variants.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void WhitespaceOnlyDocumentationIsTakenFromAnother()
+    {
+        var primary = new MetadataItem { Name = "N.T", Summary = " \n " };
+        var other = new MetadataItem { Name = "N.T", Summary = "text" };
+
+        TargetFrameworkVariants.Merge(primary, other, Second);
+
+        primary.Summary.Should().Be("text");
+        primary.Variants.Should().BeNull();
+    }
+
+    [Fact]
     public void EmptyAndMissingAreTheSame()
     {
         var primary = new MetadataItem { Name = "N.T", Examples = [], Exceptions = [] };
