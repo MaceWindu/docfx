@@ -1387,6 +1387,8 @@
     "extensionMethods",
     "conceptual",
     "platform",
+    "appliesTo",
+    "variants",
     "attributes",
     "additionalNotes"
   ],
@@ -1422,6 +1424,7 @@
     "package": "Package",
     "namespace": "Namespace",
     "assembly": "Assembly",
+    "appliesTo": "Applies to",
     "syntax": "Syntax",
     "overrides": "Overrides",
     "implements": "Implements",
