@@ -12,6 +12,7 @@
 
 <div class="markdown summary">{{{summary}}}</div>
 <div class="markdown conceptual">{{{conceptual}}}</div>
+{{>partials/apiVariants}}
 
 {{#syntax.content.0.value}}
 <div class="codewrapper">
