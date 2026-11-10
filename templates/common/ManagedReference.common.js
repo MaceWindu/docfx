@@ -11,12 +11,12 @@ exports.transform = function (model) {
   langs = model.langs;
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
   handleItem(model, model._gitContribute, model._gitUrlPattern);
-  if (showAppliesTo) handleAppliesTo(model);
+  if (showAppliesTo) handleAppliesTo(model, null, model._frameworkNames);
   else delete model.variants;
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
-      if (showAppliesTo) handleAppliesTo(item, model);
+      if (showAppliesTo) handleAppliesTo(item, model, model._frameworkNames);
       else delete item.variants;
     });
   }
@@ -87,14 +87,16 @@ function getAppliesToFrameworks(vm) {
   return units;
 }
 
-function getAppliesToText(vm) {
+function getAppliesToText(vm, names) {
   return (vm.appliesTo || []).map(function (group) {
-    var frameworks = (group.frameworks || []).map(getFrameworkLabel).join(', ');
+    var frameworks = (group.frameworks || []).map(function (framework) { return getFrameworkLabel(framework, names); }).join(', ');
     return group.version ? (group.label || group.version) + ': ' + frameworks : frameworks;
   }).join(' · ');
 }
 
-function getFrameworkLabel(framework) {
+function getFrameworkLabel(framework, names) {
+  if (names && Object.prototype.hasOwnProperty.call(names, framework)) return names[framework];
+
   var match = /^netstandard(\d+\.\d+)$/.exec(framework);
   if (match) return '.NET Standard ' + match[1];
 
@@ -110,7 +112,7 @@ function getFrameworkLabel(framework) {
   return framework;
 }
 
-function handleAppliesTo(vm, parent) {
+function handleAppliesTo(vm, parent, names) {
   // set to empty so that mustache does not look up the values of the enclosing type
   vm.appliesToData = "";
   vm.appliesToText = "";
@@ -119,7 +121,7 @@ function handleAppliesTo(vm, parent) {
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
-    variant.appliesToText = getAppliesToText(variant);
+    variant.appliesToText = getAppliesToText(variant, names);
     // a field that does not differ must not be looked up on the item, which would repeat its value
     variant.summary = variant.summary || "";
     variant.remarks = variant.remarks || "";
@@ -132,7 +134,7 @@ function handleAppliesTo(vm, parent) {
     return;
   }
 
-  var text = getAppliesToText(vm);
+  var text = getAppliesToText(vm, names);
   vm.appliesToData = frameworks.join(' ');
   if (!parent) {
     vm.appliesToText = text;

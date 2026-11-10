@@ -175,9 +175,30 @@ A project that targets a single framework is matched by the `TargetFramework` MS
 
 If a project listed in `src` does not target the requested framework, or MSBuild cannot evaluate it, docfx logs a `TargetFrameworkNotFound` warning and documents the framework the project selects by default. For the projects of a solution that is logged as information, and the warning is logged once per solution none of whose projects is known to target the framework, unless an earlier solution already reported all of them; see [`targetFramework`](../reference/docfx-json-reference.md#targetframework).
 
-The `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json-reference.md#properties) documents another framework too, and loads only that one, which is faster. MSBuild applies a global property to every project it loads, though, including the projects the documented ones reference. A project that references a `netstandard2.0` library then loads that library for `net8.0` as well, which no longer matches the reference MSBuild resolved for it: docfx logs `Found project reference without a matching metadata reference` and `Unresolved metadata reference removed from project`, and drops the reference, so links to the library's types are lost. A library that cannot build for that framework fails to load. To keep a referenced project at its own framework, add `TreatAsLocalProperty="TargetFramework"` to its `<Project>` element.
+#### Documenting several frameworks together
 
-`properties` and `targetFramework` have no effect on assemblies: when the input is `.dll` files, list the ones built for the framework to document.
+[`targetFrameworks`](../reference/docfx-json-reference.md#targetframeworks) documents several frameworks of a project, or all of them with `"*"`, as one set of pages:
+
+```json
+{
+  "metadata": {
+    "src": [{
+      "files": ["src/MyLib/MyLib.csproj"],
+      "src": "../"
+    }],
+    "dest": "api",
+    "targetFrameworks": ["net8.0", "netstandard2.0"]
+  },
+}
+```
+
+Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8.0, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
+
+Documentation that one framework has and another lacks, or that differs only in whitespace, is not shown as a difference. Inherited documentation is the common case: the reference assemblies of older frameworks often have none. [`variantIgnore`](../reference/docfx-json-reference.md#variantignore) leaves out attribute or documentation differences altogether.
+
+Projects that build the same assembly against different versions of a dependency, one project per version, can be documented as one set of pages too, with [`axes`](../reference/docfx-json-reference.md#axes).
+
+Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. The labels of frameworks can be changed with the `_frameworkNames` template option.
 
 ## Generate from source code
 
