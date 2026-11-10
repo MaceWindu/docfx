@@ -47,6 +47,7 @@ Name         | Type    | Description
 `_disableNextArticle`   | bool    | Whether to show the previous and next article link.
 `_disableTocFilter`     | bool    | Whether to show the table of content filter box.
 `_disableApiAppliesTo`  | bool    | Whether to show which target frameworks an API applies to.
+`_frameworkNames`       | object  | The names to show for target frameworks, by framework.
 `_googleAnalyticsTagId` | string  | Enables Google Analytics web traffic analysis.
 `_lang`                  | string  | Primary language of the page. If unset, the `<html>` tag will not have `lang` property.
 `_layout`                | string  | Determines the layout of the page. Supported values are `landing` and `chromeless`.
@@ -72,6 +73,7 @@ Name         | Type    | Description
 `_disableToc`           | bool    | Whether to show the TOC.
 `_disableAffix`         | bool    | Whether to show the right rail.
 `_disableApiAppliesTo`  | bool    | Whether to show which target frameworks an API applies to.
+`_frameworkNames`       | object  | The names to show for target frameworks, by framework.
 `_googleAnalyticsTagId` | string  | Enables Google Analytics web traffic analysis.
 `_lang`                 | string | Primary language of the page. If unset, the `<html>` tag will not have `lang` property.
 

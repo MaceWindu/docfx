@@ -188,6 +188,54 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task DefaultFrameworkProvidesTheContentAndIsListedFirst()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["netstandard2.0", "net8.0"], DefaultFramework = "net8.0" });
+
+        AssertWarnings(listener);
+        Assert.Equal(["net8.0", "netstandard2.0"], AppliesTo("Lib.Shared.yml"));
+        var item = Page("Lib.Shared.yml").Items[0];
+        Assert.Equal("net8.0", item.Summary.Trim());
+        Assert.Equal("netstandard2.0", Assert.Single(item.Variants).Summary.Trim());
+    }
+
+    [Fact]
+    public async Task ADefaultFrameworkNotDocumentedWarnsAndTheNearestProvidesTheContent()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["netstandard2.0", "net8.0"], DefaultFramework = "net10.0" });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("'net10.0'", warning.Message);
+        Assert.Equal("net8.0", Page("Lib.Shared.yml").Items[0].Summary.Trim());
+    }
+
+    [Fact]
+    public async Task ADefaultFrameworkOneProjectDoesNotTargetFallsBackToTheNearestOneItDoes()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly(v1Frameworks: "net462;netstandard2.0");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v2")], DefaultFramework = "net8.0" });
+
+        // v2 targets the default framework, so there is no warning about it.
+        AssertWarnings(listener);
+
+        // A page only v1 has is documented from netstandard2.0, which net8.0 can reference, not net462.
+        var onlyV1 = Page("Lib.OnlyV1.yml").Items[0];
+        Assert.Equal(["netstandard2.0", "net462"], Assert.Single(onlyV1.AppliesTo).Frameworks);
+        Assert.Equal("v1 netstandard2.0", onlyV1.Summary.Trim());
+    }
+
+    [Fact]
     public async Task TargetFrameworksWithOneFrameworkIsPlainSelection()
     {
         var project = CreateMultiTargetedProject();
@@ -423,19 +471,29 @@ public class TargetFrameworkTest : TestBase
     /// Two projects that both build an assembly named <c>Lib</c>, the way one library is built against
     /// two versions of a dependency.
     /// </summary>
-    private (string V1, string V2) CreateTwoVersionsOfOneAssembly()
+    private (string V1, string V2) CreateTwoVersionsOfOneAssembly(string v1Frameworks = null)
     {
-        string Create(string name) => CreateProject(name, "<TargetFramework>net8.0</TargetFramework><AssemblyName>Lib</AssemblyName>", $$"""
+        string Create(string name, string frameworks) => CreateProject(
+            name,
+            frameworks is null
+                ? "<TargetFramework>net8.0</TargetFramework><AssemblyName>Lib</AssemblyName>"
+                : $"<TargetFrameworks>{frameworks}</TargetFrameworks><AssemblyName>Lib</AssemblyName>",
+            $$"""
             namespace Lib
             {
                 /// <summary>{{name.ToLowerInvariant()}}</summary>
                 public class Shared { }
 
+            #if NETSTANDARD2_0
+                /// <summary>{{name.ToLowerInvariant()}} netstandard2.0</summary>
+            #else
+                /// <summary>{{name.ToLowerInvariant()}}</summary>
+            #endif
                 public class Only{{name}} { }
             }
             """);
 
-        return (Create("V1"), Create("V2"));
+        return (Create("V1", v1Frameworks), Create("V2", null));
     }
 
     private PageViewModel Page(string fileName)

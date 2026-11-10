@@ -262,6 +262,15 @@ internal class MetadataJsonItemConfig
     public List<string> TargetFrameworks { get; set; }
 
     /// <summary>
+    /// The framework of `targetFrameworks` that provides the content of an API that exists in several,
+    /// e.g. `net10.0`, instead of the first one listed. A project that does not target it uses the nearest
+    /// framework it targets that can stand in for it, else its first one.
+    /// </summary>
+    [JsonProperty("defaultFramework")]
+    [JsonPropertyName("defaultFramework")]
+    public string DefaultFramework { get; set; }
+
+    /// <summary>
     /// The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as
     /// variants: `attributes`, `documentation`, or both.
     /// </summary>

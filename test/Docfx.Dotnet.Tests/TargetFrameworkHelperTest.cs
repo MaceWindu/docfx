@@ -109,4 +109,21 @@ public class TargetFrameworkHelperTest
 
         TargetFrameworkHelper.GetTargetFrameworkFromName(project).Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData("net10.0", "net462 netstandard2.0 net8.0 net10.0", "net10.0 net8.0 netstandard2.0 net462")]
+    [InlineData("net10.0", "net462 netstandard2.0", "netstandard2.0 net462")]
+    [InlineData("net48", "netstandard2.0 net8.0 net462", "net462 netstandard2.0 net8.0")]
+    [InlineData("net8.0", "netstandard2.0 netstandard2.1 netcoreapp3.1", "netcoreapp3.1 netstandard2.1 netstandard2.0")]
+    [InlineData("net472", "netstandard2.1 netstandard2.0 netstandard1.3", "netstandard2.0 netstandard1.3 netstandard2.1")]
+    [InlineData("net45", "netstandard1.3 netstandard1.1", "netstandard1.1 netstandard1.3")]
+    [InlineData("netcoreapp2.1", "netstandard2.1 netstandard2.0", "netstandard2.0 netstandard2.1")]
+    [InlineData("net8.0", "net8.0-windows netstandard2.0", "netstandard2.0 net8.0-windows")]
+    [InlineData("net8.0-windows", "net8.0 net8.0-windows", "net8.0-windows net8.0")]
+    [InlineData("NET8.0", "net9.0 net8.0", "net8.0 net9.0")]
+    [InlineData("unknown", "net8.0 netstandard2.0", "net8.0 netstandard2.0")]
+    public void OrderByNearest(string target, string frameworks, string expected)
+    {
+        TargetFrameworkHelper.OrderByNearest(target, frameworks.Split(' ')).Should().Equal(expected.Split(' '));
+    }
 }
