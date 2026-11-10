@@ -283,18 +283,23 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
     }
 
     /// <summary>
-    /// An overload page applies wherever any of its overloads does. Unlike <see cref="MergeList"/>, this
-    /// keeps the frameworks in the order they were documented in, which is meaningful: the first is primary.
+    /// An overload page applies wherever any of its overloads does, per value of the axis. Unlike
+    /// <see cref="MergeList"/>, this keeps the order things were documented in, which is meaningful.
     /// </summary>
     private static List<AppliesToViewModel> MergeAppliesTo(IEnumerable<ItemViewModel> overloads)
     {
-        var frameworks = overloads
+        var groups = overloads
             .SelectMany(s => s.AppliesTo ?? [])
-            .SelectMany(s => s.Frameworks ?? [])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .GroupBy(s => s.Version)
+            .Select(group => new AppliesToViewModel
+            {
+                Version = group.Key,
+                Label = group.First().Label,
+                Frameworks = group.SelectMany(s => s.Frameworks ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            })
             .ToList();
 
-        return frameworks.Count == 0 ? null : [new() { Frameworks = frameworks }];
+        return groups.Count == 0 ? null : groups;
     }
 
     private static List<string> MergeList(IEnumerable<ItemViewModel> children, Func<ItemViewModel, IEnumerable<string>> selector)
