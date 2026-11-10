@@ -19,9 +19,15 @@ partial class DotnetApiCatalog
 
         // Symbols of different compilations cannot be used together, and each framework is a compilation
         // of its own, so extension methods and the documented assemblies are worked out per framework.
+        // The first group provides the content of an API that several share, so the default value of an
+        // axis goes first; the order is otherwise kept.
         List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
             ? [assemblies]
-            : assemblies.GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase).Select(group => group.ToList()).ToList();
+            : assemblies
+                .GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => config.Axis is { } axis && TargetFrameworkAxis.SplitUnit(group.Key).Value != axis.Default ? 1 : 0)
+                .Select(group => group.ToList())
+                .ToList();
 
         foreach (var group in frameworkGroups)
         {
@@ -94,7 +100,7 @@ partial class DotnetApiCatalog
             var tocViewModel = new TocItemViewModel
             {
                 Metadata = new() { ["memberLayout"] = config.MemberLayout },
-                Items = model.TocYamlViewModel.ToTocViewModel(),
+                Items = model.TocYamlViewModel.ToTocViewModel(axis: config.Axis),
             };
             string tocFilePath = Path.Combine(config.OutputFolder, "toc.yml");
 

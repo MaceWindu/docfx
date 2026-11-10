@@ -272,6 +272,16 @@ internal class MetadataJsonItemConfig
     public List<string> VariantIgnore { get; set; }
 
     /// <summary>
+    /// An axis besides the target framework along which the projects of this item differ, such as the
+    /// version of a dependency, e.g. `[{ "name": "EF Core", "values": [{ "id": "ef9", "label": "EF Core 9",
+    /// "files": ["**/*.EF9.csproj"] }], "default": "ef9" }]`. Each project gets the first value whose files
+    /// match it, and APIs that several values share get one page.
+    /// </summary>
+    [JsonProperty("axes")]
+    [JsonPropertyName("axes")]
+    public List<MetadataAxisConfig> Axes { get; set; }
+
+    /// <summary>
     /// Disables generation of view source links.
     /// </summary>
     [JsonProperty("disableGitFeatures")]

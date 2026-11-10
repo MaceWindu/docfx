@@ -25,6 +25,7 @@ public static class ErrorCodes
     public static class Metadata
     {
         public const string TargetFrameworksNotSupported = "TargetFrameworksNotSupported";
+        public const string InvalidAxis = "InvalidAxis";
     }
 
     public static class Toc

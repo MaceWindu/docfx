@@ -352,6 +352,92 @@ public class TargetFrameworkTest : TestBase
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.TargetFrameworksNotSupported);
     }
 
+    [Fact]
+    public async Task AnAxisMergesProjectsThatBuildTheSameAssembly()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v2")] });
+
+        AssertWarnings(listener);
+
+        var shared = Page("Lib.Shared.yml").Items[0];
+        Assert.Equal(["v1", "v2"], shared.AppliesTo.Select(a => a.Version));
+        Assert.Equal(["Version 1", "Version 2"], shared.AppliesTo.Select(a => a.Label));
+        Assert.All(shared.AppliesTo, a => Assert.Equal(["net8.0"], a.Frameworks));
+
+        // The default value provides the content, the other one is a variant.
+        Assert.Equal("v2", shared.Summary.Trim());
+        var variant = Assert.Single(shared.Variants);
+        Assert.Equal("v1", Assert.Single(variant.AppliesTo).Version);
+        Assert.Equal("v1", variant.Summary.Trim());
+
+        Assert.Equal("v1", Assert.Single(Page("Lib.OnlyV1.yml").Items[0].AppliesTo).Version);
+        Assert.Equal("v2", Assert.Single(Page("Lib.OnlyV2.yml").Items[0].AppliesTo).Version);
+    }
+
+    [Fact]
+    public async Task AProjectThatMatchesNoValueOfTheAxisIsAnError()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+        var axis = Axis(defaultValue: "v1");
+        axis.Values.RemoveAt(1);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [axis] });
+
+        var error = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Equal(ErrorCodes.Metadata.InvalidAxis, error.Code);
+        Assert.Contains("V2.csproj", error.Message);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyV1.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyV2.yml")));
+    }
+
+    [Fact]
+    public async Task AnInvalidAxisIsAnError()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v3")] });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.InvalidAxis && x.Message.Contains("'v3'"));
+    }
+
+    private static MetadataAxisConfig Axis(string defaultValue) => new()
+    {
+        Name = "Version",
+        Values =
+        [
+            new() { Id = "v1", Label = "Version 1", Files = ["**/V1/V1.csproj"] },
+            new() { Id = "v2", Label = "Version 2", Files = ["**/V2/V2.csproj"] },
+        ],
+        Default = defaultValue,
+    };
+
+    /// <summary>
+    /// Two projects that both build an assembly named <c>Lib</c>, the way one library is built against
+    /// two versions of a dependency.
+    /// </summary>
+    private (string V1, string V2) CreateTwoVersionsOfOneAssembly()
+    {
+        string Create(string name) => CreateProject(name, "<TargetFramework>net8.0</TargetFramework><AssemblyName>Lib</AssemblyName>", $$"""
+            namespace Lib
+            {
+                /// <summary>{{name.ToLowerInvariant()}}</summary>
+                public class Shared { }
+
+                public class Only{{name}} { }
+            }
+            """);
+
+        return (Create("V1"), Create("V2"));
+    }
+
     private PageViewModel Page(string fileName)
     {
         return YamlUtility.Deserialize<PageViewModel>(Path.Combine(_outputFolder, fileName));
@@ -383,7 +469,7 @@ public class TargetFrameworkTest : TestBase
         return warnings.FirstOrDefault();
     }
 
-    private static FileMapping Src(string project) => new(new FileMappingItem(project)) { Expanded = true };
+    private static FileMapping Src(params string[] projects) => new(new FileMappingItem(projects)) { Expanded = true };
 
     /// <summary>
     /// A project targeting <c>net8.0;netstandard2.0</c> with one type per framework, and a type whose

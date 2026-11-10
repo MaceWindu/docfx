@@ -545,6 +545,32 @@ It cannot be combined with [`targetFramework`](#targetframework), which takes pr
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it.
 
+### `axes`
+
+An axis besides the target framework along which the projects of this metadata item differ, such as the version of a dependency they are built against. Each project gets the first value whose `files` match it, relative to the `src` of the item, and the APIs that several values share get one page, which lists the frameworks it exists in for each value. The `default` value, or the first one, provides the content of an API that exists in several.
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ { "files": [ "src/MyLib.EF/*.csproj" ] } ],
+      "axes": [
+        {
+          "name": "EF Core",
+          "values": [
+            { "id": "ef8", "label": "EF Core 8", "files": [ "**/MyLib.EF8.csproj" ] },
+            { "id": "ef9", "label": "EF Core 9", "files": [ "**/MyLib.EF9.csproj" ] }
+          ],
+          "default": "ef9"
+        }
+      ]
+    }
+  ]
+}
+```
+
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented. A project that matches no value is reported as an `InvalidAxis` error and not documented.
+
 ### `variantIgnore`
 
 The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants. Nothing is ignored by default.

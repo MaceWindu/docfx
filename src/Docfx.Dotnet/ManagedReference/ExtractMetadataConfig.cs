@@ -53,6 +53,8 @@ internal class ExtractMetadataConfig
 
     public VariantIgnore VariantIgnore { get; init; }
 
+    public TargetFrameworkAxis Axis { get; init; }
+
     public bool AllowCompilationErrors { get; init; }
 
     public static bool UseClrTypeNames { get; set; }
