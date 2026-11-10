@@ -73,16 +73,25 @@ exports.groupChildren = groupChildren;
 exports.getTypePropertyName = getTypePropertyName;
 exports.getCategory = getCategory;
 
+// The units an item applies to: a framework, or `value:framework` when there is an axis such as EF Core.
 function getAppliesToFrameworks(vm) {
-  var frameworks = [];
+  var units = [];
   (vm.appliesTo || []).forEach(function (group) {
     (group.frameworks || []).forEach(function (framework) {
-      if (frameworks.indexOf(framework) < 0) {
-        frameworks.push(framework);
+      var unit = group.version ? group.version + ':' + framework : framework;
+      if (units.indexOf(unit) < 0) {
+        units.push(unit);
       }
     });
   });
-  return frameworks;
+  return units;
+}
+
+function getAppliesToText(vm) {
+  return (vm.appliesTo || []).map(function (group) {
+    var frameworks = (group.frameworks || []).map(getFrameworkLabel).join(', ');
+    return group.version ? (group.label || group.version) + ': ' + frameworks : frameworks;
+  }).join(' · ');
 }
 
 function getFrameworkLabel(framework) {
@@ -109,9 +118,8 @@ function handleAppliesTo(vm, parent) {
 
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
-    var variantFrameworks = getAppliesToFrameworks(variant);
-    variant.appliesToData = variantFrameworks.join(' ');
-    variant.appliesToText = variantFrameworks.map(getFrameworkLabel).join(', ');
+    variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
+    variant.appliesToText = getAppliesToText(variant);
     // a field that does not differ must not be looked up on the item, which would repeat its value
     variant.summary = variant.summary || "";
     variant.remarks = variant.remarks || "";
@@ -124,7 +132,7 @@ function handleAppliesTo(vm, parent) {
     return;
   }
 
-  var text = frameworks.map(getFrameworkLabel).join(', ');
+  var text = getAppliesToText(vm);
   vm.appliesToData = frameworks.join(' ');
   if (!parent) {
     vm.appliesToText = text;
