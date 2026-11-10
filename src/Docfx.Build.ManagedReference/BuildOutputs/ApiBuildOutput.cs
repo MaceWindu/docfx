@@ -190,6 +190,11 @@ public class ApiBuildOutput
     [JsonPropertyName(Constants.PropertyName.AppliesTo)]
     public List<AppliesToViewModel> AppliesTo { get; set; }
 
+    [YamlMember(Alias = "variants")]
+    [JsonProperty("variants")]
+    [JsonPropertyName("variants")]
+    public List<ApiVariantBuildOutput> Variants { get; set; }
+
     [YamlMember(Alias = "attributes")]
     [JsonProperty("attributes")]
     [JsonPropertyName("attributes")]
@@ -281,6 +286,7 @@ public class ApiBuildOutput
             Conceptual = model.Conceptual,
             Platform = model.Platform,
             AppliesTo = model.AppliesTo,
+            Variants = model.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, references, model.SupportedLanguages)).ToList(),
             Attributes = model.Attributes,
             Metadata = model.Metadata.Concat(metadata.Where(p => !model.Metadata.ContainsKey(p.Key))).ToDictionary(p => p.Key, p => p.Value),
         };

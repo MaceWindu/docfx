@@ -12,10 +12,12 @@ exports.transform = function (model) {
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model);
+  else delete model.variants;
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
       if (showAppliesTo) handleAppliesTo(item, model);
+      else delete item.variants;
     });
   }
 
@@ -104,6 +106,18 @@ function handleAppliesTo(vm, parent) {
   vm.appliesToData = "";
   vm.appliesToText = "";
   vm.appliesToBadge = "";
+
+  vm.variants = vm.variants || [];
+  vm.variants.forEach(function (variant) {
+    var variantFrameworks = getAppliesToFrameworks(variant);
+    variant.appliesToData = variantFrameworks.join(' ');
+    variant.appliesToText = variantFrameworks.map(getFrameworkLabel).join(', ');
+    // a field that does not differ must not be looked up on the item, which would repeat its value
+    variant.summary = variant.summary || "";
+    variant.remarks = variant.remarks || "";
+    variant.syntax = variant.syntax || "";
+    variant.inheritance = variant.inheritance || [];
+  });
 
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {

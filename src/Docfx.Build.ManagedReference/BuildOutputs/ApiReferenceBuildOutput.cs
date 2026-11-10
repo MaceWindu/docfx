@@ -145,6 +145,11 @@ public class ApiReferenceBuildOutput
     [JsonPropertyName("implements")]
     public List<ApiNames> Implements { get; set; }
 
+    [YamlMember(Alias = "variants")]
+    [JsonProperty("variants")]
+    [JsonPropertyName("variants")]
+    public List<ApiVariantBuildOutput> Variants { get; set; }
+
     [YamlMember(Alias = "inheritedMembers")]
     [JsonProperty("inheritedMembers")]
     [JsonPropertyName("inheritedMembers")]
@@ -276,6 +281,7 @@ public class ApiReferenceBuildOutput
             Attributes = vm.Attributes,
             Syntax = ApiSyntaxBuildOutput.FromModel(vm.Syntax, vm.SupportedLanguages),
             Exceptions = vm.Exceptions?.Select(ApiExceptionInfoBuildOutput.FromModel).ToList(),
+            Variants = vm.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, vm.SupportedLanguages)).ToList(),
         };
         output.Metadata["type"] = vm.Type;
         output.Metadata["summary"] = vm.Summary;
@@ -300,6 +306,7 @@ public class ApiReferenceBuildOutput
             SeeAlsos?.ForEach(e => e.Expand(references, supportedLanguages));
             Exceptions?.ForEach(e => e.Expand(references, supportedLanguages));
             Overload = ApiBuildOutputUtility.GetApiNames(Overload?.Uid, references, supportedLanguages);
+            Variants?.ForEach(v => v.Expand(references, supportedLanguages));
         }
     }
 
