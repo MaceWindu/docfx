@@ -543,6 +543,26 @@ The target frameworks to document together, or `"*"` for every framework a proje
 
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
+Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it.
+
+### `variantIgnore`
+
+The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants. Nothing is ignored by default.
+
+- `attributes`: attributes, including the attribute lines of a declaration.
+- `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": "*",
+      "variantIgnore": [ "attributes" ]
+    }
+  ]
+}
+```
+
 ### `noRestore`
 
 Do not run `dotnet restore` before building the projects. Use this option when the projects have already been restored.

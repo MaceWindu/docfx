@@ -3,14 +3,36 @@
 
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using YamlDotNet.Serialization;
 
 namespace Docfx.Dotnet;
 
 /// <summary>
+/// The kinds of difference between target frameworks that are not recorded as variants.
+/// </summary>
+[Flags]
+internal enum VariantIgnore
+{
+    None = 0,
+
+    /// <summary>
+    /// Attributes, including the attribute lines of a declaration.
+    /// </summary>
+    Attributes = 1,
+
+    /// <summary>
+    /// Summaries, remarks, examples, descriptions, exceptions and see-also links.
+    /// </summary>
+    Documentation = 2,
+}
+
+/// <summary>
 /// Records how the same API differs between the target frameworks it is documented for.
 /// </summary>
-internal static class TargetFrameworkVariants
+internal static partial class TargetFrameworkVariants
 {
     // Excluded rather than listed the other way round, so that a field added to the model is compared by
     // default. These identify the API, say where it was declared, or are combined instead of compared.
@@ -38,15 +60,25 @@ internal static class TargetFrameworkVariants
         nameof(MetadataItem.References),
     ];
 
-    private static readonly PropertyInfo[] Compared = typeof(MetadataItem)
+    private static readonly (PropertyInfo Property, string Name)[] Compared = typeof(MetadataItem)
         .GetProperties()
         .Where(p => p.GetCustomAttribute<YamlMemberAttribute>() is not null && !NotCompared.Contains(p.Name))
+        .Select(p => (p, p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? p.Name))
         .ToArray();
+
+    // Text that one framework documents and another leaves empty is not a difference: it is most often
+    // inherited from the reference assemblies of a framework, and some ship without documentation.
+    private static readonly HashSet<string> DocumentationText = ["summary", "remarks", "example", "description"];
+
+    private static readonly HashSet<string> Documentation = [.. DocumentationText, "exceptions", "seealso"];
+
+    [GeneratedRegex(@"^[ \t]*(\[[^\]\r\n]*\]|<[^>\r\n]*>)[ \t]*(\r?\n|$)", RegexOptions.Multiline)]
+    private static partial Regex AttributeLineRegex();
 
     /// <summary>
     /// Adds what <paramref name="other"/> has in <paramref name="framework"/> to <paramref name="primary"/>.
     /// </summary>
-    public static void Merge(MetadataItem primary, MetadataItem other, string framework)
+    public static void Merge(MetadataItem primary, MetadataItem other, string framework, VariantIgnore ignore = VariantIgnore.None)
     {
         // A member or interface present in one framework belongs on the page whichever framework
         // provides the rest of it. An inheritance chain cannot be combined, so it is compared instead.
@@ -54,12 +86,27 @@ internal static class TargetFrameworkVariants
         primary.InheritedMembers = Union(primary.InheritedMembers, other.InheritedMembers);
         primary.ExtensionMethods = Union(primary.ExtensionMethods, other.ExtensionMethods);
 
+        if (string.IsNullOrEmpty(primary.Summary))
+        {
+            primary.Summary = other.Summary;
+        }
+
+        if (string.IsNullOrEmpty(primary.Remarks))
+        {
+            primary.Remarks = other.Remarks;
+        }
+
+        if (primary.Examples is not { Count: > 0 })
+        {
+            primary.Examples = other.Examples;
+        }
+
         var content = new MetadataItem();
         var differs = false;
-        foreach (var property in Compared)
+        foreach (var (property, name) in Compared)
         {
             var value = property.GetValue(other);
-            if (!AreEqual(property.GetValue(primary), value))
+            if (!AreEquivalent(property.GetValue(primary), value, name, ignore))
             {
                 property.SetValue(content, value);
                 differs = true;
@@ -72,7 +119,7 @@ internal static class TargetFrameworkVariants
         }
 
         primary.Variants ??= [];
-        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content)) is { } existing)
+        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, ignore)) is { } existing)
         {
             existing.Frameworks.Add(framework);
         }
@@ -82,26 +129,68 @@ internal static class TargetFrameworkVariants
         }
     }
 
-    private static bool HasSameContent(MetadataItem left, MetadataItem right)
+    private static bool HasSameContent(MetadataItem left, MetadataItem right, VariantIgnore ignore)
     {
-        return Compared.All(property => AreEqual(property.GetValue(left), property.GetValue(right)));
+        return Compared.All(field => AreEquivalent(field.Property.GetValue(left), field.Property.GetValue(right), field.Name, ignore));
     }
 
-    private static bool AreEqual(object left, object right)
+    private static bool AreEquivalent(object left, object right, string name, VariantIgnore ignore)
     {
-        if (ReferenceEquals(left, right))
+        return ReferenceEquals(left, right) || AreEquivalent(ToNode(left), ToNode(right), name, ignore, inDeclaration: false);
+    }
+
+    private static JsonNode ToNode(object value)
+    {
+        return value is null ? null : JsonSerializer.SerializeToNode(value, value.GetType());
+    }
+
+    private static bool AreEquivalent(JsonNode left, JsonNode right, string name, VariantIgnore ignore, bool inDeclaration)
+    {
+        if ((ignore.HasFlag(VariantIgnore.Attributes) && name == "attributes") ||
+            (ignore.HasFlag(VariantIgnore.Documentation) && Documentation.Contains(name)))
         {
             return true;
         }
 
-        if (left is null || right is null)
+        if (IsEmpty(left) || IsEmpty(right))
         {
-            return false;
+            return (IsEmpty(left) && IsEmpty(right)) || DocumentationText.Contains(name);
         }
 
-        return left is string
-            ? left.Equals(right)
-            : JsonSerializer.Serialize(left, left.GetType()) == JsonSerializer.Serialize(right, right.GetType());
+        switch (left)
+        {
+            case JsonObject leftObject when right is JsonObject rightObject:
+                return leftObject.Select(p => p.Key).Union(rightObject.Select(p => p.Key)).All(key =>
+                    AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content"));
+
+            case JsonArray leftArray when right is JsonArray rightArray:
+                return leftArray.Count == rightArray.Count
+                    && leftArray.Zip(rightArray).All(pair => AreEquivalent(pair.First, pair.Second, name, ignore, inDeclaration));
+
+            case JsonValue when right is JsonValue:
+                if (inDeclaration && ignore.HasFlag(VariantIgnore.Attributes) &&
+                    left.GetValueKind() is JsonValueKind.String && right.GetValueKind() is JsonValueKind.String)
+                {
+                    return AttributeLineRegex().Replace(left.GetValue<string>(), "") == AttributeLineRegex().Replace(right.GetValue<string>(), "");
+                }
+
+                return left.ToJsonString() == right.ToJsonString();
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsEmpty(JsonNode node)
+    {
+        return node switch
+        {
+            null => true,
+            JsonArray array => array.Count == 0,
+            JsonObject obj => obj.Count == 0,
+            JsonValue value => value.GetValueKind() is JsonValueKind.String && value.GetValue<string>().Length == 0,
+            _ => false,
+        };
     }
 
     private static List<string> Union(List<string> first, List<string> second)
