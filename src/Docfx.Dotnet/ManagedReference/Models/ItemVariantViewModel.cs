@@ -22,16 +22,19 @@ public class ItemVariantViewModel
     [YamlMember(Alias = "summary")]
     [JsonProperty("summary")]
     [JsonPropertyName("summary")]
+    [MarkdownContent]
     public string Summary { get; set; }
 
     [YamlMember(Alias = "remarks")]
     [JsonProperty("remarks")]
     [JsonPropertyName("remarks")]
+    [MarkdownContent]
     public string Remarks { get; set; }
 
     [YamlMember(Alias = "example")]
     [JsonProperty("example")]
     [JsonPropertyName("example")]
+    [MarkdownContent]
     public List<string> Examples { get; set; }
 
     [YamlMember(Alias = "syntax")]
@@ -42,6 +45,7 @@ public class ItemVariantViewModel
     [YamlMember(Alias = "overridden")]
     [JsonProperty("overridden")]
     [JsonPropertyName("overridden")]
+    [UniqueIdentityReference]
     public string Overridden { get; set; }
 
     [YamlMember(Alias = "exceptions")]
@@ -54,9 +58,16 @@ public class ItemVariantViewModel
     [JsonPropertyName("seealso")]
     public List<LinkInfo> SeeAlsos { get; set; }
 
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    [UniqueIdentityReference]
+    public List<string> SeeAlsosUidReference => SeeAlsos?.Where(s => s.LinkType == LinkType.CRef).Select(s => s.LinkId).ToList();
+
     [YamlMember(Alias = "inheritance")]
     [JsonProperty("inheritance")]
     [JsonPropertyName("inheritance")]
+    [UniqueIdentityReference]
     public List<string> Inheritance { get; set; }
 
     [YamlMember(Alias = "attributes")]
