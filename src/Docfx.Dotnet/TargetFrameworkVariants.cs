@@ -75,6 +75,9 @@ internal static partial class TargetFrameworkVariants
     [GeneratedRegex(@"^[ \t]*(\[[^\]\r\n]*\]|<[^>\r\n]*>)[ \t]*(\r?\n|$)", RegexOptions.Multiline)]
     private static partial Regex AttributeLineRegex();
 
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
+
     /// <summary>
     /// Adds what <paramref name="other"/> has in <paramref name="framework"/> to <paramref name="primary"/>.
     /// </summary>
@@ -86,12 +89,12 @@ internal static partial class TargetFrameworkVariants
         primary.InheritedMembers = Union(primary.InheritedMembers, other.InheritedMembers);
         primary.ExtensionMethods = Union(primary.ExtensionMethods, other.ExtensionMethods);
 
-        if (string.IsNullOrEmpty(primary.Summary))
+        if (string.IsNullOrWhiteSpace(primary.Summary))
         {
             primary.Summary = other.Summary;
         }
 
-        if (string.IsNullOrEmpty(primary.Remarks))
+        if (string.IsNullOrWhiteSpace(primary.Remarks))
         {
             primary.Remarks = other.Remarks;
         }
@@ -168,10 +171,21 @@ internal static partial class TargetFrameworkVariants
                     && leftArray.Zip(rightArray).All(pair => AreEquivalent(pair.First, pair.Second, name, ignore, inDeclaration));
 
             case JsonValue when right is JsonValue:
-                if (inDeclaration && ignore.HasFlag(VariantIgnore.Attributes) &&
-                    left.GetValueKind() is JsonValueKind.String && right.GetValueKind() is JsonValueKind.String)
+                if (left.GetValueKind() is JsonValueKind.String && right.GetValueKind() is JsonValueKind.String)
                 {
-                    return AttributeLineRegex().Replace(left.GetValue<string>(), "") == AttributeLineRegex().Replace(right.GetValue<string>(), "");
+                    if (inDeclaration && ignore.HasFlag(VariantIgnore.Attributes))
+                    {
+                        return AttributeLineRegex().Replace(left.GetValue<string>(), "") == AttributeLineRegex().Replace(right.GetValue<string>(), "");
+                    }
+
+                    // Line breaks and indentation of documentation follow the layout of the source comment,
+                    // which is rewrapped between versions without changing what it says.
+                    if (DocumentationText.Contains(name))
+                    {
+                        var leftText = WhitespaceRegex().Replace(left.GetValue<string>(), "");
+                        var rightText = WhitespaceRegex().Replace(right.GetValue<string>(), "");
+                        return leftText == rightText || leftText.Length == 0 || rightText.Length == 0;
+                    }
                 }
 
                 return left.ToJsonString() == right.ToJsonString();
