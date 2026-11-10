@@ -696,6 +696,22 @@
               }
             ]
           },
+          "variantIgnore": {
+            "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants. Nothing is ignored by default.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [ "attributes", "documentation" ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [ "attributes", "documentation" ]
+                }
+              }
+            ]
+          },
           "disableGitFeatures": {
             "type": "boolean",
             "default": false,
