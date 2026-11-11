@@ -15,8 +15,9 @@ namespace Docfx.Tests;
 [Collection("docfx STA")]
 public class TargetFrameworksBuildTest : TestBase
 {
-    private const string Both = ".NET 8.0, .NET Standard 2.0";
-    private const string Net8 = ".NET 8.0";
+    private const string Both = ".NET 8, .NET Standard 2.0";
+    private const string Net8 = ".NET 8";
+    private const string Badge = "<span class=\"applies-to ms-2 fs-6 fw-normal text-body-secondary\">{0}</span>";
 
     private readonly string _projectFolder;
 
@@ -90,8 +91,8 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Contains("data-uid=\"Lib.Shared.Everywhere\" data-applies-to=\"net8.0 netstandard2.0\"", page);
         Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
-        Assert.Contains($"<span class=\"badge text-bg-secondary applies-to\">{Net8}</span>", page);
-        Assert.DoesNotContain($"<span class=\"badge text-bg-secondary applies-to\">{Both}</span>", page);
+        Assert.Contains(string.Format(Badge, Net8), page);
+        Assert.DoesNotContain(string.Format(Badge, Both), page);
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public class TargetFrameworksBuildTest : TestBase
         var page = await Page(site, "Lib.Shared.Do.html");
 
         Assert.Contains($"<dt>Applies to</dt><dd>{Both}</dd>", page);
-        Assert.Contains($"<span class=\"badge text-bg-secondary applies-to\">{Net8}</span>", page);
+        Assert.Contains(string.Format(Badge, Net8), page);
     }
 
     [Theory]
@@ -191,7 +192,7 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.DoesNotContain("Applies to", page);
         Assert.DoesNotContain("data-applies-to", page);
-        Assert.DoesNotContain("applies-to\">", page);
+        Assert.DoesNotContain("class=\"applies-to", page);
 
         var differs = await Page(site, "Lib.Differs.html");
         Assert.DoesNotContain("api-variant", differs);
@@ -210,9 +211,11 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain(".NET Standard 2.0", await Page(site, "Lib.Differs.html"));
     }
 
-    [Fact]
+    [Theory]
     [Trait("Related", "docfx")]
-    public async Task AnAxisIsShownWithTheLabelsOfItsValues()
+    [InlineData(false, "<strong>Version 1</strong> (.NET 8), <strong>Version 2</strong> (.NET 8)", "<strong>Version 1</strong> (.NET 8)")]
+    [InlineData(true, "<strong>Version 1</strong>, <strong>Version 2</strong>", "<strong>Version 1</strong>")]
+    public async Task AnAxisIsShownWithTheLabelsOfItsValues(bool hideFrameworks, string appliesTo, string variantLabel)
     {
         foreach (var version in new[] { "V1", "V2" })
         {
@@ -237,7 +240,7 @@ public class TargetFrameworksBuildTest : TestBase
         }
 
         var configPath = Path.Combine(_projectFolder, "docfx.json");
-        await File.WriteAllTextAsync(configPath, """
+        await File.WriteAllTextAsync(configPath, $$"""
             {
               "metadata": [
                 {
@@ -258,6 +261,7 @@ public class TargetFrameworksBuildTest : TestBase
               "build": {
                 "content": [ { "files": [ "api/**.yml" ] } ],
                 "template": [ "default", "modern" ],
+                "globalMetadata": { "_disableApiAppliesToFrameworks": {{(hideFrameworks ? "true" : "false")}} },
                 "dest": "_site"
               }
             }
@@ -267,11 +271,10 @@ public class TargetFrameworksBuildTest : TestBase
         await Docset.Build(configPath);
 
         var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
-        // Mustache escapes the separator between values, which reads the same.
-        Assert.Contains("<dt>Applies to</dt><dd>Version 1: .NET 8.0 &#183; Version 2: .NET 8.0</dd>", page);
+        Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
         Assert.Contains("Summary of V2.", page);
         Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
-        Assert.Contains("<h6 class=\"api-variant-label\">Version 1: .NET 8.0</h6>", page);
+        Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
     }
 
     private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));

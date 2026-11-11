@@ -190,7 +190,7 @@ If a project does not target the requested framework, docfx logs a `TargetFramew
 }
 ```
 
-Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8.0, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
+Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
 
 Documentation that one framework has and another lacks, or that differs only in whitespace, is not shown as a difference. Inherited documentation is the common case: the reference assemblies of older frameworks often have none. [`variantIgnore`](../reference/docfx-json-reference.md#variantignore) leaves out attribute or documentation differences altogether.
 
