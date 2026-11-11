@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Docfx.Dotnet.Tests;
 
+[Collection("docfx STA")]
 public class TargetFrameworkMergeTest
 {
     private const string First = "net8.0";
