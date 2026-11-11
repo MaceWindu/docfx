@@ -31,6 +31,13 @@ public class TargetFrameworkTest : TestBase
         File.WriteAllText(Path.Combine(_projectFolder, "Directory.Packages.props"), "<Project></Project>");
     }
 
+    public override void Dispose()
+    {
+        // Some cases log errors on purpose, and the command run by a later test reports any error logged.
+        Logger.ResetCount();
+        base.Dispose();
+    }
+
     [Fact]
     public async Task WithoutTargetFrameworkTheFirstFrameworkIsDocumented()
     {
