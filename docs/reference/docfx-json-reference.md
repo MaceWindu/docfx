@@ -540,6 +540,8 @@ An axis besides the target framework along which the projects of this metadata i
 
 One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented. A project that matches no value is reported as an `InvalidAxis` error and not documented.
 
+Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
+
 ### `variantIgnore`
 
 The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants. Nothing is ignored by default.
@@ -730,9 +732,13 @@ File(s) specified are not returned in search results
 
 Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks).
 
+### `_disableApiAppliesToFrameworks`
+
+On API pages built with [`axes`](#axes), show only the values of the axis an API applies to, such as `Applies to: EF Core 8, EF Core 9`, without their frameworks. Pages without an axis are not affected.
+
 ### `_frameworkNames`
 
-The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0`.
+The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0` or `.NET 8` for `net8.0`.
 
 ```json
 {

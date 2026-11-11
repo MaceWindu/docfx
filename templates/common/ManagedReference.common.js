@@ -10,13 +10,14 @@ exports.transform = function (model) {
 
   langs = model.langs;
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
   handleItem(model, model._gitContribute, model._gitUrlPattern);
-  if (showAppliesTo) handleAppliesTo(model, null, model._frameworkNames);
+  if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
-      if (showAppliesTo) handleAppliesTo(item, model, model._frameworkNames);
+      if (showAppliesTo) handleAppliesTo(item, model, appliesToOptions);
       else delete item.variants;
     });
   }
@@ -87,11 +88,16 @@ function getAppliesToFrameworks(vm) {
   return units;
 }
 
-function getAppliesToText(vm, names) {
-  return (vm.appliesTo || []).map(function (group) {
-    var frameworks = (group.frameworks || []).map(function (framework) { return getFrameworkLabel(framework, names); }).join(', ');
-    return group.version ? (group.label || group.version) + ': ' + frameworks : frameworks;
-  }).join(' · ');
+// One entry per value of the axis, or a single one without an axis, rendered by `partials/appliesTo`.
+// Every field is set, so that mustache does not look one up on the enclosing item.
+function getAppliesToGroups(vm, options) {
+  return (vm.appliesTo || []).map(function (group, index) {
+    var label = group.version ? (group.label || group.version) : "";
+    var frameworks = label && options.hideFrameworks
+      ? ""
+      : (group.frameworks || []).map(function (framework) { return getFrameworkLabel(framework, options.names); }).join(', ');
+    return { appliesToLabel: label, appliesToFrameworks: frameworks, appliesToIsFirst: index === 0 };
+  });
 }
 
 function getFrameworkLabel(framework, names) {
@@ -103,8 +109,9 @@ function getFrameworkLabel(framework, names) {
   match = /^netcoreapp(\d+\.\d+)$/.exec(framework);
   if (match) return '.NET Core ' + match[1];
 
-  match = /^net(\d+\.\d+)(-.+)?$/.exec(framework);
-  if (match) return '.NET ' + match[1] + (match[2] || '');
+  // .NET 5 and later are named by their major version, as Microsoft does: `net8.0` is .NET 8.
+  match = /^net(\d+)\.(\d+)(-.+)?$/.exec(framework);
+  if (match) return '.NET ' + match[1] + (match[2] === '0' ? '' : '.' + match[2]) + (match[3] || '');
 
   match = /^net(\d)(\d)(\d)?$/.exec(framework);
   if (match) return '.NET Framework ' + match[1] + '.' + match[2] + (match[3] ? '.' + match[3] : '');
@@ -112,16 +119,17 @@ function getFrameworkLabel(framework, names) {
   return framework;
 }
 
-function handleAppliesTo(vm, parent, names) {
+function handleAppliesTo(vm, parent, options) {
   // set to empty so that mustache does not look up the values of the enclosing type
   vm.appliesToData = "";
-  vm.appliesToText = "";
-  vm.appliesToBadge = "";
+  vm.appliesToGroups = [];
+  vm.showAppliesTo = false;
+  vm.showAppliesToBadge = false;
 
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
-    variant.appliesToText = getAppliesToText(variant, names);
+    variant.appliesToGroups = getAppliesToGroups(variant, options);
     // a field that does not differ must not be looked up on the item, which would repeat its value
     variant.summary = variant.summary || "";
     variant.remarks = variant.remarks || "";
@@ -134,13 +142,13 @@ function handleAppliesTo(vm, parent, names) {
     return;
   }
 
-  var text = getAppliesToText(vm, names);
   vm.appliesToData = frameworks.join(' ');
+  vm.appliesToGroups = getAppliesToGroups(vm, options);
   if (!parent) {
-    vm.appliesToText = text;
+    vm.showAppliesTo = true;
   } else if (frameworks.slice().sort().join(' ') !== getAppliesToFrameworks(parent).sort().join(' ')) {
     // A member is only marked when it differs from its type, or every member would carry the same badge.
-    vm.appliesToBadge = text;
+    vm.showAppliesToBadge = true;
   }
 }
 
