@@ -127,10 +127,17 @@ function inThisArticle(): TemplateResult {
     return html`
       <h5 class="border-bottom">${loc('inThisArticle')}</h5>
       <ul>${headings.map(h => h.tagName === 'H2'
-        ? html`<li><a class="link-body-emphasis" href="#${h.id}">${breakWordLit(h.textContent)}</a></li>`
-        : html`<li><a class="link-secondary" href="#${h.id}">${breakWordLit(h.textContent)}</a></li>`
+        ? html`<li><a class="link-body-emphasis" href="#${h.id}">${breakWordLit(headingTitle(h))}</a></li>`
+        : html`<li><a class="link-secondary" href="#${h.id}">${breakWordLit(headingTitle(h))}</a></li>`
     )}</ul>`
   }
+}
+
+// The frameworks a member applies to are shown in its heading, but are not part of its name.
+function headingTitle(heading: HTMLHeadingElement): string {
+  const title = heading.cloneNode(true) as HTMLHeadingElement
+  title.querySelectorAll('.applies-to').forEach(e => e.remove())
+  return title.textContent
 }
 
 function findActiveItem(items: (NavItem | NavItemContainer)[]): NavItem {
