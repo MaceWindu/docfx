@@ -1,0 +1,115 @@
+# Measures what `docfx metadata` costs on the linq2db documentation for each way of choosing target
+# frameworks, with the docfx of this branch. Temporary: lives on measure/* branches only.
+#
+# - properties: linq2db's own config, `properties.TargetFramework` per entry (the current site)
+# - targetFramework: the same entries with `targetFramework` (PR-1)
+# - targetFrameworks: every framework of each project, EF Core as one entry with an axis (PR-2)
+name: measure-linq2db
+
+on:
+  push:
+    branches: ['measure/*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LINQ2DB_REF: fdc08bfe6a30e8fa0848123c23718882db1acddd
+
+jobs:
+  measure:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: properties
+            config: docfx.json
+          - name: targetFramework
+            config: docfx-tf.json
+          - name: targetFrameworks
+            config: docfx-axes.json
+    name: measure (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: docfx
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: linq2db/linq2db
+          ref: ${{ env.LINQ2DB_REF }}
+          path: linq2db
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # 11.x for docfx's own net11.0 target, 10.x for linq2db's global.json
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            11.x
+            10.x
+
+      - name: Publish docfx
+        shell: pwsh
+        working-directory: docfx
+        run: |
+          Push-Location templates
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'npm run build failed' }
+          Pop-Location
+          dotnet publish src/docfx/docfx.csproj -c Release -f net10.0 -o "$env:RUNNER_TEMP/docfx"
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+
+      # As linq2db's docs/build.ps1 does: the F# entry documents the built assembly.
+      - name: Prepare linq2db
+        shell: pwsh
+        working-directory: linq2db
+        run: |
+          Copy-Item ../docfx/.github/measure/*.json docs/source/
+          dotnet build -c Release -p:RunAnalyzersDuringBuild=false -p:EnforceCodeStyleInBuild=false 'Source/LinqToDB.FSharp/LinqToDB.FSharp.fsproj'
+          if ($LASTEXITCODE -ne 0) { throw 'F# pre-build failed' }
+
+      # CPU time and peak working set are those of the docfx process, as measured locally before.
+      - name: docfx metadata
+        shell: pwsh
+        working-directory: linq2db
+        run: |
+          $log = "$env:RUNNER_TEMP/docfx-${{ matrix.name }}.log"
+          $started = Get-Date
+          $process = Start-Process -FilePath dotnet -ArgumentList @("$env:RUNNER_TEMP/docfx/docfx.dll", 'metadata', 'docs/source/${{ matrix.config }}') `
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow
+          $null = $process.Handle
+          $peak = 0L; $cpu = [TimeSpan]::Zero
+          while (-not $process.HasExited)
+          {
+            try { $process.Refresh(); $peak = [Math]::Max($peak, $process.PeakWorkingSet64); $cpu = $process.TotalProcessorTime } catch [System.InvalidOperationException] { }
+            Start-Sleep -Seconds 2
+          }
+          $process.WaitForExit()
+          $elapsed = (Get-Date) - $started
+          $files = @(Get-ChildItem docs/source/api -Recurse -Filter *.yml -ErrorAction SilentlyContinue).Count
+          $warnings = @(Select-String -LiteralPath $log -Pattern '\bwarning\b').Count
+          $result = "| ${{ matrix.name }} | $($process.ExitCode) | $([Math]::Round($cpu.TotalMinutes, 1)) min | $([Math]::Round($peak / 1GB, 2)) GB | $([Math]::Round($elapsed.TotalMinutes, 1)) min | $files | $warnings |"
+          "| config | exit | CPU | peak working set | wall | yml files | warnings |" >> $env:GITHUB_STEP_SUMMARY
+          "|---|---|---|---|---|---|---|" >> $env:GITHUB_STEP_SUMMARY
+          $result >> $env:GITHUB_STEP_SUMMARY
+          $result | Set-Content "$env:RUNNER_TEMP/result-${{ matrix.name }}.md"
+          Write-Host $result
+          Get-Content $log -Tail 30
+          if ($process.ExitCode -ne 0) { throw "docfx exited with $($process.ExitCode)" }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: measure-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/docfx-${{ matrix.name }}.log*
+            ${{ runner.temp }}/result-${{ matrix.name }}.md
+          retention-days: 14
