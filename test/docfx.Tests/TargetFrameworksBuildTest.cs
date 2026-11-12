@@ -50,6 +50,13 @@ public class TargetFrameworksBuildTest : TestBase
             #else
                     public void Do(string value) { }
             #endif
+
+            #if NET8_0
+                    /// <exception cref="System.ArgumentException">Thrown on net8.</exception>
+            #else
+                    /// <exception cref="System.InvalidOperationException">Thrown on older frameworks.</exception>
+            #endif
+                    public void Check() { }
                 }
             #if NET8_0
                 public class OnlyNet8 { }
@@ -157,6 +164,22 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains("In other frameworks", page);
         Assert.True(page.IndexOf("public int Value()", StringComparison.Ordinal) < page.IndexOf("public long Value()", StringComparison.Ordinal));
         Assert.True(page.IndexOf("Described for net8.", StringComparison.Ordinal) < page.IndexOf("Described for older", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AVariantShowsWhateverDiffers(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Shared.html");
+
+        // Check differs only in the exception it documents, which must not leave an empty variant.
+        var variant = Regex.Match(page, "<div class=\"api-variant\" data-applies-to=\"netstandard2.0\">[\\s\\S]*?Thrown on older frameworks\\.").Value;
+        Assert.NotEmpty(variant);
+        Assert.Contains("InvalidOperationException", variant);
+        Assert.Equal(1, Regex.Count(page, "Thrown on net8\\."));
     }
 
     [Theory]
