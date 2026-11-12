@@ -12,7 +12,9 @@ exports.transform = function (model) {
   var showAppliesTo = getAppliesToFrameworks(model).length > 0;
   // `_disableApiAppliesTo` hides the labels only: what differs in other frameworks is still shown, and
   // `data-applies-to`, which a framework picker and a framework PDF read, is still written.
-  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, hideLabels: !!model._disableApiAppliesTo };
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, hideLabels: !!model._disableApiAppliesTo, picker: !!model._enableApiAppliesToPicker };
+  // the picker labels frameworks as the page does
+  if (appliesToOptions.picker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -149,6 +151,7 @@ function handleAppliesTo(vm, parent, options) {
   vm.showAppliesTo = false;
   vm.showAppliesToBadge = false;
 
+  var kind = vm.type ? vm.type.toLowerCase() : "";
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
@@ -181,10 +184,7 @@ function handleAppliesTo(vm, parent, options) {
       if (variant.syntax.return) withDescription(variant.syntax.return);
       // the value is labelled as in the API's own section: a return value, until groupChildren names the value of
       // a member of a type as a field, property or event value
-      variant.syntax.return = variant.syntax.return || "";
-      variant.syntax.fieldValue = "";
-      variant.syntax.propertyValue = "";
-      variant.syntax.eventType = "";
+      setValue(variant.syntax, variant.syntax.return, "");
     }
   });
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
@@ -194,9 +194,23 @@ function handleAppliesTo(vm, parent, options) {
     part.description = part.description || "";
   }
 
+  // With the picker, each variant is also rendered as a whole, hidden until a framework it applies to is picked.
+  vm.pickerAppliesToData = "";
+  vm.primaryAppliesToData = "";
+  vm.variantViews = [];
+
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {
     return;
+  }
+
+  if (options.picker) {
+    vm.pickerAppliesToData = frameworks.join(' ');
+    if (vm.variants.length > 0) {
+      var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
+      vm.primaryAppliesToData = frameworks.filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+      vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
+    }
   }
 
   vm.appliesToData = frameworks.join(' ');
@@ -254,6 +268,43 @@ function handleImplements(vm, options) {
     implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
+}
+
+// The value of a field, property or event is labelled as in the API's own section, not as a return value.
+function setValue(syntax, value, kind) {
+  value = value || "";
+  syntax.fieldValue = kind === "field" ? value : "";
+  syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
+  syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
+  syntax.return = syntax.fieldValue || syntax.propertyValue || syntax.eventType ? "" : value;
+}
+
+// The API as it is in the frameworks of a variant: its own content, with what the variant records in place.
+function getVariantView(vm, variant, kind, index) {
+  var view = {};
+  for (var key in vm) {
+    if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
+  }
+  // headings of the copy must not repeat the ids of the API's own
+  view.id = vm.id + '_variant' + (index + 1);
+  view.appliesToData = variant.appliesToData;
+  view.variantViews = [];
+  if (variant.summary) view.summary = variant.summary;
+  if (variant.remarks) view.remarks = variant.remarks;
+  ['inheritance', 'example', 'exceptions', 'seealso'].forEach(function (field) {
+    if (variant[field].length > 0) view[field] = variant[field];
+  });
+  if (variant.syntax) {
+    var own = vm.syntax || {};
+    var syntax = {
+      content: variant.syntax.content || own.content,
+      parameters: variant.syntax.parameters.length > 0 ? variant.syntax.parameters : (own.parameters || []),
+      typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
+    };
+    setValue(syntax, variant.syntax.return || variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType || own.return, kind);
+    view.syntax = syntax;
+  }
+  return view;
 }
 
 function groupChildren(model, category) {
