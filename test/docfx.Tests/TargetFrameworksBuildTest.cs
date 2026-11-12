@@ -270,22 +270,19 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ThePickerGetsEachVariantAsAWholeOnlyWhenEnabled(bool picker)
+    public async Task EachVariantIsRenderedAsAWholeForThePickerAndPdf(bool picker)
     {
-        var options = picker ? "\"globalMetadata\": { \"_enableApiAppliesToPicker\": true, \"_frameworkNames\": { \"net8.0\": \"Modern\" } }," : "";
+        var options = "\"globalMetadata\": { \"_frameworkNames\": { \"net8.0\": \"Modern\" }" + (picker ? ", \"_enableApiAppliesToPicker\": true" : "") + " },";
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
         var page = await Page(site, "Lib.Shared.html");
 
+        // the dropdowns come with the option only, and label frameworks as the page does
         Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
-        Assert.Equal(picker, page.Contains("<div class=\"api-contents\">"));
-        Assert.Equal(picker, Regex.IsMatch(page, "<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\""));
-        if (!picker)
-        {
-            return;
-        }
+        Assert.Equal(picker, Regex.IsMatch(page, "<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">"));
 
-        // the picker labels frameworks as the page does
-        Assert.Matches("<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">", page);
+        // a PDF of one framework needs the content of each variant whether the site has the picker or not
+        Assert.Contains("<div class=\"api-contents\">", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
 
         // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
         var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
