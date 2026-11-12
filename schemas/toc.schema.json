@@ -119,6 +119,14 @@
           "maximum": 6,
           "default": 3,
           "description": "Maximum heading level to include in PDF TOC when pdfTocSource is 'headings'. For example, 3 includes h1, h2, and h3."
+        },
+        "pdfFramework": {
+          "type": "string",
+          "description": "The target framework to print API pages for, such as 'net8.0', for API documented with 'targetFrameworks'. APIs that do not exist in it are left out."
+        },
+        "pdfAxisValue": {
+          "type": "string",
+          "description": "The id of the axis value to print API pages for, such as 'ef9', for API documented with 'axes'. APIs that do not exist in it are left out."
         }
       }
     },

@@ -673,9 +673,9 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
  * Shows the page for the selection: the content of each API for the framework that stands in best, and of what
  * differs elsewhere only what differs within the selection; members, types, and inherited members and extension
  * methods, that do not exist in the selection dimmed; "Applies to" for what is shown; a banner when the API itself
- * does not exist in it.
+ * does not exist in it. In print, for a PDF of one framework, such members are left out instead.
  */
-export function applySelection(selection: Selection, axis?: Axis) {
+export function applySelection(selection: Selection, axis?: Axis, print = false) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
 
@@ -716,6 +716,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
+    if (print) {
+      for (const e of memberElements(heading)) {
+        (e as HTMLElement).hidden = true
+      }
+      return
+    }
     heading.appendChild(unavailableBadge(label, false))
     for (const e of memberElements(heading)) {
       e.classList.add('applies-to-unavailable')
@@ -727,8 +733,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // the types a namespace page lists, and the members of a type with a page each
   document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
     if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
-      entry.classList.add('applies-to-unavailable')
-      entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
+      if (print) {
+        entry.hidden = true
+      } else {
+        entry.classList.add('applies-to-unavailable')
+        entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
+      }
     }
   })
 
@@ -744,8 +754,13 @@ export function applySelection(selection: Selection, axis?: Axis) {
     })
   })
 
+  // a PDF of one framework leaves out the pages of APIs that do not exist in it, and keeps "Applies to" as it is: it
+  // has no axis to label a value with
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
   const units = title ? parseUnits(title.dataset.appliesTo) : []
+  if (print) {
+    return
+  }
   if (title && !isAvailable(units, selection)) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
@@ -917,6 +932,21 @@ export function addHeadingAnchors(add: (headings: Element[]) => void) {
  */
 export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'): string | undefined {
   return display === 'heading' ? undefined : entry.href
+}
+
+declare global {
+  interface Window {
+    /** Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework` and `pdfAxisValue`. */
+    docfxAppliesTo?: { framework?: string, value?: string }
+  }
+}
+
+/** In a PDF of one framework or axis value, shows the pages for it. */
+export function applyPrintSelection() {
+  const selection = window.docfxAppliesTo
+  if (selection) {
+    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined }, undefined, true)
+  }
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */
