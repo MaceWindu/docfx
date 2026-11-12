@@ -28,6 +28,12 @@ internal enum VariantIgnore
     /// Summaries, remarks, examples, descriptions, exceptions and see-also links.
     /// </summary>
     Documentation = 2,
+
+    /// <summary>
+    /// <see cref="Documentation"/>, for an API whose documentation is inherited through <c>inheritdoc</c>,
+    /// explicitly or as an override or implementation without a comment of its own.
+    /// </summary>
+    InheritedDocumentation = 4,
 }
 
 /// <summary>
@@ -84,6 +90,13 @@ internal static partial class TargetFrameworkVariants
     /// </summary>
     public static void Merge(MetadataItem primary, MetadataItem other, string framework, VariantIgnore ignore = VariantIgnore.None)
     {
+        // Inherited text most often comes from the reference assemblies of a framework, which word it for each
+        // framework; either side inheriting is enough, as the other then documents the same API.
+        if (ignore.HasFlag(VariantIgnore.InheritedDocumentation) && (primary.IsDocumentationInherited || other.IsDocumentationInherited))
+        {
+            ignore |= VariantIgnore.Documentation;
+        }
+
         // A member or interface present in one framework belongs on the page whichever framework
         // provides the rest of it. An inheritance chain cannot be combined, so it is compared instead.
         primary.Implements = Union(primary.Implements, other.Implements);

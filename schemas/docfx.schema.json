@@ -750,13 +750,13 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [ "attributes", "documentation" ]
+                "enum": [ "attributes", "documentation", "inheritdoc" ]
               },
               {
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": [ "attributes", "documentation" ]
+                  "enum": [ "attributes", "documentation", "inheritdoc" ]
                 }
               }
             ]
