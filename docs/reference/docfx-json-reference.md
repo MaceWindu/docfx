@@ -548,13 +548,14 @@ The kinds of difference between the frameworks of [`targetFrameworks`](#targetfr
 
 - `attributes`: attributes, including the attribute lines of a declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
+- `inheritdoc`: the same, for an API whose documentation is inherited: through `inheritdoc`, or as an override or interface implementation without a comment of its own. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
 
 ```json
 {
   "metadata": [
     {
       "targetFrameworks": "*",
-      "variantIgnore": [ "attributes" ]
+      "variantIgnore": [ "attributes", "inheritdoc" ]
     }
   ]
 }
