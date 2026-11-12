@@ -21,7 +21,6 @@
 
 <div class="markdown level1 summary">{{{summary}}}</div>
 <div class="markdown level1 conceptual">{{{conceptual}}}</div>
-{{>partials/apiVariants}}
 
 {{#syntax}}
 <div class="codewrapper">
@@ -127,6 +126,7 @@
   </dd>
 </dl>
 {{/seealso.0}}
+{{>partials/apiVariants}}
 
 {{/children}}
 {{/children}}

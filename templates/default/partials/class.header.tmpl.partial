@@ -3,7 +3,6 @@
 <h1 id="{{id}}" data-uid="{{uid}}" class="text-break">{{>partials/title}}</h1>
 <div class="markdown level0 summary">{{{summary}}}</div>
 <div class="markdown level0 conceptual">{{{conceptual}}}</div>
-{{>partials/apiVariants}}
 {{#inClass}}
 <div class="inheritance">
   <h5>{{__global.inheritance}}</h5>
@@ -120,3 +119,4 @@
 {{#example}}
 {{{.}}}
 {{/example}}
+{{>partials/apiVariants}}

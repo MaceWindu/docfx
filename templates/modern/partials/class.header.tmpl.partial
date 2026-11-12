@@ -12,7 +12,6 @@
 
 <div class="markdown summary">{{{summary}}}</div>
 <div class="markdown conceptual">{{{conceptual}}}</div>
-{{>partials/apiVariants}}
 
 {{#syntax.content.0.value}}
 <div class="codewrapper">
@@ -158,3 +157,4 @@
 <h2 id="{{id}}_remarks">{{__global.remarks}}</h2>
 <div class="markdown level0 remarks">{{{remarks}}}</div>
 {{/remarks}}
+{{>partials/apiVariants}}
