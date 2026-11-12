@@ -4,12 +4,14 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
+import { AppliesToGroup, Axis, Selection, getSelection, isAvailable, isPickerEnabled, onSelectionChange, unitsOf } from './appliesTo'
 
 export type TocNode = {
   name?: string
   href?: string
   expanded?: boolean
   items?: TocNode[]
+  appliesTo?: AppliesToGroup[]
 }
 
 /**
@@ -24,7 +26,8 @@ export async function renderToc(): Promise<TocNode[]> {
   const disableTocFilter = meta('docfx:disabletocfilter') === 'true'
 
   const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
-  const { items, pdf, pdfFileName } = await (await fetch(tocUrl)).json()
+  const { items, pdf, pdfFileName, axis } = await (await fetch(tocUrl)).json() as { items: TocNode[], pdf?: boolean, pdfFileName?: string, axis?: Axis }
+  const picker = isPickerEnabled()
 
   const tocFilterUrl = disableTocFilter ? '' : (localStorage?.getItem('tocFilterUrl') || '')
   let tocFilter = disableTocFilter ? '' : (localStorage?.getItem('tocFilter') || '')
@@ -44,6 +47,9 @@ export async function renderToc(): Promise<TocNode[]> {
   const tocContainer = document.getElementById('toc')
   if (tocContainer) {
     renderToc()
+    if (picker) {
+      onSelectionChange(renderToc)
+    }
 
     const activeElements = tocContainer.querySelectorAll('li.active')
     const lastActiveElement = activeElements[activeElements.length - 1]
@@ -93,22 +99,28 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 
   function renderToc() {
+    const selection = picker ? getSelection(axis) : {}
     render(html`
       ${renderTocFilter()}
-      <div class="flex-fill overflow-y-auto">${renderTocNodes(items) || renderNoFilterResult()}</div>
+      <div class="flex-fill overflow-y-auto">${renderTocNodes(items, selection) || renderNoFilterResult()}</div>
       ${renderDownloadPdf()}`, tocContainer)
   }
 
-  function renderTocNodes(nodes: TocNode[]): TemplateResult {
+  function renderTocNodes(nodes: TocNode[], selection: Selection): TemplateResult {
     const result = nodes.map(node => {
-      const { href, name, items, expanded } = node
+      const { href, name, items, expanded, appliesTo } = node
       if (!name) {
+        return null
+      }
+
+      // APIs that do not exist in what the reader picked are left out, except the page being read and its parents
+      if (appliesTo && (selection.framework || selection.value) && !activeNodes.includes(node) && !isAvailable(unitsOf(appliesTo), selection)) {
         return null
       }
 
       const isLeaf = !items || items.length <= 0
 
-      const children = isLeaf ? null : renderTocNodes(items)
+      const children = isLeaf ? null : renderTocNodes(items, selection)
       if (tocFilter !== '' && !children && !name.toLowerCase().includes(tocFilter.toLowerCase())) {
         return null
       }

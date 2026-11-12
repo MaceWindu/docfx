@@ -86,6 +86,10 @@ test('choose the content for an axis value', () => {
 
   assert.ok(isAvailable(own, { value: 'ef8' }))
   assert.ok(!isAvailable(own, { value: 'ef3' }))
+
+  // EF Core 3.1, picked on the EF Core pages, says nothing about APIs without that axis
+  assert.ok(isAvailable(parseUnits('net10.0 net462'), { value: 'ef3' }))
+  assert.strictEqual(chooseGroup([parseUnits('net10.0'), parseUnits('net462')], { value: 'ef3', framework: 'net472' }), 1)
 })
 
 test('frameworks in picker order', () => {
