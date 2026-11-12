@@ -110,6 +110,17 @@ internal sealed class TargetFrameworkAxis
 
     public string GetLabel(string id) => _values.FirstOrDefault(v => v.Id == id).Label ?? id;
 
+    /// <summary>
+    /// The axis as written to the root of the API table of contents: pages carry only the ids and labels of
+    /// its values, and a picker needs its name and the order of its values too.
+    /// </summary>
+    public Dictionary<string, object> ToTocMetadata() => new()
+    {
+        ["name"] = Name,
+        ["values"] = _values.Select(v => new Dictionary<string, object> { ["id"] = v.Id, ["label"] = v.Label }).ToList(),
+        ["default"] = Default,
+    };
+
     public int IndexOf(string? id) => _values.FindIndex(v => v.Id == id);
 
     public static string GetUnit(string value, string framework) => $"{value}{Separator}{framework}";
