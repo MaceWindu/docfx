@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Docfx.Common;
+using Docfx.DataContracts.Common;
 using Docfx.DataContracts.ManagedReference;
 using Docfx.Dotnet;
 using Docfx.Tests.Common;
@@ -431,6 +432,23 @@ public class TargetFrameworkTest : TestBase
 
         Assert.Equal("v1", Assert.Single(Page("Lib.OnlyV1.yml").Items[0].AppliesTo).Version);
         Assert.Equal("v2", Assert.Single(Page("Lib.OnlyV2.yml").Items[0].AppliesTo).Version);
+
+        // The table of contents names the axis once, for a picker: pages carry only its value ids and labels.
+        var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
+        Assert.Equal(
+            """{"name":"Version","values":[{"id":"v1","label":"Version 1"},{"id":"v2","label":"Version 2"}],"default":"v2"}""",
+            JsonUtility.Serialize(toc.Metadata["axis"]));
+    }
+
+    [Fact]
+    public async Task WithoutAnAxisTheTableOfContentsNamesNone()
+    {
+        var (v1, _) = CreateTwoVersionsOfOneAssembly();
+
+        await Exec(new() { Src = Src(v1), TargetFrameworks = ["*"] });
+
+        var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
+        Assert.False(toc.Metadata.ContainsKey("axis"));
     }
 
     [Fact]
