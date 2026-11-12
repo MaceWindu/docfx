@@ -148,6 +148,23 @@ public class TargetFrameworkMergeTest
         variant.Content.Syntax.Return.Type.Should().Be("System.Int64");
     }
 
+    [Fact]
+    public void ADifferentSignatureHoldsOnlyThePartsThatDiffer()
+    {
+        var result = Merge(
+            ("namespace N { public class T { public const string C = \"a\"; public int M<TV>(int x) => 0; } }", First),
+            ("namespace N { public class T { public const string C = \"b\"; public long M<TV>(int x) => 0; } }", Second));
+
+        var constant = result["N.T.C"].Variants.Should().ContainSingle().Subject.Content.Syntax;
+        constant.Content.Should().ContainValue("public const string C = \"b\"");
+        constant.Return.Should().BeNull();
+
+        var method = result["N.T.M``1(System.Int32)"].Variants.Should().ContainSingle().Subject.Content.Syntax;
+        method.Return.Type.Should().Be("System.Int64");
+        method.Parameters.Should().BeNull();
+        method.TypeParameters.Should().BeNull();
+    }
+
     [Theory]
     [InlineData("class")]
     [InlineData("interface")]
