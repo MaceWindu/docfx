@@ -192,6 +192,15 @@ internal class MetadataItem : ICloneable
     [System.Text.Json.Serialization.JsonIgnore]
     public List<MetadataItemVariant> Variants { get; set; }
 
+    /// <summary>
+    /// Whether the documentation of this item is inherited rather than written for it: through
+    /// <c>inheritdoc</c>, or as an override or implementation without a comment of its own.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsDocumentationInherited { get; set; }
+
     [YamlMember(Alias = "references")]
     [JsonProperty("references")]
     [JsonPropertyName("references")]

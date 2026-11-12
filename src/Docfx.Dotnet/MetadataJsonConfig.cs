@@ -272,7 +272,7 @@ internal class MetadataJsonItemConfig
 
     /// <summary>
     /// The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as
-    /// variants: `attributes`, `documentation`, or both.
+    /// variants: `attributes`, `documentation`, and `inheritdoc` for the documentation of APIs that inherit it.
     /// </summary>
     [JsonProperty("variantIgnore")]
     [JsonPropertyName("variantIgnore")]
