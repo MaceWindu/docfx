@@ -148,12 +148,14 @@ public class TargetFrameworkMergeTest
         variant.Content.Syntax.Return.Type.Should().Be("System.Int64");
     }
 
-    [Fact]
-    public void InterfacesListedInADifferentOrderAreNotAVariant()
+    [Theory]
+    [InlineData("class")]
+    [InlineData("interface")]
+    public void InterfacesListedInADifferentOrderAreNotAVariant(string kind)
     {
         var result = Merge(
-            ("namespace N { public interface IA { } public interface IB { } public class T : IA, IB { } }", First),
-            ("namespace N { public interface IA { } public interface IB { } public class T : IB, IA { } }", Second));
+            ($"namespace N {{ public interface IA {{ }} public interface IB {{ }} public {kind} T : IA, IB {{ }} }}", First),
+            ($"namespace N {{ public interface IA {{ }} public interface IB {{ }} public {kind} T : IB, IA {{ }} }}", Second));
 
         result["N.T"].Variants.Should().BeNull();
     }
@@ -175,6 +177,8 @@ public class TargetFrameworkMergeTest
     [InlineData("CSharp", "public void M<T>(T x) where T : IB, IA", "public void M<T>(T x) where T : IB, IA")]
     [InlineData("CSharp", "public int P { get; set; }", "public int P { get; set; }")]
     [InlineData("VB", "Public Class T Inherits B Implements IB, IA", "Public Class T Inherits B Implements IA, IB")]
+    [InlineData("VB", "Public Interface IT Inherits IB, IA", "Public Interface IT Inherits IA, IB")]
+    [InlineData("VB", "Public Class T Inherits B", "Public Class T Inherits B")]
     public void SortBaseList(string language, string declaration, string expected)
     {
         TargetFrameworkVariants.SortBaseList(declaration, language).Should().Be(expected);
