@@ -220,12 +220,15 @@ internal static partial class TargetFrameworkVariants
 
     /// <summary>
     /// Sorts the base types and interfaces a type declaration lists: after <c>:</c> up to a <c>where</c>
-    /// clause in C#, after <c>Implements</c> in Visual Basic. Other declarations are returned unchanged.
+    /// clause in C#, after <c>Implements</c>, or <c>Inherits</c> for an interface, in Visual Basic. Other
+    /// declarations are returned unchanged.
     /// </summary>
     internal static string SortBaseList(string declaration, string language)
     {
         var isVisualBasic = string.Equals(language, nameof(SyntaxLanguage.VB), StringComparison.OrdinalIgnoreCase);
-        var separator = isVisualBasic ? " Implements " : " : ";
+        // A Visual Basic interface lists the interfaces it extends after Inherits, a class after Implements.
+        var separator = !isVisualBasic ? " : "
+            : declaration.Contains(" Implements ", StringComparison.Ordinal) ? " Implements " : " Inherits ";
         var depth = 0;
         int start = -1, end = declaration.Length;
         var commas = new List<int>();
