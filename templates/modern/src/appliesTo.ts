@@ -277,9 +277,9 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
 /**
  * Shows the page for the selection: the content of each API for the framework that stands in best, without the
  * other frameworks' differences; members that do not exist in the selection dimmed; a banner when the API itself
- * does not exist in it.
+ * does not exist in it. In print, for a PDF of one framework, such members are left out instead.
  */
-export function applySelection(selection: Selection, axis?: Axis) {
+export function applySelection(selection: Selection, axis?: Axis, print = false) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
 
@@ -288,6 +288,7 @@ export function applySelection(selection: Selection, axis?: Axis) {
     const chosen = any ? chooseGroup(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : 0
     blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
   })
+
   document.querySelectorAll<HTMLElement>('.api-variants-heading, .api-variant').forEach(e => { e.hidden = any })
 
   document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
@@ -300,6 +301,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
+    if (print) {
+      for (let e = heading as HTMLElement; e && (e === heading || !/^H[1-3]$/.test(e.tagName)); e = e.nextElementSibling as HTMLElement) {
+        e.hidden = true
+      }
+      return
+    }
     heading.insertAdjacentHTML('beforeend', ' ')
     const badge = document.createElement('span')
     badge.className = 'applies-to-unavailable-badge badge text-bg-secondary fs-6 fw-normal ms-2'
@@ -310,12 +317,39 @@ export function applySelection(selection: Selection, axis?: Axis) {
     }
   })
 
+  // the types a namespace page lists
+  document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
+    if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+      if (print) {
+        entry.hidden = true
+      } else {
+        entry.classList.add('applies-to-unavailable')
+      }
+    }
+  })
+
+  // a PDF of one framework leaves out the pages of APIs that do not exist in it
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
-  if (title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
+  if (!print && title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
     title.parentElement.querySelector('.facts')?.after(banner)
+  }
+}
+
+declare global {
+  interface Window {
+    /** Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework` and `pdfAxisValue`. */
+    docfxAppliesTo?: { framework?: string, value?: string }
+  }
+}
+
+/** In a PDF of one framework or axis value, shows the pages for it. */
+export function applyPrintSelection() {
+  const selection = window.docfxAppliesTo
+  if (selection) {
+    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined }, undefined, true)
   }
 }
 

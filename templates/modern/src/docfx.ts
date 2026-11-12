@@ -8,7 +8,7 @@ import { renderMarkdown } from './markdown'
 import { enableSearch } from './search'
 import { renderToc } from './toc'
 import { initTheme } from './theme'
-import { initAppliesTo } from './appliesTo'
+import { applyPrintSelection, initAppliesTo } from './appliesTo'
 import { renderBreadcrumb, renderInThisArticle, renderNavbar } from './nav'
 
 import 'bootstrap-icons/font/bootstrap-icons.scss'
@@ -32,6 +32,7 @@ async function init() {
 
   const pdfmode = navigator.userAgent.indexOf('docfx/pdf') >= 0
   if (pdfmode) {
+    applyPrintSelection()
     await Promise.all([
       renderMarkdown(),
       highlight()
