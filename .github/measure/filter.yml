@@ -1,0 +1,8 @@
+apiRules:
+- exclude:
+    uidRegex: .*System\.Object
+    type: Type
+# COM interop interfaces that System.Exception, System.Attribute and others implement on .NET Framework only.
+- exclude:
+    uidRegex: ^System\.Runtime\.InteropServices\._\w+$
+    type: Type

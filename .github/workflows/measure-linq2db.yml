@@ -72,7 +72,7 @@ jobs:
         shell: pwsh
         working-directory: linq2db
         run: |
-          Copy-Item ../docfx/.github/measure/*.json docs/source/
+          Copy-Item ../docfx/.github/measure/*.json, ../docfx/.github/measure/*.yml docs/source/
           dotnet build -c Release -p:RunAnalyzersDuringBuild=false -p:EnforceCodeStyleInBuild=false 'Source/LinqToDB.FSharp/LinqToDB.FSharp.fsproj'
           if ($LASTEXITCODE -ne 0) { throw 'F# pre-build failed' }
 
@@ -112,4 +112,13 @@ jobs:
           path: |
             ${{ runner.temp }}/docfx-${{ matrix.name }}.log*
             ${{ runner.temp }}/result-${{ matrix.name }}.md
+          retention-days: 14
+
+      # The metadata of every framework, from which the site is built and screenshot locally.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.name == 'targetFrameworks'
+        with:
+          name: api-${{ matrix.name }}
+          path: linq2db/docs/source/api
+          include-hidden-files: true
           retention-days: 14

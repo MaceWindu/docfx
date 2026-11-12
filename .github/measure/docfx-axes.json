@@ -56,6 +56,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db"
 		},
@@ -69,6 +70,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.extensions"
 		},
@@ -82,6 +84,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.compat"
 		},
@@ -121,6 +124,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.grpc"
 		},
@@ -146,6 +150,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.tools"
 		},
@@ -159,6 +164,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.scaffold"
 		},
@@ -188,7 +194,7 @@
 			],
 			// EF Core rewords the documentation linq2db inherits from it between versions; only API
 			// differences between versions are worth a variant.
-			"variantIgnore": [ "documentation" ],
+			"variantIgnore": [ "documentation", "attributes" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.efcore"
 		},
@@ -202,6 +208,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.identity"
 		},
@@ -215,6 +222,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.httpclient.client"
 		},
@@ -228,6 +236,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.httpclient.server"
 		},
@@ -241,6 +250,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.signalr.client"
 		},
@@ -254,6 +264,7 @@
 				}
 			],
 			"targetFrameworks": [ "net10.0", "net9.0", "net8.0", "netstandard2.0", "net462" ],
+			"variantIgnore": [ "attributes", "inheritdoc" ],
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.signalr.server"
 		}
