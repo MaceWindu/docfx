@@ -60,6 +60,7 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
         var comment = symbol.GetDocumentationComment(_compilation, expandIncludes: true, expandInheritdoc: true);
         if (XmlComment.Parse(comment.FullXmlFragment, GetXmlCommentParserContext(item, symbol)) is { } commentModel)
         {
+            item.IsDocumentationInherited = IsDocumentationInherited(symbol);
             item.Summary = commentModel.Summary;
             item.Remarks = commentModel.Remarks;
             item.Exceptions = commentModel.Exceptions;
@@ -754,6 +755,16 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
                 result.Syntax.Parameters.Add(param);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the documentation of <paramref name="symbol"/> comes from another symbol: its own comment, before
+    /// <c>inheritdoc</c> is expanded, is empty or uses <c>inheritdoc</c>.
+    /// </summary>
+    private static bool IsDocumentationInherited(ISymbol symbol)
+    {
+        var own = symbol.GetDocumentationCommentXml(expandIncludes: true);
+        return string.IsNullOrWhiteSpace(own) || own.Contains("<inheritdoc", StringComparison.Ordinal);
     }
 
     private XmlCommentParserContext GetXmlCommentParserContext(MetadataItem item, ISymbol symbol)

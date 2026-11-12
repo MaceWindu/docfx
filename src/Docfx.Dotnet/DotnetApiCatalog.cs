@@ -248,9 +248,12 @@ public static partial class DotnetApiCatalog
                 case "documentation":
                     result |= VariantIgnore.Documentation;
                     break;
+                case "inheritdoc":
+                    result |= VariantIgnore.InheritedDocumentation;
+                    break;
                 default:
                     Logger.LogWarning(
-                        $"Unknown 'variantIgnore' value '{value}'. The supported values are 'attributes' and 'documentation'.",
+                        $"Unknown 'variantIgnore' value '{value}'. The supported values are 'attributes', 'documentation' and 'inheritdoc'.",
                         code: WarningCodes.Metadata.InvalidVariantIgnore);
                     break;
             }

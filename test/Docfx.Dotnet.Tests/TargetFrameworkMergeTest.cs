@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Docfx.Dotnet.Tests;
 
+[Collection("docfx STA")]
 public class TargetFrameworkMergeTest
 {
     private const string First = "net8.0";
@@ -148,6 +149,38 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void InterfacesListedInADifferentOrderAreNotAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA, IB { } }", First),
+            ("namespace N { public interface IA { } public interface IB { } public class T : IB, IA { } }", Second));
+
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void ADifferentSetOfInterfacesIsAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA, IB { } }", First),
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA { } }", Second));
+
+        result["N.T"].Variants.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("CSharp", "public class T : B, IB, IA where X : class", "public class T : B, IA, IB where X : class")]
+    [InlineData("CSharp", "public class T<K, V> : IB<K, V>, IA", "public class T<K, V> : IA, IB<K, V>")]
+    [InlineData("CSharp", "public record R(int A, int B) : IB, IA", "public record R(int A, int B) : IA, IB")]
+    [InlineData("CSharp", "public void M<T>(T x) where T : IB, IA", "public void M<T>(T x) where T : IB, IA")]
+    [InlineData("CSharp", "public int P { get; set; }", "public int P { get; set; }")]
+    [InlineData("VB", "Public Class T Inherits B Implements IB, IA", "Public Class T Inherits B Implements IA, IB")]
+    public void SortBaseList(string language, string declaration, string expected)
+    {
+        TargetFrameworkVariants.SortBaseList(declaration, language).Should().Be(expected);
+    }
+
+    [Fact]
     public void ADifferentInheritanceChainIsAVariantNotAUnion()
     {
         var result = Merge(
@@ -271,6 +304,38 @@ public class TargetFrameworkMergeTest
             ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second));
 
         (result["N.T"].Variants is not null).Should().Be(expectVariant);
+    }
+
+    [Theory]
+    [InlineData(nameof(VariantIgnore.None), "", true)]
+    [InlineData(nameof(VariantIgnore.InheritedDocumentation), "", false)]
+    [InlineData(nameof(VariantIgnore.None), "/// <inheritdoc/>\n", true)]
+    [InlineData(nameof(VariantIgnore.InheritedDocumentation), "/// <inheritdoc/>\n", false)]
+    public void InheritedDocumentationCanBeIgnored(string ignore, string comment, bool expectVariant)
+    {
+        string Code(string text) => $$"""
+            namespace N
+            {
+                public class B { /// <summary>{{text}}</summary>
+                public virtual void M() { } }
+                public class T : B { {{comment}}public override void M() { } }
+            }
+            """;
+
+        var result = MergeIgnoring(Enum.Parse<VariantIgnore>(ignore), (Code("one"), First), (Code("two"), Second));
+
+        (result["N.T.M"].Variants is not null).Should().Be(expectVariant);
+    }
+
+    [Fact]
+    public void IgnoringInheritedDocumentationKeepsDocumentationOfItsOwn()
+    {
+        var result = MergeIgnoring(
+            VariantIgnore.InheritedDocumentation,
+            ("namespace N { /// <summary>one</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second));
+
+        result["N.T"].Variants.Should().ContainSingle();
     }
 
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)

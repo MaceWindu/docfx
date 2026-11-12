@@ -1,4 +1,7 @@
 {{!Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license.}}
+{{#variants.0}}
+<h5 class="api-variants-heading">{{__global.inOtherFrameworks}}</h5>
+{{/variants.0}}
 {{#variants}}
 <div class="api-variant" data-applies-to="{{appliesToData}}">
   <h6 class="api-variant-label">{{>partials/appliesTo}}</h6>

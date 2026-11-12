@@ -543,7 +543,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
-Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it. Nor is documentation that differs only in whitespace, such as line breaks and indentation.
+Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
 ### `defaultFramework`
 
@@ -596,13 +596,14 @@ The kinds of difference between the frameworks of [`targetFrameworks`](#targetfr
 
 - `attributes`: attributes, including the attribute lines of a declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
+- `inheritdoc`: the same, for an API whose documentation is inherited: through `inheritdoc`, or as an override or interface implementation without a comment of its own. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
 
 ```json
 {
   "metadata": [
     {
       "targetFrameworks": "*",
-      "variantIgnore": [ "attributes" ]
+      "variantIgnore": [ "attributes", "inheritdoc" ]
     }
   ]
 }
