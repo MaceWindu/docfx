@@ -135,6 +135,11 @@ internal static partial class TargetFrameworkVariants
             return;
         }
 
+        if (content.Syntax is { } syntax && primary.Syntax is { } own)
+        {
+            content.Syntax = SyntaxThatDiffers(own, syntax, ignore);
+        }
+
         primary.Variants ??= [];
         if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, ignore)) is { } existing)
         {
@@ -144,6 +149,21 @@ internal static partial class TargetFrameworkVariants
         {
             primary.Variants.Add(new() { Frameworks = [framework], Content = content });
         }
+    }
+
+    /// <summary>
+    /// The declaration, with the parameters, type parameters and return value only where they differ: a field
+    /// whose constant differs would otherwise repeat a return type that is the same everywhere.
+    /// </summary>
+    private static SyntaxDetail SyntaxThatDiffers(SyntaxDetail own, SyntaxDetail other, VariantIgnore ignore)
+    {
+        return new()
+        {
+            Content = other.Content,
+            Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore) ? null : other.Parameters,
+            TypeParameters = AreEquivalent(own.TypeParameters, other.TypeParameters, "typeParameters", ignore) ? null : other.TypeParameters,
+            Return = AreEquivalent(own.Return, other.Return, "return", ignore) ? null : other.Return,
+        };
     }
 
     private static bool HasSameContent(MetadataItem left, MetadataItem right, VariantIgnore ignore)

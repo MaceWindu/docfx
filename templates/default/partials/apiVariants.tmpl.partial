@@ -28,6 +28,27 @@
     <dd>{{{description}}}</dd>
   </dl>
   {{/syntax.return}}
+  {{#syntax.fieldValue}}
+  <h6>{{__global.fieldValue}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.fieldValue}}
+  {{#syntax.propertyValue}}
+  <h6>{{__global.propertyValue}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.propertyValue}}
+  {{#syntax.eventType}}
+  <h6>{{__global.eventType}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.eventType}}
   {{#syntax.typeParameters.0}}
   <h6>{{__global.typeParameters}}</h6>
   <dl class="parameters">
