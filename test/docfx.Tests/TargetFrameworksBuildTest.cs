@@ -274,7 +274,7 @@ public class TargetFrameworksBuildTest : TestBase
     {
         var options = "\"globalMetadata\": { \"_frameworkNames\": { \"net8.0\": \"Modern\" }" + (picker ? ", \"_enableApiAppliesToPicker\": true" : "") + " },";
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
-        var page = await Page(site, "Lib.Shared.html");
+        var page = await RawPage(site, "Lib.Shared.html");
 
         // the dropdowns come with the option only, and label frameworks as the page does
         Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
@@ -360,7 +360,39 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
     }
 
-    private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+    /// <returns>The page as a reader sees it, without the content kept hidden for the picker and PDFs.</returns>
+    private static async Task<string> Page(string site, string name) => WithoutHiddenContent(await RawPage(site, name));
+
+    private static Task<string> RawPage(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+
+    private static string WithoutHiddenContent(string page)
+    {
+        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" hidden>");
+        for (var match = hidden.Match(page); match.Success; match = hidden.Match(page))
+        {
+            // the copy ends at the </div> that balances its <div>
+            var depth = 1;
+            var end = match.Index + match.Length;
+            while (depth > 0)
+            {
+                var open = page.IndexOf("<div", end, StringComparison.Ordinal);
+                var close = page.IndexOf("</div>", end, StringComparison.Ordinal);
+                if (open >= 0 && open < close)
+                {
+                    depth++;
+                    end = open + "<div".Length;
+                }
+                else
+                {
+                    depth--;
+                    end = close + "</div>".Length;
+                }
+            }
+            page = page[..match.Index] + page[end..];
+        }
+
+        return page;
+    }
 
     /// <returns>The variant with this declaration, up to the heading of the next member.</returns>
     private static string VariantOf(string page, string declaration)
