@@ -152,6 +152,11 @@ public class TargetFrameworksBuildTest : TestBase
         // A member shows its own difference, and not the one of its type.
         Assert.Contains("public long Value()", page);
         Assert.Equal(1, Regex.Count(page, "Described for older"));
+
+        // What applies elsewhere follows what the page documents, under a heading of its own.
+        Assert.Contains("In other frameworks", page);
+        Assert.True(page.IndexOf("public int Value()", StringComparison.Ordinal) < page.IndexOf("public long Value()", StringComparison.Ordinal));
+        Assert.True(page.IndexOf("Described for net8.", StringComparison.Ordinal) < page.IndexOf("Described for older", StringComparison.Ordinal));
     }
 
     [Theory]

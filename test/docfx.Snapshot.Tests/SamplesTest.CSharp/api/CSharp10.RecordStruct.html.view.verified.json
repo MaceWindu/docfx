@@ -1172,6 +1172,7 @@
     "namespace": "Namespace",
     "assembly": "Assembly",
     "appliesTo": "Applies to",
+    "inOtherFrameworks": "In other frameworks",
     "syntax": "Syntax",
     "overrides": "Overrides",
     "implements": "Implements",
