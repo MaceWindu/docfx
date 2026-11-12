@@ -149,6 +149,38 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void InterfacesListedInADifferentOrderAreNotAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA, IB { } }", First),
+            ("namespace N { public interface IA { } public interface IB { } public class T : IB, IA { } }", Second));
+
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void ADifferentSetOfInterfacesIsAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA, IB { } }", First),
+            ("namespace N { public interface IA { } public interface IB { } public class T : IA { } }", Second));
+
+        result["N.T"].Variants.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("CSharp", "public class T : B, IB, IA where X : class", "public class T : B, IA, IB where X : class")]
+    [InlineData("CSharp", "public class T<K, V> : IB<K, V>, IA", "public class T<K, V> : IA, IB<K, V>")]
+    [InlineData("CSharp", "public record R(int A, int B) : IB, IA", "public record R(int A, int B) : IA, IB")]
+    [InlineData("CSharp", "public void M<T>(T x) where T : IB, IA", "public void M<T>(T x) where T : IB, IA")]
+    [InlineData("CSharp", "public int P { get; set; }", "public int P { get; set; }")]
+    [InlineData("VB", "Public Class T Inherits B Implements IB, IA", "Public Class T Inherits B Implements IA, IB")]
+    public void SortBaseList(string language, string declaration, string expected)
+    {
+        TargetFrameworkVariants.SortBaseList(declaration, language).Should().Be(expected);
+    }
+
+    [Fact]
     public void ADifferentInheritanceChainIsAVariantNotAUnion()
     {
         var result = Merge(

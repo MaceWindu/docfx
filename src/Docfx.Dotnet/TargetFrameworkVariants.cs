@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Docfx.DataContracts.ManagedReference;
 using YamlDotNet.Serialization;
 
 namespace Docfx.Dotnet;
@@ -173,9 +174,18 @@ internal static partial class TargetFrameworkVariants
             case JsonValue when right is JsonValue:
                 if (left.GetValueKind() is JsonValueKind.String && right.GetValueKind() is JsonValueKind.String)
                 {
-                    if (inDeclaration && ignore.HasFlag(VariantIgnore.Attributes))
+                    if (inDeclaration)
                     {
-                        return AttributeLineRegex().Replace(left.GetValue<string>(), "") == AttributeLineRegex().Replace(right.GetValue<string>(), "");
+                        var leftDeclaration = left.GetValue<string>();
+                        var rightDeclaration = right.GetValue<string>();
+                        if (ignore.HasFlag(VariantIgnore.Attributes))
+                        {
+                            leftDeclaration = AttributeLineRegex().Replace(leftDeclaration, "");
+                            rightDeclaration = AttributeLineRegex().Replace(rightDeclaration, "");
+                        }
+
+                        // The reference assemblies of each framework list the interfaces of a type in their own order.
+                        return SortBaseList(leftDeclaration, name) == SortBaseList(rightDeclaration, name);
                     }
 
                     // Line breaks and indentation of documentation follow the layout of the source comment,
@@ -193,6 +203,78 @@ internal static partial class TargetFrameworkVariants
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Sorts the base types and interfaces a type declaration lists: after <c>:</c> up to a <c>where</c>
+    /// clause in C#, after <c>Implements</c> in Visual Basic. Other declarations are returned unchanged.
+    /// </summary>
+    internal static string SortBaseList(string declaration, string language)
+    {
+        var isVisualBasic = string.Equals(language, nameof(SyntaxLanguage.VB), StringComparison.OrdinalIgnoreCase);
+        var separator = isVisualBasic ? " Implements " : " : ";
+        var depth = 0;
+        int start = -1, end = declaration.Length;
+        var commas = new List<int>();
+
+        for (var i = 0; i < declaration.Length; i++)
+        {
+            switch (declaration[i])
+            {
+                case '<' or '(' or '[' or '{':
+                    depth++;
+                    continue;
+                case '>' or ')' or ']' or '}':
+                    depth--;
+                    continue;
+            }
+
+            if (depth != 0)
+            {
+                continue;
+            }
+
+            if (start < 0)
+            {
+                if (string.CompareOrdinal(declaration, i, separator, 0, separator.Length) == 0)
+                {
+                    // A `where` before the first colon makes it a constraint, not a base list.
+                    if (!isVisualBasic && declaration.AsSpan(0, i).Contains(" where ", StringComparison.Ordinal))
+                    {
+                        return declaration;
+                    }
+
+                    start = i + separator.Length;
+                    i = start - 1;
+                }
+            }
+            else if (declaration[i] == ',')
+            {
+                commas.Add(i);
+            }
+            else if (!isVisualBasic && string.CompareOrdinal(declaration, i, " where ", 0, 7) == 0)
+            {
+                end = i;
+                break;
+            }
+        }
+
+        if (start < 0 || commas.Count == 0)
+        {
+            return declaration;
+        }
+
+        var items = new List<string>();
+        var from = start;
+        foreach (var comma in commas)
+        {
+            items.Add(declaration[from..comma].Trim());
+            from = comma + 1;
+        }
+
+        items.Add(declaration[from..end].Trim());
+        items.Sort(StringComparer.Ordinal);
+        return string.Concat(declaration.AsSpan(0, start), string.Join(", ", items), declaration.AsSpan(end));
     }
 
     private static bool IsEmpty(JsonNode node)
