@@ -752,3 +752,13 @@ The names to show for target frameworks on API pages built with [`targetFramewor
   }
 }
 ```
+
+### `_enableApiAppliesToPicker`
+
+In the `modern` template, adds dropdowns to the navigation bar of API pages built with [`targetFrameworks`](#targetframeworks): one for the target frameworks and, with [`axes`](#axes), one for the values of the axis. They list what the current table of contents applies to, and start at "All", which shows the pages as without the option. Once the reader picks a framework or value:
+
+- each API shows its content for that selection: a variant replaces the content it differs in, and "In other frameworks" is hidden. A framework the API is not built for is stood in for by the nearest one it is, as in a project referencing it: .NET Standard 2.0 for .NET 10, when that is what the API targets.
+- members that do not exist in the selection are dimmed and marked, and a page whose API does not exist in it says so.
+- the table of contents leaves out the APIs that do not exist in the selection.
+
+The choice is kept across pages. `?framework=net8.0` in a link picks a framework, and the axis name in lower case with dashes picks a value, such as `?ef-core=ef9`. Search and PDF output are not affected.
