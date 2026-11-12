@@ -306,6 +306,38 @@ public class TargetFrameworkMergeTest
         (result["N.T"].Variants is not null).Should().Be(expectVariant);
     }
 
+    [Theory]
+    [InlineData(nameof(VariantIgnore.None), "", true)]
+    [InlineData(nameof(VariantIgnore.InheritedDocumentation), "", false)]
+    [InlineData(nameof(VariantIgnore.None), "/// <inheritdoc/>\n", true)]
+    [InlineData(nameof(VariantIgnore.InheritedDocumentation), "/// <inheritdoc/>\n", false)]
+    public void InheritedDocumentationCanBeIgnored(string ignore, string comment, bool expectVariant)
+    {
+        string Code(string text) => $$"""
+            namespace N
+            {
+                public class B { /// <summary>{{text}}</summary>
+                public virtual void M() { } }
+                public class T : B { {{comment}}public override void M() { } }
+            }
+            """;
+
+        var result = MergeIgnoring(Enum.Parse<VariantIgnore>(ignore), (Code("one"), First), (Code("two"), Second));
+
+        (result["N.T.M"].Variants is not null).Should().Be(expectVariant);
+    }
+
+    [Fact]
+    public void IgnoringInheritedDocumentationKeepsDocumentationOfItsOwn()
+    {
+        var result = MergeIgnoring(
+            VariantIgnore.InheritedDocumentation,
+            ("namespace N { /// <summary>one</summary>\npublic class T { } }", First),
+            ("namespace N { /// <summary>two</summary>\npublic class T { } }", Second));
+
+        result["N.T"].Variants.Should().ContainSingle();
+    }
+
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
     {
         return MergeIgnoring(VariantIgnore.None, units);
