@@ -126,6 +126,7 @@ function handleAppliesTo(vm, parent, options) {
   vm.showAppliesTo = false;
   vm.showAppliesToBadge = false;
 
+  var kind = vm.type ? vm.type.toLowerCase() : "";
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
@@ -141,7 +142,12 @@ function handleAppliesTo(vm, parent, options) {
     if (variant.syntax) {
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
-      variant.syntax.return = variant.syntax.return || "";
+      // the value of a field, property or event is labelled as in the API's own section, not as a return value
+      var value = variant.syntax.return || "";
+      variant.syntax.fieldValue = kind === "field" ? value : "";
+      variant.syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
+      variant.syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
+      variant.syntax.return = variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType ? "" : value;
     }
   });
 

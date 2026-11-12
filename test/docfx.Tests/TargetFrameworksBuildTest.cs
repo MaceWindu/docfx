@@ -57,6 +57,14 @@ public class TargetFrameworksBuildTest : TestBase
                     /// <exception cref="System.InvalidOperationException">Thrown on older frameworks.</exception>
             #endif
                     public void Check() { }
+
+            #if NET8_0
+                    public const int Limit = 8;
+                    public int Size { get; set; }
+            #else
+                    public const int Limit = 2;
+                    public long Size { get; set; }
+            #endif
                 }
             #if NET8_0
                 public class OnlyNet8 { }
@@ -186,6 +194,25 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
+    public async Task AVariantShowsTheValueOfAFieldOrPropertyAsItsOwnSectionDoes(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Shared.html");
+
+        // Limit differs in its constant only, so its type is the same everywhere and is not repeated.
+        var limit = VariantOf(page, "public const int Limit = 2");
+        Assert.DoesNotContain("Field Value", limit);
+        Assert.DoesNotContain("Returns", limit);
+
+        var size = VariantOf(page, "public long Size");
+        Assert.Contains("Property Value", size);
+        Assert.DoesNotContain("Returns", size);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
     public async Task AVariantDoesNotRepeatWhatIsTheSame(string template)
     {
         var site = await Build(template, targetFrameworks: "\"*\"");
@@ -306,6 +333,17 @@ public class TargetFrameworksBuildTest : TestBase
     }
 
     private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+
+    /// <returns>The variant with this declaration, up to the heading of the next member.</returns>
+    private static string VariantOf(string page, string declaration)
+    {
+        var start = page.IndexOf(declaration, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"no {declaration}");
+        var label = page.LastIndexOf("<div class=\"api-variant\"", start, StringComparison.Ordinal);
+        Assert.True(label >= 0, $"{declaration} is not in a variant");
+        var next = Regex.Match(page[start..], "<h[1-4][\\s>]");
+        return page[label..(next.Success ? start + next.Index : page.Length)];
+    }
 
     /// <returns>The folder of the generated API pages.</returns>
     private async Task<string> Build(string template, string targetFrameworks, string memberLayout = "samePage", string extraBuild = "")
