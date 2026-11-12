@@ -135,6 +135,14 @@ function handleAppliesTo(vm, parent, options) {
     variant.remarks = variant.remarks || "";
     variant.syntax = variant.syntax || "";
     variant.inheritance = variant.inheritance || [];
+    variant.example = variant.example || [];
+    variant.exceptions = variant.exceptions || [];
+    variant.seealso = variant.seealso || [];
+    if (variant.syntax) {
+      variant.syntax.parameters = variant.syntax.parameters || [];
+      variant.syntax.typeParameters = variant.syntax.typeParameters || [];
+      variant.syntax.return = variant.syntax.return || "";
+    }
   });
 
   var frameworks = getAppliesToFrameworks(vm);
