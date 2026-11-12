@@ -246,6 +246,21 @@ public class TargetFrameworkMergeTest
         result["N.T.M(System.Int32)"].Variants.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("<exception cref=\"System.ArgumentException\">bad</exception>")]
+    [InlineData("<seealso cref=\"System.String\"/>")]
+    public void ExceptionsAndSeeAlsoInOneFrameworkOnlyAreNotADifference(string comment)
+    {
+        var documented = $"namespace N {{ public class T {{ /// {comment}\npublic void M() {{ }} }} }}";
+        var undocumented = "namespace N { public class T { public void M() { } } }";
+
+        Merge((documented, First), (undocumented, Second))["N.T.M"].Variants.Should().BeNull();
+
+        var taken = Merge((undocumented, First), (documented, Second))["N.T.M"];
+        taken.Variants.Should().BeNull();
+        ((taken.Exceptions?.Count ?? 0) + (taken.SeeAlsos?.Count ?? 0)).Should().Be(1);
+    }
+
     [Fact]
     public void AFrameworkWithoutDocumentationTakesItFromAnother()
     {
