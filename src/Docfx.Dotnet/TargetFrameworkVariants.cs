@@ -73,10 +73,11 @@ internal static partial class TargetFrameworkVariants
         .Select(p => (p, p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? p.Name))
         .ToArray();
 
-    // Text that one framework documents and another leaves empty is not a difference: it is most often
-    // inherited from the reference assemblies of a framework, and some ship without documentation.
+    // Text compared regardless of its whitespace, which follows the layout of the source comment.
     private static readonly HashSet<string> DocumentationText = ["summary", "remarks", "example", "description"];
 
+    // Documentation that one framework has and another lacks is not a difference: it is most often inherited
+    // from the reference assemblies of a framework, and some ship without documentation.
     private static readonly HashSet<string> Documentation = [.. DocumentationText, "exceptions", "seealso"];
 
     [GeneratedRegex(@"^[ \t]*(\[[^\]\r\n]*\]|<[^>\r\n]*>)[ \t]*(\r?\n|$)", RegexOptions.Multiline)]
@@ -118,6 +119,16 @@ internal static partial class TargetFrameworkVariants
             primary.Examples = other.Examples;
         }
 
+        if (primary.Exceptions is not { Count: > 0 })
+        {
+            primary.Exceptions = other.Exceptions;
+        }
+
+        if (primary.SeeAlsos is not { Count: > 0 })
+        {
+            primary.SeeAlsos = other.SeeAlsos;
+        }
+
         var content = new MetadataItem();
         var differs = false;
         foreach (var (property, name) in Compared)
@@ -126,7 +137,8 @@ internal static partial class TargetFrameworkVariants
             if (!AreEquivalent(property.GetValue(primary), value, name, ignore))
             {
                 property.SetValue(content, value);
-                differs = true;
+                // A variant shows what the other framework has: one that only lacks something would show nothing.
+                differs |= !IsEmpty(ToNode(value));
             }
         }
 
@@ -191,7 +203,7 @@ internal static partial class TargetFrameworkVariants
 
         if (IsEmpty(left) || IsEmpty(right))
         {
-            return (IsEmpty(left) && IsEmpty(right)) || DocumentationText.Contains(name);
+            return (IsEmpty(left) && IsEmpty(right)) || Documentation.Contains(name);
         }
 
         switch (left)
