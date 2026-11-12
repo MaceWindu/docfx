@@ -106,6 +106,11 @@ partial class DotnetApiCatalog
                 Metadata = new() { ["memberLayout"] = config.MemberLayout },
                 Items = model.TocYamlViewModel.ToTocViewModel(axis: config.Axis),
             };
+            if (config.Axis is { } axis)
+            {
+                tocViewModel.Metadata["axis"] = axis.ToTocMetadata();
+            }
+
             string tocFilePath = Path.Combine(config.OutputFolder, "toc.yml");
 
             YamlUtility.Serialize(tocFilePath, tocViewModel, YamlMime.TableOfContent);
