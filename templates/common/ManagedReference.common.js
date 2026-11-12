@@ -10,9 +10,9 @@ exports.transform = function (model) {
 
   langs = model.langs;
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
-  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, picker: !!model._enableApiAppliesToPicker };
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
   // the picker labels frameworks as the page does
-  if (appliesToOptions.picker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
+  if (model._enableApiAppliesToPicker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -157,8 +157,8 @@ function handleAppliesTo(vm, parent, options) {
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
   vm.hasVariants = vm.variants.length > 0;
 
-  // With the picker, each variant is also rendered as a whole, hidden until a framework it applies to is picked.
-  vm.pickerAppliesToData = "";
+  // Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed:
+  // a PDF of one framework needs it whether the site has the picker or not.
   vm.primaryAppliesToData = "";
   vm.variantViews = [];
 
@@ -167,13 +167,10 @@ function handleAppliesTo(vm, parent, options) {
     return;
   }
 
-  if (options.picker) {
-    vm.pickerAppliesToData = frameworks.join(' ');
-    if (vm.variants.length > 0) {
-      var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
-      vm.primaryAppliesToData = frameworks.filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
-      vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
-    }
+  if (vm.variants.length > 0) {
+    var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
+    vm.primaryAppliesToData = frameworks.filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+    vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
   }
 
   vm.appliesToData = frameworks.join(' ');
