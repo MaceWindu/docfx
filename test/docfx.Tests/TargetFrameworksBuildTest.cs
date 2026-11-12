@@ -268,6 +268,37 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Theory]
     [Trait("Related", "docfx")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ThePickerGetsEachVariantAsAWholeOnlyWhenEnabled(bool picker)
+    {
+        var options = picker ? "\"globalMetadata\": { \"_enableApiAppliesToPicker\": true, \"_frameworkNames\": { \"net8.0\": \"Modern\" } }," : "";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await Page(site, "Lib.Shared.html");
+
+        Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
+        Assert.Equal(picker, page.Contains("<div class=\"api-contents\">"));
+        Assert.Equal(picker, Regex.IsMatch(page, "<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\""));
+        if (!picker)
+        {
+            return;
+        }
+
+        // the picker labels frameworks as the page does
+        Assert.Matches("<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">", page);
+
+        // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.NotEmpty(copy);
+        Assert.Contains("Property Value", copy);
+        Assert.DoesNotContain("Returns", copy);
+
+        // the API's own content applies to the frameworks no variant does
+        Assert.Contains("<div class=\"api-content\" data-applies-to=\"net8.0\">", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
     [InlineData(false, "<strong>Version 1</strong> (.NET 8), <strong>Version 2</strong> (.NET 8)", "<strong>Version 1</strong> (.NET 8)")]
     [InlineData(true, "<strong>Version 1</strong>, <strong>Version 2</strong>", "<strong>Version 1</strong>")]
     public async Task AnAxisIsShownWithTheLabelsOfItsValues(bool hideFrameworks, string appliesTo, string variantLabel)

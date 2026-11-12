@@ -1,6 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+import { html, TemplateResult } from 'lit-html'
+import { loc, meta } from './helper'
+
 /**
  * What an API is documented for: a target framework, and the value of the entry's axis, such as an EF Core
  * version, when it has one. Pages write it `value:framework` in `data-applies-to`, e.g. `ef9:net8.0`.
@@ -110,7 +113,8 @@ export function rank(target: string, framework: string): number {
 }
 
 export function matches(unit: Unit, selection: Selection): boolean {
-  return (!selection.value || unit.value === selection.value) &&
+  // a value picked for the axis of one part of the docs says nothing about a part without that axis
+  return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
     (!selection.framework || rank(selection.framework, unit.framework) < Infinity)
 }
 
@@ -140,15 +144,179 @@ export function chooseGroup(groups: Unit[][], selection: Selection): number {
 
 /** Frameworks in the order a picker lists them: .NET, then .NET Standard, then .NET Framework, newest first. */
 export function sortFrameworks(frameworks: string[]): string[] {
-  const order = (f: string) => {
+  const order = (f: string): [number, number[]] => {
     const m = parseMoniker(f)
-    return m ? [m.family === Family.Core ? 0 : m.family === Family.Standard ? 1 : 2, m.version] as const : [3, []] as const
+    return m ? [m.family === Family.Core ? 0 : m.family === Family.Standard ? 1 : 2, m.version] : [3, []]
   }
-  return [...new Set(frameworks)].sort((a, b) => {
+  return Array.from(new Set(frameworks)).sort((a, b) => {
     const [fa, va] = order(a)
     const [fb, vb] = order(b)
     return fa - fb || compareVersions(vb, va) || a.localeCompare(b)
   })
+}
+
+/** The axis of a part of the docs, as `docfx metadata` writes it to the root of its table of contents. */
+export type Axis = { name: string, values: { id: string, label: string }[], default?: string }
+
+type Choices = { frameworks: string[], axis?: Axis, key?: string }
+
+const changeEvent = 'docfx:appliestochange'
+
+export function isPickerEnabled(): boolean {
+  return meta('docfx:appliestopicker') === 'true'
+}
+
+/** The key of an axis in storage and in the query string: its name in lower case, e.g. `ef-core`. */
+export function axisKey(axis: Axis): string {
+  return axis.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+/** What the reader picked: from the query string, for shareable links, else what they picked last. */
+export function getSelection(axis?: Axis): Selection {
+  const query = new URLSearchParams(window.location.search)
+  const read = (key: string) => query.get(key) || localStorage?.getItem(`docfx.axis.${key}`) || undefined
+  return { framework: read('framework'), value: axis ? read(axisKey(axis)) : undefined }
+}
+
+function select(key: string, value: string | undefined) {
+  if (value) {
+    localStorage?.setItem(`docfx.axis.${key}`, value)
+  } else {
+    localStorage?.removeItem(`docfx.axis.${key}`)
+  }
+  // the query string would override the choice on this page
+  const url = new URL(window.location.href)
+  if (url.searchParams.has(key)) {
+    url.searchParams.delete(key)
+    history.replaceState(null, '', url)
+  }
+  window.dispatchEvent(new Event(changeEvent))
+}
+
+export function onSelectionChange(callback: () => void) {
+  window.addEventListener(changeEvent, callback)
+}
+
+/** The frameworks and axis of the current table of contents: what a reader can pick on this page. */
+export function getChoices(toc: { items?: { appliesTo?: AppliesToGroup[], items?: unknown[] }[], axis?: Axis }): Choices {
+  const frameworks: string[] = []
+  const visit = (items: { appliesTo?: AppliesToGroup[], items?: unknown[] }[]) => items?.forEach(item => {
+    unitsOf(item.appliesTo).forEach(u => frameworks.push(u.framework))
+    visit(item.items as { appliesTo?: AppliesToGroup[], items?: unknown[] }[])
+  })
+  visit(toc.items)
+  return { frameworks: sortFrameworks(frameworks), axis: toc.axis, key: toc.axis ? axisKey(toc.axis) : undefined }
+}
+
+/** The choices of the current table of contents, none when the picker is off. */
+export async function loadChoices(): Promise<Choices> {
+  const tocrel = meta('docfx:tocrel')
+  if (!isPickerEnabled() || !tocrel) {
+    return { frameworks: [] }
+  }
+  const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
+  return getChoices(await (await fetch(tocUrl)).json())
+}
+
+/** Applies the selection to the page now and whenever the reader picks another. */
+export async function initAppliesTo() {
+  const { frameworks, axis } = await loadChoices()
+  if (frameworks.length === 0) {
+    return
+  }
+  applySelection(getSelection(axis), axis)
+  onSelectionChange(() => applySelection(getSelection(axis), axis))
+}
+
+/**
+ * The dropdowns of the navbar, one for the axis of this part of the docs, if it has one, and one for frameworks.
+ * Nothing when the picker is off or the table of contents applies to no framework.
+ */
+export function appliesToPicker(choices: Choices): TemplateResult {
+  if (!isPickerEnabled() || choices.frameworks.length === 0) {
+    return null
+  }
+  const names = frameworkNames()
+  const selection = getSelection(choices.axis)
+  const dropdown = (key: string, title: string, current: string, items: { id: string, label: string }[]) => html`
+    <div class='dropdown applies-to-picker'>
+      <a title='${title}' class='btn border-0 dropdown-toggle' data-bs-toggle='dropdown' aria-expanded='false'>${current}</a>
+      <ul class='dropdown-menu dropdown-menu-end'>
+        ${items.map(i => html`<li><a class='dropdown-item' href='#' @click=${(e: Event) => { e.preventDefault(); select(key, i.id) }}>${i.label}</a></li>`)}
+      </ul>
+    </div>`
+
+  const axis = choices.axis
+  const axisDropdown = axis
+    ? dropdown(choices.key, axis.name,
+      // a value's label already names the axis ("EF Core 3.1"), "All" does not
+      axis.values.find(v => v.id === selection.value)?.label || `${axis.name}: ${loc('appliesToAll')}`,
+      [{ id: undefined, label: loc('appliesToAll') }, ...axis.values])
+    : null
+  const frameworkDropdown = dropdown('framework', loc('appliesToFramework'),
+    selection.framework ? frameworkLabel(selection.framework, names) : loc('appliesToAllFrameworks'),
+    [{ id: undefined, label: loc('appliesToAllFrameworks') }, ...choices.frameworks.map(f => ({ id: f, label: frameworkLabel(f, names) }))])
+  return html`${axisDropdown}${frameworkDropdown}`
+}
+
+function frameworkNames(): Record<string, string> {
+  try {
+    return JSON.parse(meta('docfx:frameworknames') || '{}')
+  } catch {
+    return {}
+  }
+}
+
+/** Describes a selection in a banner or a badge, e.g. `EF Core 3.1, .NET Framework 4.6.2`. */
+function selectionLabel(selection: Selection, axis?: Axis): string {
+  const value = axis?.values.find(v => v.id === selection.value)?.label
+  const framework = selection.framework ? frameworkLabel(selection.framework, frameworkNames()) : undefined
+  return [value, framework].filter(s => s).join(', ')
+}
+
+/**
+ * Shows the page for the selection: the content of each API for the framework that stands in best, without the
+ * other frameworks' differences; members that do not exist in the selection dimmed; a banner when the API itself
+ * does not exist in it.
+ */
+export function applySelection(selection: Selection, axis?: Axis) {
+  const any = !!(selection.framework || selection.value)
+  const label = selectionLabel(selection, axis)
+
+  document.querySelectorAll('.api-contents').forEach(container => {
+    const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content')) as HTMLElement[]
+    const chosen = any ? chooseGroup(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : 0
+    blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
+  })
+  document.querySelectorAll<HTMLElement>('.api-variants-heading, .api-variant').forEach(e => { e.hidden = any })
+
+  document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
+  document.querySelectorAll('.applies-to-unavailable').forEach(e => e.classList.remove('applies-to-unavailable'))
+  if (!any) {
+    return
+  }
+
+  document.querySelectorAll<HTMLElement>('article h3[data-applies-to]').forEach(heading => {
+    if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
+      return
+    }
+    heading.insertAdjacentHTML('beforeend', ' ')
+    const badge = document.createElement('span')
+    badge.className = 'applies-to-unavailable-badge badge text-bg-secondary fs-6 fw-normal ms-2'
+    badge.textContent = loc('appliesToUnavailable', { selection: label })
+    heading.appendChild(badge)
+    for (let e: Element = heading; e && (e === heading || !/^H[1-3]$/.test(e.tagName)); e = e.nextElementSibling) {
+      e.classList.add('applies-to-unavailable')
+    }
+  })
+
+  const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
+  if (title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
+    const banner = document.createElement('div')
+    banner.className = 'applies-to-banner alert alert-warning'
+    banner.textContent = loc('appliesToUnavailable', { selection: label })
+    title.parentElement.querySelector('.facts')?.after(banner)
+  }
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */
