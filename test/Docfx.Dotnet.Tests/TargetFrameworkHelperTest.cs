@@ -235,4 +235,21 @@ public class TargetFrameworkHelperTest
     {
         TargetFrameworkHelper.OrderByNearest(target, frameworks.Split(' ')).Should().Equal(expected.Split(' '));
     }
+
+    [Theory]
+    [InlineData("net10.0", "net8.0", true)]
+    [InlineData("net10.0", "netstandard2.0", true)]
+    [InlineData("net472", "net462", true)]
+    [InlineData("net462", "netstandard2.0", true)]
+    [InlineData("NET8.0", "net8.0", true)]
+    [InlineData("net8.0-windows", "net8.0", true)]
+    [InlineData("net8.0", "net10.0", false)]
+    [InlineData("net462", "net8.0", false)]
+    [InlineData("net462", "netstandard2.1", false)]
+    [InlineData("net8.0", "net8.0-windows", false)]
+    [InlineData("unknown", "net8.0", false)]
+    public void CanStandIn(string target, string framework, bool expected)
+    {
+        TargetFrameworkHelper.CanStandIn(target, framework).Should().Be(expected);
+    }
 }

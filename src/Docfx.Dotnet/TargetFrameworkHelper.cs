@@ -77,6 +77,16 @@ internal static partial class TargetFrameworkHelper
             .ToList();
     }
 
+    /// <summary>
+    /// Whether an API built for <paramref name="framework"/> can be used by a project targeting
+    /// <paramref name="target"/>: the same rule as <see cref="OrderByNearest"/>, and the template's picker.
+    /// </summary>
+    internal static bool CanStandIn(string target, string framework)
+    {
+        return string.Equals(target, framework, StringComparison.OrdinalIgnoreCase)
+            || (ParseMoniker(target) is { } t && ParseMoniker(framework) is { } f && CanReference(t, f));
+    }
+
     private static (FrameworkFamily Family, Version Version, string? Platform)? ParseMoniker(string moniker)
     {
         var match = TargetFrameworkMonikerRegex().Match(moniker);

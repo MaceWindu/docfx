@@ -54,11 +54,17 @@ static class PdfBuilder
             => pageTreeMembers.MediaBox ?? MediaBox.Letter;
     }
 
-    class Outline
+    internal class Outline
     {
         public string name { get; init; } = "";
         public string? href { get; init; }
-        public Outline[]? items { get; init; }
+        public Outline[]? items { get; set; }
+
+        /// <summary>The frameworks and axis values the API of this item applies to, from `docfx metadata`.</summary>
+        public AppliesTo[]? appliesTo { get; init; }
+
+        public string? pdfFramework { get; init; }
+        public string? pdfAxisValue { get; init; }
 
         public bool pdf { get; init; }
         public string? pdfFileName { get; init; }
@@ -73,6 +79,50 @@ static class PdfBuilder
 
         public string? pdfTocSource { get; init; }
         public int pdfTocHeadingDepth { get; init; } = 3;
+    }
+
+    internal class AppliesTo
+    {
+        public string? version { get; init; }
+        public string[]? frameworks { get; init; }
+    }
+
+    /// <summary>
+    /// Leaves out of <paramref name="outline"/> the items whose API does not exist in its <c>pdfFramework</c> and
+    /// <c>pdfAxisValue</c>, by the rule the picker of the modern template follows: a framework an API is not
+    /// built for is stood in for by one it is, and an axis value says nothing about an API without that axis.
+    /// </summary>
+    internal static void LeaveOutUnavailable(Outline outline)
+    {
+        if (outline.pdfFramework is null && outline.pdfAxisValue is null)
+        {
+            return;
+        }
+
+        Visit(outline);
+
+        void Visit(Outline node)
+        {
+            node.items = node.items?.Where(IsAvailable).ToArray();
+            foreach (var item in node.items ?? [])
+            {
+                Visit(item);
+            }
+        }
+
+        bool IsAvailable(Outline node) => node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
+            (outline.pdfAxisValue is null || group.version is null || group.version == outline.pdfAxisValue) &&
+            (outline.pdfFramework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(outline.pdfFramework, f))));
+    }
+
+    /// <summary>
+    /// The script that makes the pages of <paramref name="outline"/> show its framework and axis value, as the
+    /// picker would, or <see langword="null"/> when it sets neither.
+    /// </summary>
+    internal static string? GetAppliesToScript(Outline outline)
+    {
+        return outline.pdfFramework is null && outline.pdfAxisValue is null ? null
+            : $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework = outline.pdfFramework, value = outline.pdfAxisValue })};";
     }
 
     public static Task Run(BuildJsonConfig config, string configDirectory, string? outputDirectory = null, CancellationToken cancellationToken = default)
@@ -128,13 +178,31 @@ static class PdfBuilder
         await using var browser = await playwright.Chromium.LaunchAsync();
         await using var context = await browser.NewContextAsync(new() { UserAgent = "docfx/pdf" });
 
-        if (Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT") is { } timeout)
+        var timeout = Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT");
+        if (timeout is not null)
         {
             context.SetDefaultTimeout(int.Parse(timeout));
         }
 
         using var pageLimiter = new SemaphoreSlim(Environment.ProcessorCount, Environment.ProcessorCount);
         var pagePool = new ConcurrentBag<IPage>();
+
+        // A PDF for one framework or axis value gets pages of its own: the script that selects them runs on every
+        // page of a context, and the pages of the shared context are reused across PDFs.
+        var outlineContexts = new Dictionary<Outline, (IBrowserContext Context, ConcurrentBag<IPage> Pool)>();
+        foreach (var toc in pdfTocs.Values)
+        {
+            if (GetAppliesToScript(toc) is { } script)
+            {
+                var outlineContext = await browser.NewContextAsync(new() { UserAgent = "docfx/pdf" });
+                await outlineContext.AddInitScriptAsync(script);
+                if (timeout is not null)
+                {
+                    outlineContext.SetDefaultTimeout(int.Parse(timeout));
+                }
+                outlineContexts[toc] = (outlineContext, new());
+            }
+        }
         var headerFooterTemplateCache = new ConcurrentDictionary<string, string>();
         var headerFooterPageCache = new ConcurrentDictionary<(string Header, string Footer, PageSize Size, double Width, double Height), Task<byte[]>>();
 
@@ -182,6 +250,11 @@ static class PdfBuilder
             }
         }
 
+        foreach (var (outlineContext, _) in outlineContexts.Values)
+        {
+            await outlineContext.DisposeAsync();
+        }
+
         Logger.LogVerbose($"PDF done in {stopwatch.Elapsed}");
         return;
 
@@ -203,7 +276,10 @@ static class PdfBuilder
 
                 var outline = JsonSerializer.Deserialize<Outline>(File.ReadAllBytes(tocFile));
                 if (outline?.pdf is true)
+                {
+                    LeaveOutUnavailable(outline);
                     yield return (jsonOutput.RelativePath, outline);
+                }
             }
         }
 
@@ -217,7 +293,8 @@ static class PdfBuilder
         async Task<(byte[]? bytes, List<HeadingInfo> headings)> PrintPdf(Outline outline, Uri url, int headingDepth)
         {
             await pageLimiter.WaitAsync(cancellationToken);
-            var page = pagePool.TryTake(out var pooled) ? pooled : await context.NewPageAsync();
+            var (pageContext, pool) = outlineContexts.TryGetValue(outline, out var own) ? own : (context, pagePool);
+            var page = pool.TryTake(out var pooled) ? pooled : await pageContext.NewPageAsync();
             var headings = new List<HeadingInfo>();
 
             try
@@ -276,7 +353,7 @@ static class PdfBuilder
             }
             finally
             {
-                pagePool.Add(page);
+                pool.Add(page);
                 pageLimiter.Release();
             }
         }
