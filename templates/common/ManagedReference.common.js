@@ -141,12 +141,15 @@ function handleAppliesTo(vm, parent, options) {
     variant.example = variant.example || [];
     variant.exceptions = variant.exceptions || [];
     variant.seealso = variant.seealso || [];
+    variant.overridden = variant.overridden || "";
     if (variant.syntax) {
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
       setValue(variant.syntax, variant.syntax.return, kind);
     }
   });
+  // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
+  vm.hasVariants = vm.variants.length > 0;
 
   // Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed:
   // a PDF of one framework needs it whether the site has the picker or not.
@@ -190,7 +193,10 @@ function getVariantView(vm, variant, kind, index) {
     if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
   }
   // headings of the copy must not repeat the ids of the API's own
-  view.id = vm.id + '_variant' + (index + 1);
+  var suffix = '_variant' + (index + 1);
+  view.id = vm.id + suffix;
+  // nor the ids of what it lists, such as the values of an enum
+  if (vm.children) view.children = vm.children.map(function (child) { return withIdSuffix(child, suffix); });
   view.appliesToData = variant.appliesToData;
   view.variantViews = [];
   if (variant.summary) view.summary = variant.summary;
@@ -209,6 +215,16 @@ function getVariantView(vm, variant, kind, index) {
     view.syntax = syntax;
   }
   return view;
+}
+
+function withIdSuffix(item, suffix) {
+  var copy = {};
+  for (var key in item) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) copy[key] = item[key];
+  }
+  if (copy.id) copy.id = copy.id + suffix;
+  if (copy.children) copy.children = copy.children.map(function (child) { return withIdSuffix(child, suffix); });
+  return copy;
 }
 
 function groupChildren(model, category) {

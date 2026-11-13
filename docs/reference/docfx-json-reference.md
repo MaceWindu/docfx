@@ -525,7 +525,7 @@ The target framework to document projects at, e.g. `net8.0`. When it is not set,
 }
 ```
 
-Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
+Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, that is logged as information, and the warning is logged only if no project of the solution targets the framework. A framework is matched with its platform: `net8.0` does not select `net8.0-windows`, nor the reverse. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
 
 ### `targetFrameworks`
 
@@ -543,7 +543,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
-Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
+Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
 ### `defaultFramework`
 
@@ -586,13 +586,13 @@ An axis besides the target framework along which the projects of this metadata i
 }
 ```
 
-One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented. A project that matches no value is reported as an `InvalidAxis` error and not documented.
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value. A project that matches no value is reported as an `InvalidAxis` error and not documented.
 
 Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
 
 ### `variantIgnore`
 
-The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants. Nothing is ignored by default.
+The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.
 
 - `attributes`: attributes, including the attribute lines of a declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.

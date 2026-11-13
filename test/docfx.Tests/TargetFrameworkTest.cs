@@ -150,6 +150,60 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworkSelectsTheFrameworkOfAProjectAnEarlierOneReferenced()
+    {
+        // App references Lib, so loading App loads every framework of Lib too, and Lib is then taken from
+        // the solution rather than opened, which must not skip the selection.
+        var library = CreateMultiTargetedProject();
+        var app = CreateProject(
+            "App",
+            "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>",
+            "namespace App { public class Widget { } }",
+            $"""<ItemGroup><ProjectReference Include="{Path.GetFullPath(library)}" /></ItemGroup>""");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = new(new FileMappingItem(app, library)) { Expanded = true }, TargetFramework = "netstandard2.0" });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNetStandard.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkOnASolutionReportsOtherProjectsAsInformation()
+    {
+        // An analyzer that targets only netstandard2.0 is the common case of a solution project that does
+        // not target the framework the site documents.
+        var solution = CreateSolution(
+            CreateMultiTargetedProject(),
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        await Exec(new() { Src = Src(solution), TargetFramework = "net8.0" });
+
+        AssertWarnings(listener);
+        Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("does not target 'net8.0'"));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Analyzer.Rule.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkNoProjectOfASolutionTargetsWarnsOnce()
+    {
+        var solution = CreateSolution(
+            CreateMultiTargetedProject(),
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(solution), TargetFramework = "net9.0" });
+
+        AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+    }
+
+    [Fact]
     public async Task TargetFrameworkAndTheTargetFrameworkPropertyTogetherWarn()
     {
         var project = CreateMultiTargetedProject();
@@ -409,6 +463,52 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworksOnASolutionReportsProjectsMissingAFrameworkAsInformation()
+    {
+        var solution = CreateSolution(
+            CreateMultiTargetedProject(),
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        await Exec(new() { Src = Src(solution), TargetFrameworks = ["net8.0", "netstandard2.0"] });
+
+        AssertWarnings(listener);
+        Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("does not target 'net8.0'"));
+        Assert.Equal(["netstandard2.0"], AppliesTo("Analyzer.Rule.yml"));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksWithSourceFilesIsAnError()
+    {
+        // Source files and assemblies have no target framework to say an API applies to.
+        var project = CreateMultiTargetedProject();
+        var source = Path.Combine(_projectFolder, "Extra.cs");
+        File.WriteAllText(source, "namespace Extra { public class Tool { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project, source), TargetFrameworks = ["*"] });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.TargetFrameworksNotSupported);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWithAnAxisDocumentsThatFrameworkForEachValue()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly(v1Frameworks: "net8.0;netstandard2.0");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v2")], TargetFramework = "net8.0" });
+
+        AssertWarnings(listener);
+        var shared = Page("Lib.Shared.yml").Items[0];
+        Assert.Equal(["v1", "v2"], shared.AppliesTo.Select(a => a.Version));
+        Assert.All(shared.AppliesTo, a => Assert.Equal(["net8.0"], a.Frameworks));
+    }
+
+    [Fact]
     public async Task AnAxisMergesProjectsThatBuildTheSameAssembly()
     {
         var (v1, v2) = CreateTwoVersionsOfOneAssembly();
@@ -597,6 +697,23 @@ public class TargetFrameworkTest : TestBase
             "<TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>",
             "namespace App { public class Derived : Dep.Base { } }",
             $"""<ItemGroup><ProjectReference Include="{Path.GetFullPath(library)}" /></ItemGroup>""");
+    }
+
+    private string CreateSolution(params string[] projects)
+    {
+        var solution = Path.Combine(_projectFolder, "All.sln");
+        var entries = string.Concat(projects.Select(project => $$"""
+            Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "{{Path.GetFileNameWithoutExtension(project)}}", "{{Path.GetRelativePath(_projectFolder, project)}}", "{{{Guid.NewGuid().ToString().ToUpperInvariant()}}}"
+            EndProject
+
+            """));
+        File.WriteAllText(solution, $"""
+            Microsoft Visual Studio Solution File, Format Version 12.00
+            # Visual Studio Version 17
+            {entries}Global
+            EndGlobal
+            """);
+        return solution;
     }
 
     /// <summary>

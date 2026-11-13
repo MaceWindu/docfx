@@ -131,6 +131,16 @@ public static partial class DotnetApiCatalog
                 ? null
                 : new HashSet<IAssemblySymbol>(assemblies.Select(a => a.symbol), SymbolEqualityComparer.Default);
 
+            // Source files and assemblies have no target framework to say an API applies to.
+            if (frameworks is not null && assemblies.Any(a => !frameworks.ContainsKey(a.compilation)))
+            {
+                Logger.LogError(
+                    "'targetFrameworks' with more than one framework applies to project and solution input only. "
+                    + "Document source files and assemblies in a metadata item of their own.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
+
             if (frameworks is not null && config.DefaultFramework is { } defaultFramework &&
                 !frameworks.Values.Any(unit => string.Equals(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework, StringComparison.OrdinalIgnoreCase)))
             {
@@ -304,6 +314,22 @@ public static partial class DotnetApiCatalog
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() is { Count: > 0 } frameworks ? frameworks : null;
 
+        var targetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim();
+
+        // With an axis, one framework is still documented for each of its values, which are merged: a list of one.
+        if (axis is not null && targetFramework is not null)
+        {
+            if (targetFrameworks is not null)
+            {
+                Logger.LogWarning(
+                    "Both 'targetFramework' and 'targetFrameworks' are set. They are mutually exclusive, 'targetFrameworks' is ignored.",
+                    code: WarningCodes.Metadata.ConflictingTargetFramework);
+            }
+
+            targetFrameworks = [targetFramework];
+            targetFramework = null;
+        }
+
         return new ExtractMetadataConfig
         {
             ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
@@ -314,7 +340,7 @@ public static partial class DotnetApiCatalog
             AssemblyUidOverride = configModel?.AssemblyUidOverride,
             AssemblyLabel = configModel?.AssemblyLabel ?? default,
             MSBuildProperties = configModel?.Properties,
-            TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
+            TargetFramework = targetFramework,
             // An axis tells apart projects that would otherwise be documented as one, so every framework
             // of each of them is documented unless the frameworks are given.
             TargetFrameworks = targetFrameworks ?? (axis is null ? null : ["*"]),

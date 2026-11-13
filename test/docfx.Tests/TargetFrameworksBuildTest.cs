@@ -81,6 +81,21 @@ public class TargetFrameworksBuildTest : TestBase
                     public long Value() => 0;
                 }
             #endif
+
+                public enum Mode
+                {
+                    /// <summary>Plain everywhere.</summary>
+                    Plain,
+            #if NET8_0
+                    /// <summary>Fast on net8 only.</summary>
+                    Fast,
+                    /// <summary>Strict on net8.</summary>
+                    Strict,
+            #else
+                    /// <summary>Strict on older frameworks.</summary>
+                    Strict,
+            #endif
+                }
             }
             """);
     }
@@ -206,6 +221,25 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
+    public async Task AnEnumMarksItsValuesAndShowsWhatDiffers(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Mode.html");
+
+        // Fast exists on net8 only, so it is marked; Plain is everywhere, so it is not.
+        Assert.Matches("id=\"Lib_Mode_Fast\" data-applies-to=\"net8.0\"[^\\n]*>\\.NET 8</span>", page);
+        Assert.DoesNotMatch("id=\"Lib_Mode_Plain\"[^\\n]*</span>", page);
+
+        // Strict has another value and summary on netstandard2.0.
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", page);
+        Assert.Contains("Strict on older frameworks.", page);
+        Assert.Equal(1, Regex.Count(page, "class=\"api-variant\" "));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
     public async Task AVariantShowsTheValueOfAFieldOrPropertyAsItsOwnSectionDoes(string template)
     {
         var site = await Build(template, targetFrameworks: "\"*\"");
@@ -297,7 +331,7 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
 
         // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
-        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
         Assert.NotEmpty(copy);
         Assert.Contains("Property Value", copy);
         Assert.DoesNotContain("Returns", copy);
@@ -379,7 +413,7 @@ public class TargetFrameworksBuildTest : TestBase
 
     private static string WithoutHiddenContent(string page)
     {
-        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" hidden>");
+        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" data-search-ignore hidden>");
         for (var match = hidden.Match(page); match.Success; match = hidden.Match(page))
         {
             // the copy ends at the </div> that balances its <div>

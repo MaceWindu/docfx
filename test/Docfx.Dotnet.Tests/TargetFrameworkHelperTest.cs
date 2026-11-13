@@ -23,6 +23,36 @@ public class TargetFrameworkHelperTest
     }
 
     [Theory]
+    [InlineData("net8.0", null)]
+    [InlineData("net8.0-windows", "WINDOWS")]
+    [InlineData("net8.0-windows10.0.19041.0", "WINDOWS")]
+    [InlineData("net9.0-maccatalyst18.0", "MACCATALYST")]
+    [InlineData("netstandard2.0", null)]
+    public void GetTargetFrameworkPlatform(string targetFramework, string expected)
+    {
+        TargetFrameworkHelper.GetTargetFrameworkPlatform(targetFramework).Should().Be(expected);
+    }
+
+    [Theory]
+    // the symbols the .NET SDK defines for net8.0, net8.0-windows, netstandard2.0 and net462
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "NET8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net9.0", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net8.0-windows", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0-windows", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0", false)]
+    [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard2.0", true)]
+    [InlineData("NETFRAMEWORK;NET462", "net462", true)]
+    [InlineData("NETFRAMEWORK;NET462", "net48", false)]
+    // a non-SDK project, or one with DisableImplicitFrameworkDefines, does not say
+    [InlineData("TRACE;DEBUG", "net48", null)]
+    [InlineData("", "net8.0", null)]
+    public void TargetsFramework(string symbols, string targetFramework, bool? expected)
+    {
+        TargetFrameworkHelper.TargetsFramework(symbols.Split(';', StringSplitOptions.RemoveEmptyEntries), targetFramework).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("net8.0", "NET", "NETCOREAPP", "NET8_0", "NET8_0_OR_GREATER", "NET7_0_OR_GREATER")]
     [InlineData("net10.0", "NET10_0_OR_GREATER", "NET10_0")]
     [InlineData("netstandard2.0", "NETSTANDARD", "NETSTANDARD2_0", "NETSTANDARD1_6_OR_GREATER")]

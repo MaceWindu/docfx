@@ -9,7 +9,7 @@ import { enableSearch } from './search'
 import { renderToc } from './toc'
 import { initTheme } from './theme'
 import { applyPrintSelection, initAppliesTo } from './appliesTo'
-import { renderBreadcrumb, renderInThisArticle, renderNavbar } from './nav'
+import { renderBreadcrumb, renderInThisArticle, renderNavbar, updateInThisArticle } from './nav'
 
 import 'bootstrap-icons/font/bootstrap-icons.scss'
 import './docfx.scss'
@@ -45,7 +45,7 @@ async function init() {
       renderMarkdown(),
       renderNav(),
       highlight(),
-      initAppliesTo()
+      initAppliesTo(updateInThisArticle)
     ])
   }
 

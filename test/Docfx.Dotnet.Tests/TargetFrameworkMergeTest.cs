@@ -273,6 +273,47 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void AFrameworkWithoutParameterDescriptionsTakesThemFromAnother()
+    {
+        var result = Merge(
+            ("namespace N { public class T { /// <summary>m</summary>\npublic int M<TV>(int x) => x; } }", First),
+            ("namespace N { public class T { /// <summary>m</summary><typeparam name=\"TV\">the TV</typeparam><param name=\"x\">the x</param><returns>the result</returns>\npublic int M<TV>(int x) => x; } }", Second));
+
+        var syntax = result["N.T.M``1(System.Int32)"].Syntax;
+        syntax.Parameters.Single().Description.Should().Contain("the x");
+        syntax.TypeParameters.Single().Description.Should().Contain("the TV");
+        syntax.Return.Description.Should().Contain("the result");
+        result["N.T.M``1(System.Int32)"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AFrameworkSharesAVariantOnlyWithTheSameDocumentation()
+    {
+        // The third framework differs from the first in its signature only, the second in its signature and
+        // summary: sharing the second's variant would show the third the second's summary.
+        var result = Merge(
+            ("namespace N { public class T { /// <summary>one</summary>\npublic int M() => 0; } }", First),
+            ("namespace N { public class T { /// <summary>two</summary>\npublic long M() => 0; } }", Second),
+            ("namespace N { public class T { /// <summary>one</summary>\npublic long M() => 0; } }", Third));
+
+        var variants = result["N.T.M"].Variants;
+        variants.Select(v => v.Frameworks.Single()).Should().Equal(Second, Third);
+        variants[0].Content.Summary.Should().Contain("two");
+        variants[1].Content.Summary.Should().BeNull();
+    }
+
+    [Fact]
+    public void OnlyTheBaseListOfATypeIsComparedInAnyOrder()
+    {
+        var primary = new MetadataItem { Name = "N.T.C", Type = MemberType.Field, Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public const string C = \"a : b, c\"" } } };
+        var other = new MetadataItem { Name = "N.T.C", Type = MemberType.Field, Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public const string C = \"a : c, b\"" } } };
+
+        TargetFrameworkVariants.Merge(primary, other, Second);
+
+        primary.Variants.Should().ContainSingle();
+    }
+
+    [Fact]
     public void DocumentationThatDiffersOnlyInWhitespaceIsNotADifference()
     {
         var result = Merge(

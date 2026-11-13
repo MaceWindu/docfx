@@ -129,12 +129,25 @@ internal static partial class TargetFrameworkVariants
             primary.SeeAlsos = other.SeeAlsos;
         }
 
+        if (primary.Syntax is { } ownSyntax && other.Syntax is { } otherSyntax)
+        {
+            FillDescriptions(ownSyntax.Parameters, otherSyntax.Parameters);
+            FillDescriptions(ownSyntax.TypeParameters, otherSyntax.TypeParameters);
+            if (ownSyntax.Return is { } ownReturn && string.IsNullOrWhiteSpace(ownReturn.Description))
+            {
+                ownReturn.Description = otherSyntax.Return?.Description;
+            }
+        }
+
+        // The base types and interfaces of a type are listed in the order of each framework's reference assemblies.
+        var baseLists = primary.Type is MemberType.Class or MemberType.Struct or MemberType.Interface;
+
         var content = new MetadataItem();
         var differs = false;
         foreach (var (property, name) in Compared)
         {
             var value = property.GetValue(other);
-            if (!AreEquivalent(property.GetValue(primary), value, name, ignore))
+            if (!AreEquivalent(property.GetValue(primary), value, name, ignore, baseLists))
             {
                 property.SetValue(content, value);
                 // A variant shows what the other framework has: one that only lacks something would show nothing.
@@ -153,7 +166,7 @@ internal static partial class TargetFrameworkVariants
         }
 
         primary.Variants ??= [];
-        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, ignore)) is { } existing)
+        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, ignore, baseLists)) is { } existing)
         {
             existing.Frameworks.Add(framework);
         }
@@ -172,20 +185,45 @@ internal static partial class TargetFrameworkVariants
         return new()
         {
             Content = other.Content,
-            Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore) ? null : other.Parameters,
-            TypeParameters = AreEquivalent(own.TypeParameters, other.TypeParameters, "typeParameters", ignore) ? null : other.TypeParameters,
-            Return = AreEquivalent(own.Return, other.Return, "return", ignore) ? null : other.Return,
+            Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore, baseLists: false) ? null : other.Parameters,
+            TypeParameters = AreEquivalent(own.TypeParameters, other.TypeParameters, "typeParameters", ignore, baseLists: false) ? null : other.TypeParameters,
+            Return = AreEquivalent(own.Return, other.Return, "return", ignore, baseLists: false) ? null : other.Return,
         };
     }
 
-    private static bool HasSameContent(MetadataItem left, MetadataItem right, VariantIgnore ignore)
+    /// <summary>
+    /// Whether a framework can share a variant another framework has. Compared strictly: documentation one
+    /// variant has and the other lacks is a difference here, or the framework would be shown the other's text.
+    /// </summary>
+    private static bool HasSameContent(MetadataItem left, MetadataItem right, VariantIgnore ignore, bool baseLists)
     {
-        return Compared.All(field => AreEquivalent(field.Property.GetValue(left), field.Property.GetValue(right), field.Name, ignore));
+        return Compared.All(field => AreEquivalent(field.Property.GetValue(left), field.Property.GetValue(right), field.Name, ignore, baseLists, strict: true));
     }
 
-    private static bool AreEquivalent(object left, object right, string name, VariantIgnore ignore)
+    /// <summary>
+    /// Fills the descriptions <paramref name="own"/> lacks from the parameters of the same name in <paramref name="other"/>,
+    /// as the summary and remarks are filled: the framework that has documentation provides it.
+    /// </summary>
+    private static void FillDescriptions(List<ApiParameter> own, List<ApiParameter> other)
     {
-        return ReferenceEquals(left, right) || AreEquivalent(ToNode(left), ToNode(right), name, ignore, inDeclaration: false);
+        if (own is null || other is null)
+        {
+            return;
+        }
+
+        foreach (var parameter in own)
+        {
+            if (string.IsNullOrWhiteSpace(parameter.Description) &&
+                other.FirstOrDefault(o => o.Name == parameter.Name) is { Description: { } description } && !string.IsNullOrWhiteSpace(description))
+            {
+                parameter.Description = description;
+            }
+        }
+    }
+
+    private static bool AreEquivalent(object left, object right, string name, VariantIgnore ignore, bool baseLists, bool strict = false)
+    {
+        return ReferenceEquals(left, right) || AreEquivalent(ToNode(left), ToNode(right), name, ignore, inDeclaration: false, baseLists, strict);
     }
 
     private static JsonNode ToNode(object value)
@@ -193,7 +231,7 @@ internal static partial class TargetFrameworkVariants
         return value is null ? null : JsonSerializer.SerializeToNode(value, value.GetType());
     }
 
-    private static bool AreEquivalent(JsonNode left, JsonNode right, string name, VariantIgnore ignore, bool inDeclaration)
+    private static bool AreEquivalent(JsonNode left, JsonNode right, string name, VariantIgnore ignore, bool inDeclaration, bool baseLists, bool strict)
     {
         if ((ignore.HasFlag(VariantIgnore.Attributes) && name == "attributes") ||
             (ignore.HasFlag(VariantIgnore.Documentation) && Documentation.Contains(name)))
@@ -203,18 +241,18 @@ internal static partial class TargetFrameworkVariants
 
         if (IsEmpty(left) || IsEmpty(right))
         {
-            return (IsEmpty(left) && IsEmpty(right)) || Documentation.Contains(name);
+            return (IsEmpty(left) && IsEmpty(right)) || (!strict && Documentation.Contains(name));
         }
 
         switch (left)
         {
             case JsonObject leftObject when right is JsonObject rightObject:
                 return leftObject.Select(p => p.Key).Union(rightObject.Select(p => p.Key)).All(key =>
-                    AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content"));
+                    AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content", baseLists, strict));
 
             case JsonArray leftArray when right is JsonArray rightArray:
                 return leftArray.Count == rightArray.Count
-                    && leftArray.Zip(rightArray).All(pair => AreEquivalent(pair.First, pair.Second, name, ignore, inDeclaration));
+                    && leftArray.Zip(rightArray).All(pair => AreEquivalent(pair.First, pair.Second, name, ignore, inDeclaration, baseLists, strict));
 
             case JsonValue when right is JsonValue:
                 if (left.GetValueKind() is JsonValueKind.String && right.GetValueKind() is JsonValueKind.String)
@@ -230,7 +268,9 @@ internal static partial class TargetFrameworkVariants
                         }
 
                         // The reference assemblies of each framework list the interfaces of a type in their own order.
-                        return SortBaseList(leftDeclaration, name) == SortBaseList(rightDeclaration, name);
+                        return baseLists
+                            ? SortBaseList(leftDeclaration, name) == SortBaseList(rightDeclaration, name)
+                            : leftDeclaration == rightDeclaration;
                     }
 
                     // Line breaks and indentation of documentation follow the layout of the source comment,
@@ -239,7 +279,7 @@ internal static partial class TargetFrameworkVariants
                     {
                         var leftText = WhitespaceRegex().Replace(left.GetValue<string>(), "");
                         var rightText = WhitespaceRegex().Replace(right.GetValue<string>(), "");
-                        return leftText == rightText || leftText.Length == 0 || rightText.Length == 0;
+                        return leftText == rightText || (!strict && (leftText.Length == 0 || rightText.Length == 0));
                     }
                 }
 

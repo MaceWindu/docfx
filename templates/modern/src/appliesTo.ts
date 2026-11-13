@@ -166,23 +166,61 @@ export function isPickerEnabled(): boolean {
   return meta('docfx:appliestopicker') === 'true'
 }
 
-/** The key of an axis in storage and in the query string: its name in lower case, e.g. `ef-core`. */
+/**
+ * The key of an axis in storage and in the query string: its name in lower case, e.g. `ef-core`; never
+ * `framework`, which is the key of the frameworks.
+ */
 export function axisKey(axis: Axis): string {
-  return axis.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const key = axis.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return key === 'framework' ? 'framework-axis' : key
 }
 
-/** What the reader picked: from the query string, for shareable links, else what they picked last. */
-export function getSelection(axis?: Axis): Selection {
+/** Whether a framework can be picked: one docfx can compare, or one the table of contents lists. */
+export function isValidFramework(framework: string, frameworks: string[] = []): boolean {
+  return !!parseMoniker(framework) || frameworks.includes(framework)
+}
+
+/**
+ * The key a choice is kept under. Sites on one origin, such as the projects of one github.io account, share local
+ * storage, so the key includes the root of the site.
+ */
+function storageKey(key: string): string {
+  const root = new URL(meta('docfx:appliestorel') || './', window.location.href).pathname
+  return `docfx.axis.${root}.${key}`
+}
+
+/**
+ * What the reader picked: from the query string, for shareable links, else what they picked last. A value that
+ * is not one of the axis, or a framework that is not one, is left out, so a typo in a link or a choice kept from
+ * an earlier version of the site does not hide everything.
+ */
+export function getSelection(axis?: Axis, frameworks: string[] = []): Selection {
   const query = new URLSearchParams(window.location.search)
-  const read = (key: string) => query.get(key) || localStorage?.getItem(`docfx.axis.${key}`) || undefined
-  return { framework: read('framework'), value: axis ? read(axisKey(axis)) : undefined }
+  const read = (key: string, valid: (value: string) => boolean) =>
+    [query.get(key), localStorage?.getItem(storageKey(key))].find(value => value && valid(value)) || undefined
+  return {
+    framework: read('framework', f => isValidFramework(f, frameworks)),
+    value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v)) : undefined
+  }
+}
+
+/** Keeps the choice a link made, so that it carries on to the pages the reader goes to next. */
+function keepLinkSelection(choices: Choices) {
+  const query = new URLSearchParams(window.location.search)
+  const selection = getSelection(choices.axis, choices.frameworks)
+  if (query.get('framework') && query.get('framework') === selection.framework) {
+    localStorage?.setItem(storageKey('framework'), selection.framework)
+  }
+  if (choices.key && query.get(choices.key) && query.get(choices.key) === selection.value) {
+    localStorage?.setItem(storageKey(choices.key), selection.value)
+  }
 }
 
 function select(key: string, value: string | undefined) {
   if (value) {
-    localStorage?.setItem(`docfx.axis.${key}`, value)
+    localStorage?.setItem(storageKey(key), value)
   } else {
-    localStorage?.removeItem(`docfx.axis.${key}`)
+    localStorage?.removeItem(storageKey(key))
   }
   // the query string would override the choice on this page
   const url = new URL(window.location.href)
@@ -208,24 +246,55 @@ export function getChoices(toc: { items?: { appliesTo?: AppliesToGroup[], items?
   return { frameworks: sortFrameworks(frameworks), axis: toc.axis, key: toc.axis ? axisKey(toc.axis) : undefined }
 }
 
+const tocs = new Map<string, Promise<unknown>>()
+
+/** The table of contents at `url`, fetched once for the table of contents, the navbar and the picker. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function fetchToc(url: URL): Promise<any> {
+  if (!tocs.has(url.href)) {
+    tocs.set(url.href, fetch(url).then(res => res.json()))
+  }
+  return tocs.get(url.href)
+}
+
 /** The choices of the current table of contents, none when the picker is off. */
 export async function loadChoices(): Promise<Choices> {
   const tocrel = meta('docfx:tocrel')
   if (!isPickerEnabled() || !tocrel) {
     return { frameworks: [] }
   }
-  const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
-  return getChoices(await (await fetch(tocUrl)).json())
+  return getChoices(await fetchToc(new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)))
 }
 
-/** Applies the selection to the page now and whenever the reader picks another. */
-export async function initAppliesTo() {
-  const { frameworks, axis } = await loadChoices()
-  if (frameworks.length === 0) {
+/**
+ * Applies the selection to the page now and whenever the reader picks another, then calls `onApplied`, which
+ * updates what depends on the content shown, such as the headings of "In this article".
+ */
+export async function initAppliesTo(onApplied: () => void = () => { }) {
+  // The framework can be applied before the table of contents is loaded, so that the page does not show all
+  // frameworks first; the value of an axis needs the axis, which the table of contents names.
+  const early = isPickerEnabled() ? getSelection() : {}
+  if (early.framework) {
+    applySelection(early)
+    onApplied()
+  }
+
+  const choices = await loadChoices().catch((): Choices => ({ frameworks: [] }))
+  if (choices.frameworks.length === 0) {
+    if (early.framework) {
+      applySelection({})
+      onApplied()
+    }
     return
   }
-  applySelection(getSelection(axis), axis)
-  onSelectionChange(() => applySelection(getSelection(axis), axis))
+
+  keepLinkSelection(choices)
+  const apply = () => {
+    applySelection(getSelection(choices.axis, choices.frameworks), choices.axis)
+    onApplied()
+  }
+  apply()
+  onSelectionChange(apply)
 }
 
 /**
@@ -237,12 +306,13 @@ export function appliesToPicker(choices: Choices): TemplateResult {
     return null
   }
   const names = frameworkNames()
-  const selection = getSelection(choices.axis)
-  const dropdown = (key: string, title: string, current: string, items: { id: string, label: string }[]) => html`
+  const selection = getSelection(choices.axis, choices.frameworks)
+  const dropdown = (key: string, title: string, current: string, selected: string | undefined, items: { id: string, label: string }[]) => html`
     <div class='dropdown applies-to-picker'>
-      <a title='${title}' class='btn border-0 dropdown-toggle' data-bs-toggle='dropdown' aria-expanded='false'>${current}</a>
+      <button type='button' title='${title}' class='btn border-0 dropdown-toggle' data-bs-toggle='dropdown' aria-expanded='false'>${current}</button>
       <ul class='dropdown-menu dropdown-menu-end'>
-        ${items.map(i => html`<li><a class='dropdown-item' href='#' @click=${(e: Event) => { e.preventDefault(); select(key, i.id) }}>${i.label}</a></li>`)}
+        ${items.map(i => html`<li><a class='dropdown-item ${i.id === selected ? 'active' : ''}' aria-current=${i.id === selected ? 'true' : 'false'} href='#'
+          @click=${(e: Event) => { e.preventDefault(); select(key, i.id) }}>${i.label}</a></li>`)}
       </ul>
     </div>`
 
@@ -251,10 +321,12 @@ export function appliesToPicker(choices: Choices): TemplateResult {
     ? dropdown(choices.key, axis.name,
       // a value's label already names the axis ("EF Core 3.1"), "All" does not
       axis.values.find(v => v.id === selection.value)?.label || `${axis.name}: ${loc('appliesToAll')}`,
+      selection.value,
       [{ id: undefined, label: loc('appliesToAll') }, ...axis.values])
     : null
   const frameworkDropdown = dropdown('framework', loc('appliesToFramework'),
     selection.framework ? frameworkLabel(selection.framework, names) : loc('appliesToAllFrameworks'),
+    selection.framework,
     [{ id: undefined, label: loc('appliesToAllFrameworks') }, ...choices.frameworks.map(f => ({ id: f, label: frameworkLabel(f, names) }))])
   return html`${axisDropdown}${frameworkDropdown}`
 }
@@ -289,7 +361,18 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
   })
 
-  document.querySelectorAll<HTMLElement>('.api-variants-heading, .api-variant').forEach(e => { e.hidden = any })
+  // What differs elsewhere is hidden where the selection chose the content; a value picked for an axis says nothing
+  // about an API without that axis, which keeps all its frameworks when no framework is picked.
+  document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => {
+    e.hidden = !!selection.framework || (!!selection.value && parseUnits(e.dataset.appliesTo).some(u => u.value !== undefined))
+  })
+  document.querySelectorAll<HTMLElement>('.api-variants-heading').forEach(heading => {
+    const variants: HTMLElement[] = []
+    for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
+      variants.push(e as HTMLElement)
+    }
+    heading.hidden = variants.length > 0 && variants.every(v => v.hidden)
+  })
 
   document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
   document.querySelectorAll('.applies-to-unavailable').forEach(e => e.classList.remove('applies-to-unavailable'))
@@ -297,22 +380,22 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     return
   }
 
-  document.querySelectorAll<HTMLElement>('article h3[data-applies-to]').forEach(heading => {
+  // members, and the values of an enum, which are a list of their own
+  document.querySelectorAll<HTMLElement>('article h3[data-applies-to], article dt[data-applies-to]').forEach(heading => {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
     if (print) {
-      for (let e = heading as HTMLElement; e && (e === heading || !/^H[1-3]$/.test(e.tagName)); e = e.nextElementSibling as HTMLElement) {
-        e.hidden = true
+      for (const e of memberElements(heading)) {
+        (e as HTMLElement).hidden = true
       }
       return
     }
-    heading.insertAdjacentHTML('beforeend', ' ')
     const badge = document.createElement('span')
     badge.className = 'applies-to-unavailable-badge badge text-bg-secondary fs-6 fw-normal ms-2'
     badge.textContent = loc('appliesToUnavailable', { selection: label })
     heading.appendChild(badge)
-    for (let e: Element = heading; e && (e === heading || !/^H[1-3]$/.test(e.tagName)); e = e.nextElementSibling) {
+    for (const e of memberElements(heading)) {
       e.classList.add('applies-to-unavailable')
     }
   })
@@ -328,6 +411,21 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     }
   })
 
+  // in print, a section whose members are all left out, such as "Events", goes too
+  if (print) {
+    document.querySelectorAll<HTMLElement>('article h2').forEach(section => {
+      const following: HTMLElement[] = []
+      for (let e = section.nextElementSibling; e && e.tagName !== 'H2'; e = e.nextElementSibling) {
+        following.push(e as HTMLElement)
+      }
+      const members = following.flatMap(e => e.matches('h3, dt') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
+        section.hidden = true
+        following.forEach(e => { e.hidden = true })
+      }
+    })
+  }
+
   // a PDF of one framework leaves out the pages of APIs that do not exist in it
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
   if (!print && title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
@@ -336,6 +434,22 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     banner.textContent = loc('appliesToUnavailable', { selection: label })
     title.parentElement.querySelector('.facts')?.after(banner)
   }
+}
+
+/**
+ * The elements of a member: its heading and what follows up to the next heading or member, or for the value of an
+ * enum, its term and description.
+ */
+export function memberElements(heading: Element): Element[] {
+  const elements = [heading]
+  for (let e = heading.nextElementSibling; e; e = e.nextElementSibling) {
+    const ends = heading.tagName === 'DT' ? e.tagName !== 'DD' : /^H[1-3]$/.test(e.tagName) || e.hasAttribute('data-overload')
+    if (ends) {
+      break
+    }
+    elements.push(e)
+  }
+  return elements
 }
 
 declare global {

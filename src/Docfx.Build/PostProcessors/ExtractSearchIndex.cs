@@ -230,6 +230,11 @@ partial class ExtractSearchIndex : IPostProcessor
 
         if (node.NodeType is HtmlNodeType.Element or HtmlNodeType.Document)
         {
+            // Copies of content a page shows only on demand, such as the content of an API for another target
+            // framework, would repeat what is indexed already.
+            if (node.Attributes.Contains("data-search-ignore"))
+                return;
+
             var isBlock = !s_htmlInlineTags.Contains(node.Name);
             if (isBlock)
                 contentBuilder.Append(' ');
