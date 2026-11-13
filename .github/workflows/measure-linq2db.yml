@@ -104,6 +104,20 @@ jobs:
           Get-Content $log -Tail 30
           if ($process.ExitCode -ne 0) { throw "docfx exited with $($process.ExitCode)" }
 
+      # The site from that metadata: its API pages, and for the merged config what they show of the frameworks.
+      - name: docfx build
+        shell: pwsh
+        working-directory: linq2db
+        run: |
+          dotnet "$env:RUNNER_TEMP/docfx/docfx.dll" build 'docs/source/${{ matrix.config }}' *> "$env:RUNNER_TEMP/build-${{ matrix.name }}.log"
+          $exit = $LASTEXITCODE
+          Get-Content "$env:RUNNER_TEMP/build-${{ matrix.name }}.log" -Tail 5
+          if ($exit -ne 0) { throw "docfx build exited with $exit" }
+          $site = python ../docfx/.github/measure/count-site.py .build/docs/_site
+          $variants = python ../docfx/.github/measure/count-variants.py docs/source/api | Select-Object -First 3
+          "site: $site" | Tee-Object -Append "$env:RUNNER_TEMP/result-${{ matrix.name }}.md"
+          "variants: $($variants -join '; ')" | Tee-Object -Append "$env:RUNNER_TEMP/result-${{ matrix.name }}.md"
+          "``$site``" >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -111,6 +125,7 @@ jobs:
           path: |
             ${{ runner.temp }}/docfx-${{ matrix.name }}.log*
             ${{ runner.temp }}/result-${{ matrix.name }}.md
+            ${{ runner.temp }}/build-${{ matrix.name }}.log
           retention-days: 14
 
       # The metadata of every framework, from which the site is built and screenshot locally.
