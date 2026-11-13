@@ -72,6 +72,8 @@ jobs:
         working-directory: linq2db
         run: |
           Copy-Item ../docfx/.github/measure/*.json, ../docfx/.github/measure/*.yml docs/source/
+          # the merged config writes one EF Core folder, which the site's table of contents has to name
+          if ('${{ matrix.name }}' -eq 'targetFrameworks') { Copy-Item ../docfx/.github/measure/axes/toc.yml docs/source/toc.yml -Force }
           dotnet build -c Release -p:RunAnalyzersDuringBuild=false -p:EnforceCodeStyleInBuild=false 'Source/LinqToDB.FSharp/LinqToDB.FSharp.fsproj'
           if ($LASTEXITCODE -ne 0) { throw 'F# pre-build failed' }
 
