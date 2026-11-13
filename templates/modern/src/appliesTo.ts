@@ -487,7 +487,18 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
   })
 
-  document.querySelectorAll<HTMLElement>('.api-variants-heading, .api-variant').forEach(e => { e.hidden = any })
+  // What differs elsewhere is hidden where the selection chose the content; a value picked for an axis says nothing
+  // about an API without that axis, which keeps all its frameworks when no framework is picked.
+  document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => {
+    e.hidden = !!selection.framework || (!!selection.value && parseUnits(e.dataset.appliesTo).some(u => u.value !== undefined))
+  })
+  document.querySelectorAll<HTMLElement>('.api-variants-heading').forEach(heading => {
+    const variants: HTMLElement[] = []
+    for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
+      variants.push(e as HTMLElement)
+    }
+    heading.hidden = variants.length > 0 && variants.every(v => v.hidden)
+  })
 
   document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
   document.querySelectorAll('.applies-to-unavailable').forEach(e => e.classList.remove('applies-to-unavailable'))
@@ -525,6 +536,21 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       }
     }
   })
+
+  // in print, a section whose members are all left out, such as "Events", goes too
+  if (print) {
+    document.querySelectorAll<HTMLElement>('article h2').forEach(section => {
+      const following: HTMLElement[] = []
+      for (let e = section.nextElementSibling; e && e.tagName !== 'H2'; e = e.nextElementSibling) {
+        following.push(e as HTMLElement)
+      }
+      const members = following.flatMap(e => e.matches('h3, dt') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
+        section.hidden = true
+        following.forEach(e => { e.hidden = true })
+      }
+    })
+  }
 
   // a PDF of one framework leaves out the pages of APIs that do not exist in it
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')

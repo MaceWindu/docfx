@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Buffers;
@@ -94,25 +94,52 @@ static class PdfBuilder
     /// </summary>
     internal static void LeaveOutUnavailable(Outline outline)
     {
-        if (outline.pdfFramework is null && outline.pdfAxisValue is null)
+        var (framework, value) = (Selected(outline.pdfFramework), Selected(outline.pdfAxisValue));
+        if (framework is null && value is null)
         {
             return;
+        }
+
+        // A selection that nothing in the table of contents applies to is most likely a typo, and would leave every
+        // API out of the PDF without saying so.
+        var groups = Descendants(outline).SelectMany(node => node.appliesTo ?? []).ToList();
+        if (groups.Count > 0 && value is not null && !groups.Any(group => group.version == value))
+        {
+            Logger.LogWarning($"'pdfAxisValue' of '{outline.pdfFileName ?? outline.name}' is '{value}', which is not a value of an axis of its API.");
+        }
+        if (groups.Count > 0 && framework is not null && !groups.Any(group => (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))))
+        {
+            Logger.LogWarning($"'pdfFramework' of '{outline.pdfFileName ?? outline.name}' is '{framework}', which none of its API applies to.");
         }
 
         Visit(outline);
 
         void Visit(Outline node)
         {
-            node.items = node.items?.Where(IsAvailable).ToArray();
-            foreach (var item in node.items ?? [])
+            if (node.items is null)
             {
-                Visit(item);
+                return;
             }
+
+            var kept = new List<Outline>();
+            foreach (var item in node.items.Where(IsAvailable))
+            {
+                // A heading that only groups other items goes when they all do.
+                var groupsOthers = item.href is null && item.items is { Length: > 0 };
+                Visit(item);
+                if (!groupsOthers || item.items is { Length: > 0 })
+                {
+                    kept.Add(item);
+                }
+            }
+            node.items = [.. kept];
         }
 
         bool IsAvailable(Outline node) => node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
-            (outline.pdfAxisValue is null || group.version is null || group.version == outline.pdfAxisValue) &&
-            (outline.pdfFramework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(outline.pdfFramework, f))));
+            (value is null || group.version is null || group.version == value) &&
+            (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
+
+        static IEnumerable<Outline> Descendants(Outline node) => (node.items ?? []).SelectMany(item => Descendants(item).Prepend(item));
     }
 
     /// <summary>
@@ -121,9 +148,13 @@ static class PdfBuilder
     /// </summary>
     internal static string? GetAppliesToScript(Outline outline)
     {
-        return outline.pdfFramework is null && outline.pdfAxisValue is null ? null
-            : $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework = outline.pdfFramework, value = outline.pdfAxisValue })};";
+        var (framework, value) = (Selected(outline.pdfFramework), Selected(outline.pdfAxisValue));
+        return framework is null && value is null ? null
+            : $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value })};";
     }
+
+    // An empty pdfFramework or pdfAxisValue selects nothing, as the template reads it.
+    private static string? Selected(string? option) => string.IsNullOrWhiteSpace(option) ? null : option.Trim();
 
     public static Task Run(BuildJsonConfig config, string configDirectory, string? outputDirectory = null, CancellationToken cancellationToken = default)
     {
@@ -223,6 +254,12 @@ static class PdfBuilder
 
                 task.Value = task.MaxValue;
                 task.StopTask();
+
+                // Its pages are not used by any other PDF.
+                if (outlineContexts.TryGetValue(toc, out var own))
+                {
+                    await own.Context.DisposeAsync();
+                }
             });
         });
 
@@ -250,10 +287,6 @@ static class PdfBuilder
             }
         }
 
-        foreach (var (outlineContext, _) in outlineContexts.Values)
-        {
-            await outlineContext.DisposeAsync();
-        }
 
         Logger.LogVerbose($"PDF done in {stopwatch.Elapsed}");
         return;
@@ -370,6 +403,11 @@ static class PdfBuilder
                 {
                     var tagName = await element.EvaluateAsync<string>("e => e.tagName");
                     var level = int.Parse(tagName[1].ToString());
+                    // Content the page does not show, such as the members a PDF of one framework leaves out, or
+                    // the content of an API for another framework, is not printed either.
+                    if (await element.EvaluateAsync<bool>("e => !!e.closest('[hidden]')"))
+                        continue;
+
                     var id = await element.GetAttributeAsync("id") ?? "";
                     var text = (await element.InnerTextAsync()).Trim();
 

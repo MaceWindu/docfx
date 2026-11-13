@@ -2,13 +2,16 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text.Json;
+using Docfx.Common;
 using Docfx.Pdf;
+using Docfx.Tests.Common;
 
 namespace Docfx.Tests;
 
 /// <summary>
 /// A PDF of one framework or axis value: which pages it leaves out, and what its pages are told to show.
 /// </summary>
+[Collection("docfx STA")]
 public class PdfFrameworkTest
 {
     // A PDF table of contents over API pages, as `toc.json` carries it after a build with `targetFrameworks`.
@@ -56,6 +59,49 @@ public class PdfFrameworkTest
         Assert.Null(PdfBuilder.GetAppliesToScript(Parse(null, null)));
         Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
         Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9"};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
+    }
+
+    [Fact]
+    public void AnEmptyFrameworkOrValueSelectsNothing()
+    {
+        var outline = Parse("", " ");
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("Getting started, Lib, Everywhere, OnlyNet8, Standard, Lib.EF, FromEF8", string.Join(", ", Names(outline.items)));
+        Assert.Null(PdfBuilder.GetAppliesToScript(outline));
+    }
+
+    [Theory]
+    [InlineData("net8", null, "'pdfFramework'")]
+    [InlineData(null, "EF8", "'pdfAxisValue'")]
+    public void AFrameworkOrValueNothingAppliesToWarns(string framework, string value, string option)
+    {
+        using var listener = new TestListenerScope();
+
+        PdfBuilder.LeaveOutUnavailable(Parse(framework, value));
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains(option));
+    }
+
+    [Fact]
+    public void AHeadingWhoseItemsAreAllLeftOutGoesToo()
+    {
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            {
+              "pdf": true,
+              "pdfFramework": "net462",
+              "items": [
+                { "name": "Kept", "items": [ { "name": "Everywhere", "href": "a.html", "appliesTo": [ { "frameworks": [ "net8.0", "net462" ] } ] } ] },
+                { "name": "Emptied", "items": [ { "name": "OnlyNet8", "href": "b.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ] } ] },
+                { "name": "Empty from the start", "items": [] }
+              ]
+            }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("Kept, Everywhere, Empty from the start", string.Join(", ", Names(outline.items)));
     }
 
     private static PdfBuilder.Outline Parse(string framework, string value)

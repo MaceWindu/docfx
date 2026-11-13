@@ -80,6 +80,8 @@ internal static partial class TargetFrameworkHelper
     /// <summary>
     /// Whether an API built for <paramref name="framework"/> can be used by a project targeting
     /// <paramref name="target"/>: the same rule as <see cref="OrderByNearest"/>, and the template's picker.
+    /// The version of an OS platform is not compared: <c>net8.0-windows7.0</c> and <c>net8.0-windows10.0.19041</c>
+    /// are taken as the same platform, as its version rarely changes which API exists.
     /// </summary>
     internal static bool CanStandIn(string target, string framework)
     {
