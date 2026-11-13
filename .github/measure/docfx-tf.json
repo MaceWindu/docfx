@@ -4,7 +4,7 @@
 	// IMPORTANT:
 	// we use a custom docfx build to handle namespace conflicts:
 	// https://github.com/dotnet/docfx/issues/8966
-	// see Docs/README.md for how it is produced.
+	// see docs/README.md for how it is produced.
 	//
 	// `assemblyUids` lists the assemblies whose APIs carry the assembly they are declared in as a
 	// component of their UID, as in `linq2db.Tools::LinqToDB.Tools.Activity.ActivityStatistics`. It is a
@@ -35,14 +35,14 @@
 		"linq2db.Remote.SignalR.Server"
 	],
 	"metadata": [
-		// The four EntityFrameworkCore entries all build an assembly named `linq2db.EntityFrameworkCore`,
+		// The three EntityFrameworkCore entries all build an assembly named `linq2db.EntityFrameworkCore`,
 		// so they cannot be told apart by assembly name. Each uses `assemblyUidOverride` instead, which
 		// names the entry rather than the assembly. That works here only because nothing else in this
 		// project references the EF Core packages: a reference into them from another entry could not say
-		// which of the four versions it meant.
+		// which of the three versions it meant.
 		//
 		// docfx documents one target framework per project, the first one unless `TargetFramework` is set.
-		// Entries whose project targets net10.0 set it, so the site shows the API of current .NET rather than
+		// Entries whose project targets net11.0 set it, so the site shows the API of current .NET rather than
 		// of .NET Framework. The property is global, so it reaches every referenced project as well; the two
 		// netstandard2.0 analyzer projects they all reference keep their own framework through
 		// TreatAsLocalProperty (https://github.com/dotnet/docfx/issues/10772).
@@ -55,7 +55,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db"
 		},
@@ -68,7 +68,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.extensions"
 		},
@@ -81,7 +81,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.compat"
 		},
@@ -120,7 +120,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.grpc"
 		},
@@ -145,7 +145,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.tools"
 		},
@@ -158,7 +158,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.scaffold"
 		},
@@ -179,32 +179,6 @@
 			"src": [
 				{
 					"files": [
-						"Source/LinqToDB.EntityFrameworkCore/LinqToDB.EntityFrameworkCore.EF8.csproj"
-					],
-					"src": "../.."
-				}
-			],
-			"filter": "filter.yml",
-			"output": "api/linq2db.efcore.8",
-			"assemblyUidOverride": "linq2db.EntityFrameworkCore.EF8"
-		},
-		{
-			"src": [
-				{
-					"files": [
-						"Source/LinqToDB.EntityFrameworkCore/LinqToDB.EntityFrameworkCore.EF9.csproj"
-					],
-					"src": "../.."
-				}
-			],
-			"filter": "filter.yml",
-			"output": "api/linq2db.efcore.9",
-			"assemblyUidOverride": "linq2db.EntityFrameworkCore.EF9"
-		},
-		{
-			"src": [
-				{
-					"files": [
 						"Source/LinqToDB.EntityFrameworkCore/LinqToDB.EntityFrameworkCore.EF10.csproj"
 					],
 					"src": "../.."
@@ -218,12 +192,25 @@
 			"src": [
 				{
 					"files": [
+						"Source/LinqToDB.EntityFrameworkCore/LinqToDB.EntityFrameworkCore.EF11.csproj"
+					],
+					"src": "../.."
+				}
+			],
+			"filter": "filter.yml",
+			"output": "api/linq2db.efcore.11",
+			"assemblyUidOverride": "linq2db.EntityFrameworkCore.EF11"
+		},
+		{
+			"src": [
+				{
+					"files": [
 						"Source/LinqToDB.Identity/LinqToDB.Identity.csproj"
 					],
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.identity"
 		},
@@ -236,7 +223,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.httpclient.client"
 		},
@@ -249,7 +236,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.httpclient.server"
 		},
@@ -262,7 +249,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.signalr.client"
 		},
@@ -275,7 +262,7 @@
 					"src": "../.."
 				}
 			],
-			"targetFramework": "net10.0",
+			"targetFramework": "net11.0",
 			"filter": "filter.yml",
 			"output": "api/linq2db.remote.signalr.server"
 		}

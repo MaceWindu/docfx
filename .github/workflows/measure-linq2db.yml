@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  LINQ2DB_REF: fdc08bfe6a30e8fa0848123c23718882db1acddd
+  LINQ2DB_REF: d6f8e9f06241e2dab1db90b5d389d8f88469658b
 
 jobs:
   measure:
@@ -47,12 +47,11 @@ jobs:
         with:
           node-version: 24
 
-      # 11.x for docfx's own net11.0 target, 10.x for linq2db's global.json
+      # linq2db builds with the .NET 11 SDK, and docfx is published for net11.0 to load its projects, as the
+      # linq2db docs build does
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: |
-            11.x
-            10.x
+          dotnet-version: 11.x
 
       - name: Publish docfx
         shell: pwsh
@@ -64,7 +63,7 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'npm run build failed' }
           Pop-Location
-          dotnet publish src/docfx/docfx.csproj -c Release -f net10.0 -o "$env:RUNNER_TEMP/docfx"
+          dotnet publish src/docfx/docfx.csproj -c Release -f net11.0 -o "$env:RUNNER_TEMP/docfx"
           if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 
       # As linq2db's docs/build.ps1 does: the F# entry documents the built assembly.
