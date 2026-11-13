@@ -19,7 +19,7 @@
 </div>
 {{/variantViews.0}}
 {{#variantViews}}
-<div class="api-content" data-applies-to="{{appliesToData}}" hidden>
+<div class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden>
 {{>partials/class.content}}
 </div>
 {{/variantViews}}

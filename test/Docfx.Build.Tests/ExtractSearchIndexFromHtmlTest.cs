@@ -128,6 +128,29 @@ public class ExtractSearchIndexFromHtmlTest
     }
 
     [Fact]
+    public void TestSearchIgnoreAttribute()
+    {
+        var rawHtml = @"
+<html>
+    <head>
+        <title>This is title in head metadata</title>
+    </head>
+    <body>
+        <article>
+            <p>Shown.</p>
+            <div data-search-ignore hidden><p>A copy shown on demand.</p></div>
+        </article>
+    </body>
+</html>
+";
+        var html = new HtmlDocument();
+        html.LoadHtml(rawHtml);
+        var href = "http://dotnet.github.io/docfx";
+        var item = _extractor.ExtractItem(html, href);
+        Assert.Equal(new SearchIndexItem { Href = href, Title = "This is title in head metadata", Summary = "Shown." }, item);
+    }
+
+    [Fact]
     public void TestSearchDisableClass()
     {
         var rawHtml = @"
