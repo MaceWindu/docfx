@@ -4,7 +4,7 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
-import { AppliesToGroup, Axis, Selection, getSelection, isAvailable, isPickerEnabled, onSelectionChange, unitsOf } from './appliesTo'
+import { AppliesToGroup, Axis, Selection, fetchToc, getChoices, getSelection, isAvailable, isPickerEnabled, onSelectionChange, unitsOf } from './appliesTo'
 
 export type TocNode = {
   name?: string
@@ -26,7 +26,7 @@ export async function renderToc(): Promise<TocNode[]> {
   const disableTocFilter = meta('docfx:disabletocfilter') === 'true'
 
   const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
-  const { items, pdf, pdfFileName, axis } = await (await fetch(tocUrl)).json() as { items: TocNode[], pdf?: boolean, pdfFileName?: string, axis?: Axis }
+  const { items, pdf, pdfFileName, axis } = await fetchToc(tocUrl) as { items: TocNode[], pdf?: boolean, pdfFileName?: string, axis?: Axis }
   const picker = isPickerEnabled()
 
   const tocFilterUrl = disableTocFilter ? '' : (localStorage?.getItem('tocFilterUrl') || '')
@@ -99,7 +99,7 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 
   function renderToc() {
-    const selection = picker ? getSelection(axis) : {}
+    const selection = picker ? getSelection(axis, getChoices({ items, axis }).frameworks) : {}
     render(html`
       ${renderTocFilter()}
       <div class="flex-fill overflow-y-auto">${renderTocNodes(items, selection) || renderNoFilterResult()}</div>

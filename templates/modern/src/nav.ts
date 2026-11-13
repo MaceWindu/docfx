@@ -28,8 +28,15 @@ export async function renderNavbar(): Promise<NavItem[]> {
   }
 
   const { iconLinks } = await options()
-  const [navItems, choices] = await Promise.all([loadNavItems(), loadChoices()])
+  const navItems = await loadNavItems()
   const activeItem = findActiveItem(navItems)
+
+  // The picker needs the table of contents: the navbar does not wait for it, and shows the picker once it is there.
+  let choices: Awaited<ReturnType<typeof loadChoices>> = { frameworks: [] }
+  loadChoices().then(loaded => {
+    choices = loaded
+    return loaded.frameworks.length > 0 ? renderCore() : undefined
+  }).catch(console.error)
 
   const menuItem = item => {
     const current = (item === activeItem ? 'page' : false)
@@ -101,6 +108,11 @@ export function renderBreadcrumb(breadcrumb: (NavItem | TocNode)[]) {
 
 export async function renderInThisArticle() {
   await renderAnchors()
+  updateInThisArticle()
+}
+
+/** Renders "In this article" again, for the headings of the content shown now. */
+export function updateInThisArticle() {
   const affix = document.getElementById('affix')
   if (affix) {
     render(inThisArticle(), affix)
