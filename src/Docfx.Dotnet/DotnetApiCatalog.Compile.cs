@@ -27,7 +27,13 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
-        if (config.TargetFramework is not null &&
+        var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
+        if (config.TargetFramework is not null && !hasProjectInput)
+        {
+            Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
+        }
+
+        if (config.TargetFramework is not null && hasProjectInput &&
             msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
         {
             Logger.LogWarning(
@@ -35,6 +41,12 @@ partial class DotnetApiCatalog
                 + "so it also applies to every referenced project and leaves only one target framework to select from. Remove it from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
+
+        // Projects of a solution that do not target `targetFramework` are only reported as information, as
+        // solutions commonly hold analyzers, tools and tests that target other frameworks; but if none of
+        // them does, the option most likely has a typo, which is worth a warning.
+        var solutionProjectCount = 0;
+        var solutionProjectMatches = 0;
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -75,11 +87,18 @@ partial class DotnetApiCatalog
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
-                        await LoadCompilationFromProject(project.AbsolutePath) is { } compilation)
+                        await LoadCompilationFromProject(project.AbsolutePath, fromSolution: true) is { } compilation)
                     {
                         projectCompilations.Add(compilation);
                     }
                 }
+            }
+
+            if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
+            {
+                Logger.LogWarning(
+                    $"No project of the solutions targets '{solutionTargetFramework}', each is documented at its default target framework instead.",
+                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
             }
         }
 
@@ -152,7 +171,7 @@ partial class DotnetApiCatalog
 
         return assemblies;
 
-        async Task<Compilation?> LoadCompilationFromProject(string path)
+        async Task<Compilation?> LoadCompilationFromProject(string path, bool fromSolution = false)
         {
             var project = workspace.CurrentSolution.Projects.FirstOrDefault(
                 p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path));
@@ -177,7 +196,12 @@ partial class DotnetApiCatalog
             // `TargetFramework` would also retarget every project this one references.
             if (config.TargetFramework is { } targetFramework)
             {
-                project = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework);
+                (project, var matched) = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework, fromSolution);
+                if (fromSolution)
+                {
+                    solutionProjectCount++;
+                    solutionProjectMatches += matched ? 1 : 0;
+                }
             }
 
             if (isNewlyLoaded)
