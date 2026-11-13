@@ -2,7 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 import { html, TemplateResult } from 'lit-html'
-import { loc, meta } from './helper'
+import { isExternalHref, isSameURL, loc, meta } from './helper'
 
 /**
  * What an API is documented for: a target framework, and the value of the entry's axis, such as an EF Core
@@ -39,7 +39,17 @@ export function unitsOf(appliesTo: AppliesToGroup[]): Unit[] {
   return (appliesTo || []).flatMap(g => (g.frameworks || []).map(framework => g.version ? { value: g.version, framework } : { framework }))
 }
 
+// The table of contents and the page compare the same few frameworks over and over.
+const monikers = new Map<string, Moniker>()
+
 function parseMoniker(moniker: string): Moniker {
+  if (!monikers.has(moniker)) {
+    monikers.set(moniker, parseMonikerCore(moniker))
+  }
+  return monikers.get(moniker)
+}
+
+function parseMonikerCore(moniker: string): Moniker {
   const match = /^(netstandard|netcoreapp|net)(\d+(?:\.\d+)*)(?:-([a-z]*))?/i.exec(moniker)
   if (!match) {
     return null
@@ -155,10 +165,20 @@ export function sortFrameworks(frameworks: string[]): string[] {
   })
 }
 
-/** The axis of a part of the docs, as `docfx metadata` writes it to the root of its table of contents. */
+/**
+ * The axis of a part of the docs, as `docfx metadata` writes it to the root of its table of contents and to each of
+ * its entries, which a table of contents that includes it keeps.
+ */
 export type Axis = { name: string, values: { id: string, label: string }[], default?: string }
 
-type Choices = { frameworks: string[], axis?: Axis, key?: string }
+/** An entry of the table of contents, with what the picker reads from it. */
+export type TocEntry = { name?: string, href?: string, appliesTo?: AppliesToGroup[], axis?: Axis, items?: TocEntry[] }
+
+/** A table of contents as `toc.json` has it. */
+export type Toc = { items?: TocEntry[], axis?: Axis, frameworkNames?: Record<string, string> }
+
+/** What a reader can pick on a page: the frameworks of its table of contents, and the axis of its part of the docs. */
+export type Choices = { frameworks: string[], axis?: Axis, key?: string }
 
 const changeEvent = 'docfx:appliestochange'
 
@@ -175,9 +195,15 @@ export function axisKey(axis: Axis): string {
   return key === 'framework' ? 'framework-axis' : key
 }
 
-/** Whether a framework can be picked: one docfx can compare, or one the table of contents lists. */
-export function isValidFramework(framework: string, frameworks: string[] = []): boolean {
-  return !!parseMoniker(framework) || frameworks.includes(framework)
+/**
+ * The framework a link or storage names, as the table of contents spells it; nothing for one it does not list,
+ * which would leave out every API. Before the table of contents is loaded, any framework docfx can compare.
+ */
+export function validFramework(framework: string, frameworks?: string[]): string | undefined {
+  if (!frameworks) {
+    return parseMoniker(framework) ? framework : undefined
+  }
+  return frameworks.find(f => f.toLowerCase() === framework.toLowerCase())
 }
 
 /**
@@ -190,25 +216,25 @@ function storageKey(key: string): string {
 }
 
 /**
- * What the reader picked: from the query string, for shareable links, else what they picked last. A value that
- * is not one of the axis, or a framework that is not one, is left out, so a typo in a link or a choice kept from
- * an earlier version of the site does not hide everything.
+ * What the reader picked: from the query string, for shareable links, else what they picked last. A value that is
+ * not one of the axis, or a framework the table of contents does not list, is left out, so that a typo in a link, or
+ * a choice kept from another part or an earlier version of the site, does not hide everything.
  */
-export function getSelection(axis?: Axis, frameworks: string[] = []): Selection {
+export function getSelection(axis?: Axis, frameworks?: string[]): Selection {
   const query = new URLSearchParams(window.location.search)
-  const read = (key: string, valid: (value: string) => boolean) =>
-    [query.get(key), localStorage?.getItem(storageKey(key))].find(value => value && valid(value)) || undefined
+  const read = (key: string, valid: (value: string) => string | undefined) =>
+    [query.get(key), localStorage?.getItem(storageKey(key))].map(value => value ? valid(value) : undefined).find(value => value)
   return {
-    framework: read('framework', f => isValidFramework(f, frameworks)),
-    value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v)) : undefined
+    framework: read('framework', f => validFramework(f, frameworks)),
+    value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v) ? v : undefined) : undefined
   }
 }
 
 /** Keeps the choice a link made, so that it carries on to the pages the reader goes to next. */
-function keepLinkSelection(choices: Choices) {
+export function keepLinkSelection(choices: Choices) {
   const query = new URLSearchParams(window.location.search)
   const selection = getSelection(choices.axis, choices.frameworks)
-  if (query.get('framework') && query.get('framework') === selection.framework) {
+  if (selection.framework && query.get('framework')?.toLowerCase() === selection.framework.toLowerCase()) {
     localStorage?.setItem(storageKey('framework'), selection.framework)
   }
   if (choices.key && query.get(choices.key) && query.get(choices.key) === selection.value) {
@@ -235,24 +261,96 @@ export function onSelectionChange(callback: () => void) {
   window.addEventListener(changeEvent, callback)
 }
 
-/** The frameworks and axis of the current table of contents: what a reader can pick on this page. */
-export function getChoices(toc: { items?: { appliesTo?: AppliesToGroup[], items?: unknown[] }[], axis?: Axis }): Choices {
-  const frameworks: string[] = []
-  const visit = (items: { appliesTo?: AppliesToGroup[], items?: unknown[] }[]) => items?.forEach(item => {
-    unitsOf(item.appliesTo).forEach(u => frameworks.push(u.framework))
-    visit(item.items as { appliesTo?: AppliesToGroup[], items?: unknown[] }[])
+type TocSummary = { frameworks: string[], axes: Axis[] }
+
+// The table of contents is rendered again on every click and keystroke in its filter, and can have thousands of entries.
+const summaries = new WeakMap<Toc, TocSummary>()
+
+function summarize(toc: Toc): TocSummary {
+  if (!summaries.has(toc)) {
+    const frameworks: string[] = []
+    const axes: Axis[] = toc.axis ? [toc.axis] : []
+    const visit = (items: TocEntry[]) => items?.forEach(item => {
+      unitsOf(item.appliesTo).forEach(u => frameworks.push(u.framework))
+      if (item.axis && !axes.some(a => a.name === item.axis.name)) {
+        axes.push(item.axis)
+      }
+      visit(item.items)
+    })
+    visit(toc.items)
+    summaries.set(toc, { frameworks: sortFrameworks(frameworks), axes })
+  }
+  return summaries.get(toc)
+}
+
+/**
+ * What a reader can pick on a page: the frameworks of its table of contents, and the axis of the part of the docs
+ * the page is in, given by the entries from the root down to the page; on a page of none, the axis when there is
+ * one only.
+ */
+export function getChoices(toc: Toc, path: TocEntry[] = []): Choices {
+  const { frameworks, axes } = summarize(toc)
+  const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis || (axes.length === 1 ? axes[0] : undefined)
+  return { frameworks, axis, key: axis ? axisKey(axis) : undefined }
+}
+
+/** The entries from the root down to the entry of the page at `url`, none when the table of contents has no such entry. */
+export function findPath(items: TocEntry[], tocUrl: URL, url: { pathname: string }): TocEntry[] {
+  for (const item of items || []) {
+    if (item.href) {
+      const href = new URL(item.href, tocUrl)
+      if (!isExternalHref(href) && isSameURL(href, url)) {
+        return [item]
+      }
+    }
+    const path = findPath(item.items, tocUrl, url)
+    if (path.length > 0) {
+      return [item, ...path]
+    }
+  }
+  return []
+}
+
+/**
+ * The selection for the entries below `entry`: an entry with an axis of its own, such as the root of the API of a
+ * table of contents that includes several, has the value picked for that axis.
+ */
+export function entrySelection(entry: TocEntry, selection: Selection, frameworks: string[]): Selection {
+  return entry.axis ? { framework: selection.framework, value: getSelection(entry.axis, frameworks).value } : selection
+}
+
+/** Whether a table of contents entry exists in what the reader picked. */
+export function isEntryShown(entry: TocEntry, selection: Selection): boolean {
+  return !entry.appliesTo || !(selection.framework || selection.value) || isAvailable(unitsOf(entry.appliesTo), selection)
+}
+
+/**
+ * The entries with a link that the table of contents shows for the selection, in order: those that exist in it, and
+ * the page being read and its parents, which `keep` names.
+ */
+export function shownEntries(items: TocEntry[], selection: Selection, frameworks: string[], keep: (entry: TocEntry) => boolean): TocEntry[] {
+  return (items || []).flatMap(entry => {
+    const own = entrySelection(entry, selection, frameworks)
+    if (!keep(entry) && !isEntryShown(entry, own)) {
+      return []
+    }
+    return [...(entry.href ? [entry] : []), ...shownEntries(entry.items, own, frameworks, keep)]
   })
-  visit(toc.items)
-  return { frameworks: sortFrameworks(frameworks), axis: toc.axis, key: toc.axis ? axisKey(toc.axis) : undefined }
 }
 
 const tocs = new Map<string, Promise<unknown>>()
+
+// `_frameworkNames`, which the table of contents carries for the pages that are not API pages
+let tocFrameworkNames: Record<string, string> = {}
 
 /** The table of contents at `url`, fetched once for the table of contents, the navbar and the picker. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function fetchToc(url: URL): Promise<any> {
   if (!tocs.has(url.href)) {
-    tocs.set(url.href, fetch(url).then(res => res.json()))
+    tocs.set(url.href, fetch(url).then(res => res.json()).then((toc: Toc) => {
+      tocFrameworkNames = toc.frameworkNames || {}
+      return toc
+    }))
   }
   return tocs.get(url.href)
 }
@@ -263,7 +361,9 @@ export async function loadChoices(): Promise<Choices> {
   if (!isPickerEnabled() || !tocrel) {
     return { frameworks: [] }
   }
-  return getChoices(await fetchToc(new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)))
+  const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
+  const toc: Toc = await fetchToc(tocUrl)
+  return getChoices(toc, findPath(toc.items, tocUrl, window.location))
 }
 
 /**
@@ -294,7 +394,33 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
     onApplied()
   }
   apply()
+  // what the selection shows moves the element a link points to, which the page scrolled to before
+  if (window.location.hash) {
+    shownTarget(decodeURIComponent(window.location.hash.substring(1)))?.scrollIntoView()
+  }
   onSelectionChange(apply)
+}
+
+/**
+ * The element shown for the id a link points to: when the content it is in is hidden for the selection, the same
+ * element in the content shown instead, whose id has a suffix such as `_variant1` in a copy.
+ */
+export function shownTarget(id: string): Element | null {
+  const target = document.getElementById(id)
+  const container = target?.closest('.api-contents')
+  if (!target || !container || !target.closest('[hidden]')) {
+    return target
+  }
+  const base = id.replace(/_variant\d+/, '')
+  for (const block of Array.from(container.children)) {
+    if (block.classList.contains('api-content') && !(block as HTMLElement).hidden) {
+      const same = Array.from(block.querySelectorAll('[id]')).find(e => e.id.replace(/_variant\d+/, '') === base)
+      if (same) {
+        return same
+      }
+    }
+  }
+  return target
 }
 
 /**
@@ -333,9 +459,9 @@ export function appliesToPicker(choices: Choices): TemplateResult {
 
 function frameworkNames(): Record<string, string> {
   try {
-    return JSON.parse(meta('docfx:frameworknames') || '{}')
+    return { ...tocFrameworkNames, ...JSON.parse(meta('docfx:frameworknames') || '{}') }
   } catch {
-    return {}
+    return tocFrameworkNames
   }
 }
 

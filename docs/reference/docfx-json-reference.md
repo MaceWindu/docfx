@@ -755,10 +755,12 @@ The names to show for target frameworks on API pages built with [`targetFramewor
 
 ### `_enableApiAppliesToPicker`
 
-In the `modern` template, adds dropdowns to the navigation bar of API pages built with [`targetFrameworks`](#targetframeworks): one for the target frameworks and, with [`axes`](#axes), one for the values of the axis. They list what the current table of contents applies to, and start at "All", which shows the pages as without the option. Once the reader picks a framework or value:
+In the `modern` template, adds dropdowns to the navigation bar of the pages whose table of contents has API pages built with [`targetFrameworks`](#targetframeworks): one for the target frameworks the table of contents lists and, with [`axes`](#axes), one for the values of the axis. They start at "All", which shows the pages as without the option. Once the reader picks a framework or value:
 
 - each API shows its content for that selection: a variant replaces the content it differs in, and "In other frameworks" is hidden. A framework the API is not built for is stood in for by the nearest one it is, as in a project referencing it: .NET Standard 2.0 for .NET 10, when that is what the API targets.
 - members that do not exist in the selection are dimmed and marked, and a page whose API does not exist in it says so.
-- the table of contents leaves out the APIs that do not exist in the selection.
+- the table of contents leaves out the APIs that do not exist in the selection, except the page being read and its parents.
 
-The choice is kept across pages. `?framework=net8.0` in a link picks a framework, and the axis name in lower case with dashes picks a value, such as `?ef-core=ef9`. Search and PDF output are not affected.
+The axis of a metadata item is written to its API table of contents, and to each of its top-level entries, which a table of contents that includes it keeps. A table of contents that includes the API of several metadata items, each with an axis of its own, offers on each page the axis of the part the page is in, and keeps a value for each axis; a page in none of them, such as an article beside them, offers only the frameworks, or the axis when there is one only.
+
+The choice is kept across pages, per site. `?framework=net8.0` in a link picks a framework, and the axis name in lower case with dashes picks a value, such as `?ef-core=ef9`. A framework or axis value that the table of contents does not list is ignored, whether it comes from a link or was kept from another part of the site, so that a typo, or a framework the site has no API for, does not empty the table of contents. Framework labels follow [`_frameworkNames`](#_frameworknames) on every page. Search and PDF output are not affected.

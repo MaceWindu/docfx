@@ -127,9 +127,9 @@
 <h2 id="{{id}}">{{>partials/classSubtitle}}</h2>
 <dl class="parameters">
 {{#children}}
-  <dt id="{{id}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}><code>{{syntax.content.0.value}}</code>{{#showAppliesToBadge}} <span class="applies-to ms-2 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</dt>
-  {{#remarks}}<dd>{{{summary}}}{{{remarks}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
-  {{^remarks}}<dd>{{{summary}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
+  <dt id="{{id}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>{{#variantViews.0}}<span class="api-contents"><span class="api-content" data-applies-to="{{primaryAppliesToData}}">{{/variantViews.0}}<code>{{syntax.content.0.value}}</code>{{#variantViews.0}}</span>{{/variantViews.0}}{{#variantViews}}<span class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden><code>{{syntax.content.0.value}}</code></span>{{/variantViews}}{{#variantViews.0}}</span>{{/variantViews.0}}{{#showAppliesToBadge}} <span class="applies-to ms-2 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</dt>
+  {{#remarks}}<dd>{{#variantViews.0}}<div class="api-contents"><div class="api-content" data-applies-to="{{primaryAppliesToData}}">{{/variantViews.0}}{{{summary}}}{{{remarks}}}{{#variantViews.0}}</div>{{/variantViews.0}}{{#variantViews}}<div class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden>{{{summary}}}{{{remarks}}}</div>{{/variantViews}}{{#variantViews.0}}</div>{{/variantViews.0}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
+  {{^remarks}}<dd>{{#variantViews.0}}<div class="api-contents"><div class="api-content" data-applies-to="{{primaryAppliesToData}}">{{/variantViews.0}}{{{summary}}}{{#variantViews.0}}</div>{{/variantViews.0}}{{#variantViews}}<div class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden>{{{summary}}}{{{remarks}}}</div>{{/variantViews}}{{#variantViews.0}}</div>{{/variantViews.0}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
 {{/children}}
 </dl>
 {{/children}}

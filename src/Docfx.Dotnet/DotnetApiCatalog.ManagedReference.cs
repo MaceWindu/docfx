@@ -107,6 +107,13 @@ partial class DotnetApiCatalog
             if (config.Axis is { } axis)
             {
                 tocViewModel.Metadata["axis"] = axis.ToTocMetadata();
+
+                // A table of contents that includes this one keeps the entries but not the metadata of its root, and
+                // can include several, each with an axis of its own.
+                foreach (var item in tocViewModel.Items)
+                {
+                    item.Metadata["axis"] = axis.ToTocMetadata();
+                }
             }
 
             string tocFilePath = Path.Combine(config.OutputFolder, "toc.yml");

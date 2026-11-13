@@ -621,11 +621,14 @@ public class TargetFrameworkTest : TestBase
         Assert.Equal("v1", Assert.Single(Page("Lib.OnlyV1.yml").Items[0].AppliesTo).Version);
         Assert.Equal("v2", Assert.Single(Page("Lib.OnlyV2.yml").Items[0].AppliesTo).Version);
 
-        // The table of contents names the axis once, for a picker: pages carry only its value ids and labels.
+        // The table of contents names the axis for a picker: pages carry only its value ids and labels.
         var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
-        Assert.Equal(
-            """{"name":"Version","values":[{"id":"v1","label":"Version 1"},{"id":"v2","label":"Version 2"}],"default":"v2"}""",
-            JsonUtility.Serialize(toc.Metadata["axis"]));
+        const string AxisJson = """{"name":"Version","values":[{"id":"v1","label":"Version 1"},{"id":"v2","label":"Version 2"}],"default":"v2"}""";
+        Assert.Equal(AxisJson, JsonUtility.Serialize(toc.Metadata["axis"]));
+
+        // so does each of its entries, which a table of contents that includes this one keeps
+        Assert.NotEmpty(toc.Items);
+        Assert.All(toc.Items, item => Assert.Equal(AxisJson, JsonUtility.Serialize(item.Metadata["axis"])));
     }
 
     [Fact]
@@ -637,6 +640,7 @@ public class TargetFrameworkTest : TestBase
 
         var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
         Assert.False(toc.Metadata.ContainsKey("axis"));
+        Assert.All(toc.Items, item => Assert.False(item.Metadata.ContainsKey("axis")));
     }
 
     [Fact]
