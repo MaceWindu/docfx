@@ -550,6 +550,22 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworksOnASolutionReportsProjectsMissingAFrameworkAsInformation()
+    {
+        var solution = CreateSolution(
+            CreateMultiTargetedProject(),
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        await Exec(new() { Src = Src(solution), TargetFrameworks = ["net8.0", "netstandard2.0"] });
+
+        AssertWarnings(listener);
+        Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("does not target 'net8.0'"));
+        Assert.Equal(["netstandard2.0"], AppliesTo("Analyzer.Rule.yml"));
+    }
+
+    [Fact]
     public async Task TargetFrameworksWithSourceFilesIsAnError()
     {
         // Source files and assemblies have no target framework to say an API applies to.

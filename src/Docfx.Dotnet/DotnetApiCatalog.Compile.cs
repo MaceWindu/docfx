@@ -250,7 +250,7 @@ partial class DotnetApiCatalog
             }
 
             var compilations = new List<Compilation>();
-            foreach (var (selected, selectedFramework) in TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks))
+            foreach (var (selected, selectedFramework) in TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution))
             {
                 if (await selected.GetCompilationAsync() is not { } compilation)
                 {

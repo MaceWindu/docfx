@@ -122,7 +122,7 @@ internal static partial class TargetFrameworkHelper
     /// framework, a list states what to include, so nothing else is documented in place of a missing one.
     /// A framework is <see langword="null"/> when it can only be read from the compilation.
     /// </returns>
-    public static List<(Project Project, string? Framework)> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks)
+    public static List<(Project Project, string? Framework)> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, bool fromSolution = false)
     {
         var candidates = GetProjectsFromSameFile(solution, project);
 
@@ -154,9 +154,16 @@ internal static partial class TargetFrameworkHelper
 
         if (missing.Count > 0)
         {
-            Logger.LogWarning(
-                $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.",
-                code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            var message = $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.";
+            // as with 	argetFramework, the projects of a solution commonly target other frameworks
+            if (fromSolution)
+            {
+                Logger.LogInfo(message);
+            }
+            else
+            {
+                Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            }
         }
 
         return selected;
