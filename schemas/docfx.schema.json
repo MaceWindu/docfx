@@ -746,7 +746,7 @@
             }
           },
           "variantIgnore": {
-            "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants. Nothing is ignored by default.",
+            "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.",
             "anyOf": [
               {
                 "type": "string",
