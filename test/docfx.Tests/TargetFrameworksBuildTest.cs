@@ -81,6 +81,21 @@ public class TargetFrameworksBuildTest : TestBase
                     public long Value() => 0;
                 }
             #endif
+
+                public enum Mode
+                {
+                    /// <summary>Plain everywhere.</summary>
+                    Plain,
+            #if NET8_0
+                    /// <summary>Fast on net8 only.</summary>
+                    Fast,
+                    /// <summary>Strict on net8.</summary>
+                    Strict,
+            #else
+                    /// <summary>Strict on older frameworks.</summary>
+                    Strict,
+            #endif
+                }
             }
             """);
     }
@@ -188,6 +203,25 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.NotEmpty(variant);
         Assert.Contains("InvalidOperationException", variant);
         Assert.Equal(1, Regex.Count(page, "Thrown on net8\\."));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AnEnumMarksItsValuesAndShowsWhatDiffers(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Mode.html");
+
+        // Fast exists on net8 only, so it is marked; Plain is everywhere, so it is not.
+        Assert.Matches("id=\"Lib_Mode_Fast\" data-applies-to=\"net8.0\"[^\\n]*>\\.NET 8</span>", page);
+        Assert.DoesNotMatch("id=\"Lib_Mode_Plain\"[^\\n]*</span>", page);
+
+        // Strict has another value and summary on netstandard2.0.
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", page);
+        Assert.Contains("Strict on older frameworks.", page);
+        Assert.Equal(1, Regex.Count(page, "class=\"api-variant\" "));
     }
 
     [Theory]

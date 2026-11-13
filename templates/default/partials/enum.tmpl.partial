@@ -13,8 +13,8 @@
   <tbody>
   {{#children}}
     <tr>
-      <td id="{{id}}">{{name.0.value}}</td>
-      <td>{{{summary}}}</td>
+      <td id="{{id}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>{{name.0.value}}{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</td>
+      <td>{{{summary}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</td>
     </tr>
   {{/children}}
   </tbody>
