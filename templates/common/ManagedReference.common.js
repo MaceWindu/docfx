@@ -10,9 +10,9 @@ exports.transform = function (model) {
 
   langs = model.langs;
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
-  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, picker: !!model._enableApiAppliesToPicker };
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
   // the picker labels frameworks as the page does
-  if (appliesToOptions.picker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
+  if (model._enableApiAppliesToPicker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -141,15 +141,18 @@ function handleAppliesTo(vm, parent, options) {
     variant.example = variant.example || [];
     variant.exceptions = variant.exceptions || [];
     variant.seealso = variant.seealso || [];
+    variant.overridden = variant.overridden || "";
     if (variant.syntax) {
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
       setValue(variant.syntax, variant.syntax.return, kind);
     }
   });
+  // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
+  vm.hasVariants = vm.variants.length > 0;
 
-  // With the picker, each variant is also rendered as a whole, hidden until a framework it applies to is picked.
-  vm.pickerAppliesToData = "";
+  // Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed:
+  // a PDF of one framework needs it whether the site has the picker or not.
   vm.primaryAppliesToData = "";
   vm.variantViews = [];
 
@@ -158,13 +161,10 @@ function handleAppliesTo(vm, parent, options) {
     return;
   }
 
-  if (options.picker) {
-    vm.pickerAppliesToData = frameworks.join(' ');
-    if (vm.variants.length > 0) {
-      var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
-      vm.primaryAppliesToData = frameworks.filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
-      vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
-    }
+  if (vm.variants.length > 0) {
+    var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
+    vm.primaryAppliesToData = frameworks.filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+    vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
   }
 
   vm.appliesToData = frameworks.join(' ');
@@ -193,7 +193,10 @@ function getVariantView(vm, variant, kind, index) {
     if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
   }
   // headings of the copy must not repeat the ids of the API's own
-  view.id = vm.id + '_variant' + (index + 1);
+  var suffix = '_variant' + (index + 1);
+  view.id = vm.id + suffix;
+  // nor the ids of what it lists, such as the values of an enum
+  if (vm.children) view.children = vm.children.map(function (child) { return withIdSuffix(child, suffix); });
   view.appliesToData = variant.appliesToData;
   view.variantViews = [];
   if (variant.summary) view.summary = variant.summary;
@@ -212,6 +215,16 @@ function getVariantView(vm, variant, kind, index) {
     view.syntax = syntax;
   }
   return view;
+}
+
+function withIdSuffix(item, suffix) {
+  var copy = {};
+  for (var key in item) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) copy[key] = item[key];
+  }
+  if (copy.id) copy.id = copy.id + suffix;
+  if (copy.children) copy.children = copy.children.map(function (child) { return withIdSuffix(child, suffix); });
+  return copy;
 }
 
 function groupChildren(model, category) {

@@ -31,12 +31,12 @@
   <PropertyGroup>
     <RoslynVersion Condition="'$(TargetFramework)' == 'net8.0' OR '$(TargetFramework)' == 'net9.0'">[5.6.0]</RoslynVersion>
     <RoslynVersion Condition="'$(TargetFramework)' == 'net10.0'">5.9.0</RoslynVersion>
-    <!-- Match the compiler required by the .NET 11 RC1 Razor source generator. -->
-    <RoslynVersion Condition="'$(TargetFramework)' == 'net11.0'">5.11.0-1.26425.128</RoslynVersion>
+    <!-- The compiler of SDK 11.0.100 (C# 15): source generators shipped with that SDK, Razor included, need it. -->
+    <RoslynVersion Condition="'$(TargetFramework)' == 'net11.0'">5.12.0-1.26529.118</RoslynVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0'">
-    <!-- Only the .NET 11 preview needs the compiler packages from this feed. -->
+    <!-- The SDK 11.0.100 compiler is not on nuget.org; it is published to this feed. -->
     <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-tools/nuget/v3/index.json</RestoreAdditionalProjectSources>
   </PropertyGroup>
 

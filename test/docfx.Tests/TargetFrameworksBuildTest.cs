@@ -81,6 +81,21 @@ public class TargetFrameworksBuildTest : TestBase
                     public long Value() => 0;
                 }
             #endif
+
+                public enum Mode
+                {
+                    /// <summary>Plain everywhere.</summary>
+                    Plain,
+            #if NET8_0
+                    /// <summary>Fast on net8 only.</summary>
+                    Fast,
+                    /// <summary>Strict on net8.</summary>
+                    Strict,
+            #else
+                    /// <summary>Strict on older frameworks.</summary>
+                    Strict,
+            #endif
+                }
             }
             """);
     }
@@ -108,6 +123,18 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
         Assert.Contains(string.Format(Badge, Net8), page);
         Assert.DoesNotContain(string.Format(Badge, Both), page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ANamespacePageMarksTheTypesItListsWithTheirFrameworks()
+    {
+        // so that a PDF of one framework, and the picker, can leave out the types that do not exist in it
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.html");
+
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a class=\"xref\" href=\"Lib.OnlyNet8.html\">", page);
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0 netstandard2.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.html\">", page);
     }
 
     [Fact]
@@ -194,6 +221,25 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
+    public async Task AnEnumMarksItsValuesAndShowsWhatDiffers(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Mode.html");
+
+        // Fast exists on net8 only, so it is marked; Plain is everywhere, so it is not.
+        Assert.Matches("id=\"Lib_Mode_Fast\" data-applies-to=\"net8.0\"[^\\n]*>\\.NET 8</span>", page);
+        Assert.DoesNotMatch("id=\"Lib_Mode_Plain\"[^\\n]*</span>", page);
+
+        // Strict has another value and summary on netstandard2.0.
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", page);
+        Assert.Contains("Strict on older frameworks.", page);
+        Assert.Equal(1, Regex.Count(page, "class=\"api-variant\" "));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
     public async Task AVariantShowsTheValueOfAFieldOrPropertyAsItsOwnSectionDoes(string template)
     {
         var site = await Build(template, targetFrameworks: "\"*\"");
@@ -270,25 +316,22 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ThePickerGetsEachVariantAsAWholeOnlyWhenEnabled(bool picker)
+    public async Task EachVariantIsRenderedAsAWholeForThePickerAndPdf(bool picker)
     {
-        var options = picker ? "\"globalMetadata\": { \"_enableApiAppliesToPicker\": true, \"_frameworkNames\": { \"net8.0\": \"Modern\" } }," : "";
+        var options = "\"globalMetadata\": { \"_frameworkNames\": { \"net8.0\": \"Modern\" }" + (picker ? ", \"_enableApiAppliesToPicker\": true" : "") + " },";
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
-        var page = await Page(site, "Lib.Shared.html");
+        var page = await RawPage(site, "Lib.Shared.html");
 
+        // the dropdowns come with the option only, and label frameworks as the page does
         Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
-        Assert.Equal(picker, page.Contains("<div class=\"api-contents\">"));
-        Assert.Equal(picker, Regex.IsMatch(page, "<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\""));
-        if (!picker)
-        {
-            return;
-        }
+        Assert.Equal(picker, Regex.IsMatch(page, "<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">"));
 
-        // the picker labels frameworks as the page does
-        Assert.Matches("<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">", page);
+        // a PDF of one framework needs the content of each variant whether the site has the picker or not
+        Assert.Contains("<div class=\"api-contents\">", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
 
         // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
-        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
         Assert.NotEmpty(copy);
         Assert.Contains("Property Value", copy);
         Assert.DoesNotContain("Returns", copy);
@@ -363,7 +406,39 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
     }
 
-    private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+    /// <returns>The page as a reader sees it, without the content kept hidden for the picker and PDFs.</returns>
+    private static async Task<string> Page(string site, string name) => WithoutHiddenContent(await RawPage(site, name));
+
+    private static Task<string> RawPage(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+
+    private static string WithoutHiddenContent(string page)
+    {
+        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" data-search-ignore hidden>");
+        for (var match = hidden.Match(page); match.Success; match = hidden.Match(page))
+        {
+            // the copy ends at the </div> that balances its <div>
+            var depth = 1;
+            var end = match.Index + match.Length;
+            while (depth > 0)
+            {
+                var open = page.IndexOf("<div", end, StringComparison.Ordinal);
+                var close = page.IndexOf("</div>", end, StringComparison.Ordinal);
+                if (open >= 0 && open < close)
+                {
+                    depth++;
+                    end = open + "<div".Length;
+                }
+                else
+                {
+                    depth--;
+                    end = close + "</div>".Length;
+                }
+            }
+            page = page[..match.Index] + page[end..];
+        }
+
+        return page;
+    }
 
     /// <returns>The variant with this declaration, up to the heading of the next member.</returns>
     private static string VariantOf(string page, string declaration)

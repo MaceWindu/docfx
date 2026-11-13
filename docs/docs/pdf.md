@@ -111,6 +111,25 @@ pdfTocSource: headings
 pdfTocHeadingDepth: 4  # Include h1-h4 headings
 ```
 
+### `pdfFramework`
+
+For API documented with several target frameworks ([`targetFrameworks`](../reference/docfx-json-reference.md#targetframeworks)), the framework to print the API pages for, such as `net8.0`. Each page shows the API's content for that framework, APIs and members that do not exist in it are left out of the PDF, and a framework an API is not built for is stood in for by the nearest one it is, as when a project references it. Without it, the PDF shows every framework, as the site does.
+
+One PDF per framework takes one TOC file each:
+
+```yaml
+pdf: true
+pdfFileName: api-net462.pdf
+pdfFramework: net462
+items:
+- name: API
+  href: api/toc.yml
+```
+
+### `pdfAxisValue`
+
+For API documented with an axis ([`axes`](../reference/docfx-json-reference.md#axes)), such as an EF Core version, the id of the value to print the API pages for, such as `ef9`, the same way as `pdfFramework`. APIs without that axis are not affected. It can be combined with `pdfFramework`.
+
 ### `pdfCoverPage`
 
 A path to an HTML page relative to the root of the output directory. The HTML page will be inserted at the beginning of the PDF file as cover page.

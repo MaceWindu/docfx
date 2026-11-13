@@ -127,9 +127,9 @@
 <h2 id="{{id}}">{{>partials/classSubtitle}}</h2>
 <dl class="parameters">
 {{#children}}
-  <dt id="{{id}}"><code>{{syntax.content.0.value}}</code></dt>
-  {{#remarks}}<dd>{{{summary}}}{{{remarks}}}</dd>{{/remarks}}
-  {{^remarks}}<dd>{{{summary}}}</dd>{{/remarks}}
+  <dt id="{{id}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}><code>{{syntax.content.0.value}}</code>{{#showAppliesToBadge}} <span class="applies-to ms-2 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</dt>
+  {{#remarks}}<dd>{{{summary}}}{{{remarks}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
+  {{^remarks}}<dd>{{{summary}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
 {{/children}}
 </dl>
 {{/children}}

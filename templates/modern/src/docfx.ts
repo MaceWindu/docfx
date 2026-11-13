@@ -8,8 +8,8 @@ import { renderMarkdown } from './markdown'
 import { enableSearch } from './search'
 import { renderToc } from './toc'
 import { initTheme } from './theme'
-import { initAppliesTo } from './appliesTo'
-import { renderBreadcrumb, renderInThisArticle, renderNavbar } from './nav'
+import { applyPrintSelection, initAppliesTo } from './appliesTo'
+import { renderBreadcrumb, renderInThisArticle, renderNavbar, updateInThisArticle } from './nav'
 
 import 'bootstrap-icons/font/bootstrap-icons.scss'
 import './docfx.scss'
@@ -32,6 +32,7 @@ async function init() {
 
   const pdfmode = navigator.userAgent.indexOf('docfx/pdf') >= 0
   if (pdfmode) {
+    applyPrintSelection()
     await Promise.all([
       renderMarkdown(),
       highlight()
@@ -44,7 +45,7 @@ async function init() {
       renderMarkdown(),
       renderNav(),
       highlight(),
-      initAppliesTo()
+      initAppliesTo(updateInThisArticle)
     ])
   }
 
