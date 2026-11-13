@@ -139,6 +139,7 @@ function handleAppliesTo(vm, parent, options) {
     variant.example = variant.example || [];
     variant.exceptions = variant.exceptions || [];
     variant.seealso = variant.seealso || [];
+    variant.overridden = variant.overridden || "";
     if (variant.syntax) {
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
@@ -150,6 +151,8 @@ function handleAppliesTo(vm, parent, options) {
       variant.syntax.return = variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType ? "" : value;
     }
   });
+  // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
+  vm.hasVariants = vm.variants.length > 0;
 
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {
