@@ -44,8 +44,8 @@ partial class DotnetApiCatalog
         }
 
         // Projects of a solution that do not target `targetFramework` are only reported as information, as
-        // solutions commonly hold analyzers, tools and tests that target other frameworks; but if none of
-        // them does, the option most likely has a typo, which is worth a warning.
+        // solutions commonly hold analyzers, tools and tests that target other frameworks; but if no project
+        // of a solution does, the option most likely has a typo, which is worth a warning.
         var solutionProjectCount = 0;
         var solutionProjectMatches = 0;
 
@@ -85,7 +85,8 @@ partial class DotnetApiCatalog
             foreach (var solution in solutionFiles.Select(s => s.NormalizedPath))
             {
                 Logger.LogInfo($"Loading solution {solution}");
-                var filtered = GetSolutionFilterProjects(solution);
+                solutionProjectCount = 0;
+                solutionProjectMatches = 0;
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
@@ -94,13 +95,13 @@ partial class DotnetApiCatalog
                         projectCompilations.Add(compilation);
                     }
                 }
-            }
 
-            if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
-            {
-                Logger.LogWarning(
-                    $"No project of the solutions targets '{solutionTargetFramework}', each is documented at its default target framework instead.",
-                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
+                {
+                    Logger.LogWarning(
+                        $"No project of solution '{solution}' is known to target '{solutionTargetFramework}', each is documented at its default target framework instead.",
+                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                }
             }
         }
 
