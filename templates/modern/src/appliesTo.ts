@@ -1029,6 +1029,21 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     })
   })
 
+  // in print, a section whose members are all left out, such as "Events", goes too
+  if (print) {
+    document.querySelectorAll<HTMLElement>('article h2').forEach(section => {
+      const following: HTMLElement[] = []
+      for (let e = section.nextElementSibling; e && e.tagName !== 'H2'; e = e.nextElementSibling) {
+        following.push(e as HTMLElement)
+      }
+      const members = following.flatMap(e => e.matches('h3, dt') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
+        section.hidden = true
+        following.forEach(e => { e.hidden = true })
+      }
+    })
+  }
+
   // a PDF of one framework leaves out the pages of APIs that do not exist in it, and keeps "Applies to" as it is: it
   // has no axis to label a value with
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
