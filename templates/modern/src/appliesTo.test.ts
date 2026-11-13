@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert'
-import { canReference, chooseGroup, frameworkLabel, isAvailable, parseUnits, rank, sortFrameworks, unitsOf } from './appliesTo'
+import { axisKey, canReference, chooseGroup, frameworkLabel, isAvailable, isValidFramework, parseUnits, rank, sortFrameworks, unitsOf } from './appliesTo'
 
 test('parse units', () => {
   assert.deepStrictEqual(parseUnits('net8.0 netstandard2.0'), [{ framework: 'net8.0' }, { framework: 'netstandard2.0' }])
@@ -104,4 +104,22 @@ test('framework labels', () => {
   assert.strictEqual(frameworkLabel('netstandard2.0'), '.NET Standard 2.0')
   assert.strictEqual(frameworkLabel('net462'), '.NET Framework 4.6.2')
   assert.strictEqual(frameworkLabel('net462', { net462: '.NET Framework 4.6.2+' }), '.NET Framework 4.6.2+')
+})
+
+test('axis keys', () => {
+  assert.strictEqual(axisKey({ name: 'EF Core', values: [] }), 'ef-core')
+  assert.strictEqual(axisKey({ name: ' Driver! ', values: [] }), 'driver')
+  // the frameworks have the key 'framework'
+  assert.strictEqual(axisKey({ name: 'Framework', values: [] }), 'framework-axis')
+})
+
+test('valid frameworks', () => {
+  assert.ok(isValidFramework('net8.0'))
+  assert.ok(isValidFramework('netstandard2.0'))
+  assert.ok(isValidFramework('net462'))
+  assert.ok(!isValidFramework('net8'))
+  assert.ok(!isValidFramework('typo'))
+  // one docfx cannot compare is valid when the table of contents lists it
+  assert.ok(!isValidFramework('uap10.0'))
+  assert.ok(isValidFramework('uap10.0', ['uap10.0']))
 })
