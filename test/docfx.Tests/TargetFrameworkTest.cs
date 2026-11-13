@@ -550,6 +550,36 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworksWithSourceFilesIsAnError()
+    {
+        // Source files and assemblies have no target framework to say an API applies to.
+        var project = CreateMultiTargetedProject();
+        var source = Path.Combine(_projectFolder, "Extra.cs");
+        File.WriteAllText(source, "namespace Extra { public class Tool { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project, source), TargetFrameworks = ["*"] });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.TargetFrameworksNotSupported);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWithAnAxisDocumentsThatFrameworkForEachValue()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly(v1Frameworks: "net8.0;netstandard2.0");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v2")], TargetFramework = "net8.0" });
+
+        AssertWarnings(listener);
+        var shared = Page("Lib.Shared.yml").Items[0];
+        Assert.Equal(["v1", "v2"], shared.AppliesTo.Select(a => a.Version));
+        Assert.All(shared.AppliesTo, a => Assert.Equal(["net8.0"], a.Frameworks));
+    }
+
+    [Fact]
     public async Task AnAxisMergesProjectsThatBuildTheSameAssembly()
     {
         var (v1, v2) = CreateTwoVersionsOfOneAssembly();

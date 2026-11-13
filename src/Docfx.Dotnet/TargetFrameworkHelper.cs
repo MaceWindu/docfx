@@ -129,7 +129,9 @@ internal static partial class TargetFrameworkHelper
         if (targetFrameworks.Contains(AllTargetFrameworks))
         {
             // The project the workspace opened goes first, so that the framework a project is documented
-            // at by default stays the one that provides the content.
+            // at by default comes first among its own. Which framework provides the content is decided per
+            // entry, by the order the frameworks first appear across its projects, so with several projects
+            // that list their frameworks in different orders, `defaultFramework` is what chooses it.
             return candidates
                 .OrderBy(p => p.Id == project.Id ? 0 : 1)
                 .Select(p => (p, GetTargetFrameworkFromName(p) ?? GetTargetFrameworkFromSymbols(p.ParseOptions?.PreprocessorSymbolNames ?? [])))

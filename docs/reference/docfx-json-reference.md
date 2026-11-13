@@ -495,7 +495,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
-Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
+Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
 ### `defaultFramework`
 
@@ -538,13 +538,13 @@ An axis besides the target framework along which the projects of this metadata i
 }
 ```
 
-One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented. A project that matches no value is reported as an `InvalidAxis` error and not documented.
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value. A project that matches no value is reported as an `InvalidAxis` error and not documented.
 
 Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
 
 ### `variantIgnore`
 
-The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants. Nothing is ignored by default.
+The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.
 
 - `attributes`: attributes, including the attribute lines of a declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
