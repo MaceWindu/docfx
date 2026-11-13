@@ -119,6 +119,78 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Theory]
+    [InlineData("NETSTANDARD2.0", "Lib.OnlyNetStandard.yml")]
+    [InlineData("Net8.0", "Lib.OnlyNet8.yml")]
+    public async Task TargetFrameworkOfAMultiTargetedProjectIsCaseInsensitive(string targetFramework, string expectedFile)
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, expectedFile)));
+    }
+
+    [Theory]
+    // net8.0-windows is net8.0-windows7.0: the platform version is not compared
+    [InlineData("net8.0-windows", "Platform.OnlyWindows.yml")]
+    [InlineData("net8.0-windows7.0", "Platform.OnlyWindows.yml")]
+    [InlineData("net8.0", "Platform.OnlyPortable.yml")]
+    public async Task TargetFrameworkWithAPlatformOfAMultiTargetedProject(string targetFramework, string expectedFile)
+    {
+        var project = CreatePlatformProject("<TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, expectedFile)));
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows", false)]
+    [InlineData("net8.0-windows7.0", false)]
+    [InlineData("net8.0", true)]
+    public async Task TargetFrameworkWithAPlatformOfASingleTargetProject(string targetFramework, bool expectWarning)
+    {
+        var project = CreatePlatformProject("<TargetFramework>net8.0-windows</TargetFramework>");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        if (expectWarning)
+        {
+            AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkOnAProjectWithoutFrameworkSymbolsWarns()
+    {
+        var project = CreateProject(
+            "Legacy",
+            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines>",
+            "namespace Legacy { public class Widget { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "net9.0" });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("defines no target framework symbols", warning.Message);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Legacy.Widget.yml")));
+    }
+
+    [Theory]
     [InlineData("net8.0", false)]
     [InlineData("NET8.0", false)]
     [InlineData("netstandard2.0", true)]
@@ -193,6 +265,22 @@ public class TargetFrameworkTest : TestBase
         await Exec(new() { Src = Src(solution), TargetFramework = "net9.0" });
 
         AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWarnsForEachSolutionNoProjectOfWhichTargetsIt()
+    {
+        var matching = CreateNamedSolution("Matching", CreateMultiTargetedProject());
+        var other = CreateNamedSolution(
+            "Other",
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = new(new FileMappingItem(matching, other)) { Expanded = true }, TargetFramework = "net8.0" });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("Other.sln", warning.Message);
     }
 
     [Fact]
@@ -279,9 +367,29 @@ public class TargetFrameworkTest : TestBase
             $"""<ItemGroup><ProjectReference Include="{Path.GetFullPath(library)}" /></ItemGroup>""");
     }
 
-    private string CreateSolution(params string[] projects)
+    /// <summary>
+    /// A project with one type for Windows and one for any other platform. Windows targeting is enabled so
+    /// that it also builds on Linux and macOS.
+    /// </summary>
+    private string CreatePlatformProject(string targetFrameworks)
     {
-        var solution = Path.Combine(_projectFolder, "All.sln");
+        return CreateProject("Platform", $"{targetFrameworks}<EnableWindowsTargeting>true</EnableWindowsTargeting>", """
+            namespace Platform
+            {
+            #if WINDOWS
+                public class OnlyWindows { }
+            #else
+                public class OnlyPortable { }
+            #endif
+            }
+            """);
+    }
+
+    private string CreateSolution(params string[] projects) => CreateNamedSolution("All", projects);
+
+    private string CreateNamedSolution(string name, params string[] projects)
+    {
+        var solution = Path.Combine(_projectFolder, $"{name}.sln");
         var entries = string.Concat(projects.Select(project => $$"""
             Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "{{Path.GetFileNameWithoutExtension(project)}}", "{{Path.GetRelativePath(_projectFolder, project)}}", "{{{Guid.NewGuid().ToString().ToUpperInvariant()}}}"
             EndProject
