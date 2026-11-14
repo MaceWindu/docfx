@@ -9,10 +9,22 @@ exports.transform = function (model) {
   if (!model) return null;
 
   langs = model.langs;
+  var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
   handleItem(model, model._gitContribute, model._gitUrlPattern);
+  if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
+  else delete model.variants;
+  if (showAppliesTo) handleInheritedMembers(model, appliesToOptions);
+  // A type that frameworks build into assemblies of different names lists each of them. Set only then, so
+  // that the model of every other page stays as it is.
+  if (model.assemblies && model.assemblies.length > 1) {
+    model.assembliesText = model.assemblies.map(function (assembly) { return assembly + '.dll'; }).join(', ');
+  }
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
+      if (showAppliesTo) handleAppliesTo(item, model, appliesToOptions);
+      else delete item.variants;
     });
   }
 
@@ -67,6 +79,112 @@ exports.getBookmarks = function (model, ignoreChildren) {
 exports.groupChildren = groupChildren;
 exports.getTypePropertyName = getTypePropertyName;
 exports.getCategory = getCategory;
+
+// The units an item applies to: a framework, or `value:framework` when there is an axis such as EF Core.
+function getAppliesToFrameworks(vm) {
+  var units = [];
+  (vm.appliesTo || []).forEach(function (group) {
+    (group.frameworks || []).forEach(function (framework) {
+      var unit = group.version ? group.version + ':' + framework : framework;
+      if (units.indexOf(unit) < 0) {
+        units.push(unit);
+      }
+    });
+  });
+  return units;
+}
+
+// One entry per value of the axis, or a single one without an axis, rendered by `partials/appliesTo`.
+// Every field is set, so that mustache does not look one up on the enclosing item.
+function getAppliesToGroups(vm, options) {
+  return (vm.appliesTo || []).map(function (group, index) {
+    var label = group.version ? (group.label || group.version) : "";
+    var frameworks = label && options.hideFrameworks
+      ? ""
+      : (group.frameworks || []).map(function (framework) { return getFrameworkLabel(framework, options.names); }).join(', ');
+    return { appliesToLabel: label, appliesToFrameworks: frameworks, appliesToIsFirst: index === 0 };
+  });
+}
+
+function getFrameworkLabel(framework, names) {
+  if (names && Object.prototype.hasOwnProperty.call(names, framework)) return names[framework];
+
+  var match = /^netstandard(\d+\.\d+)$/.exec(framework);
+  if (match) return '.NET Standard ' + match[1];
+
+  match = /^netcoreapp(\d+\.\d+)$/.exec(framework);
+  if (match) return '.NET Core ' + match[1];
+
+  // .NET 5 and later are named by their major version, as Microsoft does: `net8.0` is .NET 8.
+  match = /^net(\d+)\.(\d+)(-.+)?$/.exec(framework);
+  if (match) return '.NET ' + match[1] + (match[2] === '0' ? '' : '.' + match[2]) + (match[3] || '');
+
+  match = /^net(\d)(\d)(\d)?$/.exec(framework);
+  if (match) return '.NET Framework ' + match[1] + '.' + match[2] + (match[3] ? '.' + match[3] : '');
+
+  return framework;
+}
+
+function handleAppliesTo(vm, parent, options) {
+  // set to empty so that mustache does not look up the values of the enclosing type
+  vm.appliesToData = "";
+  vm.appliesToGroups = [];
+  vm.showAppliesTo = false;
+  vm.showAppliesToBadge = false;
+
+  var kind = vm.type ? vm.type.toLowerCase() : "";
+  vm.variants = vm.variants || [];
+  vm.variants.forEach(function (variant) {
+    variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
+    variant.appliesToGroups = getAppliesToGroups(variant, options);
+    // a field that does not differ must not be looked up on the item, which would repeat its value
+    variant.summary = variant.summary || "";
+    variant.remarks = variant.remarks || "";
+    variant.syntax = variant.syntax || "";
+    variant.inheritance = variant.inheritance || [];
+    variant.example = variant.example || [];
+    variant.exceptions = variant.exceptions || [];
+    variant.seealso = variant.seealso || [];
+    variant.overridden = variant.overridden || "";
+    if (variant.syntax) {
+      variant.syntax.parameters = variant.syntax.parameters || [];
+      variant.syntax.typeParameters = variant.syntax.typeParameters || [];
+      // the value of a field, property or event is labelled as in the API's own section, not as a return value
+      var value = variant.syntax.return || "";
+      variant.syntax.fieldValue = kind === "field" ? value : "";
+      variant.syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
+      variant.syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
+      variant.syntax.return = variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType ? "" : value;
+    }
+  });
+  // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
+  vm.hasVariants = vm.variants.length > 0;
+
+  var frameworks = getAppliesToFrameworks(vm);
+  if (frameworks.length === 0) {
+    return;
+  }
+
+  vm.appliesToData = frameworks.join(' ');
+  vm.appliesToGroups = getAppliesToGroups(vm, options);
+  if (!parent) {
+    vm.showAppliesTo = true;
+  } else if (frameworks.slice().sort().join(' ') !== getAppliesToFrameworks(parent).sort().join(' ')) {
+    // A member is only marked when it differs from its type, or every member would carry the same badge.
+    vm.showAppliesToBadge = true;
+  }
+}
+
+// A member inherited in only some frameworks of the type, as its base type differs, is marked with them.
+function handleInheritedMembers(model, options) {
+  var inheritedIn = model.inheritedMembersAppliesTo || {};
+  (model.inheritedMembers || []).forEach(function (member) {
+    var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
+    // set on every member, so that mustache does not look up the values of the type
+    member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    member.showAppliesToBadge = appliesTo.length > 0;
+  });
+}
 
 function groupChildren(model, category) {
   if (!model || !model.type) {

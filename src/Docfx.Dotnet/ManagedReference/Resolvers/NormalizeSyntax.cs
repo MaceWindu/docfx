@@ -16,19 +16,28 @@ internal class NormalizeSyntax : IResolverPipeline
             s => s.IsInvalid ? null : s.Items,
             (member, parent) =>
             {
-                // get all the possible places where link is possible
-                if (member.Syntax is { Content: not null })
+                Normalize(member.Syntax);
+                foreach (var variant in member.Variants ?? [])
                 {
-                    SyntaxLanguage[] keys = new SyntaxLanguage[member.Syntax.Content.Count];
-                    member.Syntax.Content.Keys.CopyTo(keys, 0);
-                    foreach (var key in keys)
-                    {
-                        member.Syntax.Content[key] = NormalizeLines(member.Syntax.Content[key]);
-                    }
+                    Normalize(variant.Content.Syntax);
                 }
 
                 return true;
             });
+    }
+
+    private static void Normalize(SyntaxDetail syntax)
+    {
+        // get all the possible places where link is possible
+        if (syntax is { Content: not null })
+        {
+            SyntaxLanguage[] keys = new SyntaxLanguage[syntax.Content.Count];
+            syntax.Content.Keys.CopyTo(keys, 0);
+            foreach (var key in keys)
+            {
+                syntax.Content[key] = NormalizeLines(syntax.Content[key]);
+            }
+        }
     }
 
     private static string NormalizeLines(string content)

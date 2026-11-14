@@ -249,6 +249,7 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
                 [IsOverloadPropertyName] = true
             },
             Platform = MergeList(overload, s => s.Platform ?? EmptyList),
+            AppliesTo = MergeAppliesTo(overload),
             SupportedLanguages = MergeList(overload, s => s.SupportedLanguages ?? EmptyArray).ToArray(),
             IsExplicitInterfaceImplementation = firstMember.IsExplicitInterfaceImplementation,
             Source = firstMember.Source,
@@ -279,6 +280,26 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
         newPrimaryItem.Name ??= GetOverloadItemName(key, primaryItem.Uid, firstMember.Type == MemberType.Constructor);
 
         return newPrimaryItem;
+    }
+
+    /// <summary>
+    /// An overload page applies wherever any of its overloads does, per value of the axis. Unlike
+    /// <see cref="MergeList"/>, this keeps the order things were documented in, which is meaningful.
+    /// </summary>
+    private static List<AppliesToViewModel> MergeAppliesTo(IEnumerable<ItemViewModel> overloads)
+    {
+        var groups = overloads
+            .SelectMany(s => s.AppliesTo ?? [])
+            .GroupBy(s => s.Version)
+            .Select(group => new AppliesToViewModel
+            {
+                Version = group.Key,
+                Label = group.First().Label,
+                Frameworks = group.SelectMany(s => s.Frameworks ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            })
+            .ToList();
+
+        return groups.Count == 0 ? null : groups;
     }
 
     private static List<string> MergeList(IEnumerable<ItemViewModel> children, Func<ItemViewModel, IEnumerable<string>> selector)
@@ -451,6 +472,11 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
         if (item.Platform != null)
         {
             result.Metadata[Constants.PropertyName.Platform] = item.Platform;
+        }
+
+        if (item.AppliesTo != null)
+        {
+            result.Metadata[Constants.PropertyName.AppliesTo] = item.AppliesTo;
         }
 
         if (item.Metadata.TryGetValue(Constants.MetadataName.Version, out object version))

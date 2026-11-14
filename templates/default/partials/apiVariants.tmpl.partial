@@ -1,0 +1,102 @@
+{{!Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license.}}
+{{#variants.0}}
+<h5 class="api-variants-heading">{{__global.inOtherFrameworks}}</h5>
+{{/variants.0}}
+{{#variants}}
+<div class="api-variant" data-applies-to="{{appliesToData}}">
+  <h6 class="api-variant-label">{{>partials/appliesTo}}</h6>
+  {{#summary}}<div class="markdown summary">{{{summary}}}</div>{{/summary}}
+  {{#syntax}}
+  <div class="codewrapper">
+    <pre><code class="lang-csharp hljs">{{syntax.content.0.value}}</code></pre>
+  </div>
+  {{#syntax.parameters.0}}
+  <h6>{{__global.parameters}}</h6>
+  <dl class="parameters">
+  {{/syntax.parameters.0}}
+  {{#syntax.parameters}}
+    <dt><code>{{{id}}}</code> {{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  {{/syntax.parameters}}
+  {{#syntax.parameters.0}}
+  </dl>
+  {{/syntax.parameters.0}}
+  {{#syntax.return}}
+  <h6>{{__global.returns}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.return}}
+  {{#syntax.fieldValue}}
+  <h6>{{__global.fieldValue}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.fieldValue}}
+  {{#syntax.propertyValue}}
+  <h6>{{__global.propertyValue}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.propertyValue}}
+  {{#syntax.eventType}}
+  <h6>{{__global.eventType}}</h6>
+  <dl class="parameters">
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  </dl>
+  {{/syntax.eventType}}
+  {{#syntax.typeParameters.0}}
+  <h6>{{__global.typeParameters}}</h6>
+  <dl class="parameters">
+  {{/syntax.typeParameters.0}}
+  {{#syntax.typeParameters}}
+    <dt><code>{{{id}}}</code></dt>
+    <dd>{{{description}}}</dd>
+  {{/syntax.typeParameters}}
+  {{#syntax.typeParameters.0}}
+  </dl>
+  {{/syntax.typeParameters.0}}
+  {{/syntax}}
+  {{#overridden}}
+  <h6>{{__global.overrides}}</h6>
+  <div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
+  {{/overridden}}
+  {{#inheritance.0}}
+  <div class="inheritance">
+    <h5>{{__global.inheritance}}</h5>
+    {{#inheritance}}
+    <div>{{{specName.0.value}}}</div>
+    {{/inheritance}}
+  </div>
+  {{/inheritance.0}}
+  {{#example.0}}
+  <h6>{{__global.examples}}</h6>
+  {{/example.0}}
+  {{#example}}
+  {{{.}}}
+  {{/example}}
+  {{#remarks}}<div class="markdown remarks">{{{remarks}}}</div>{{/remarks}}
+  {{#exceptions.0}}
+  <h6>{{__global.exceptions}}</h6>
+  <dl class="parameters">
+  {{/exceptions.0}}
+  {{#exceptions}}
+    <dt>{{{type.specName.0.value}}}</dt>
+    <dd>{{{description}}}</dd>
+  {{/exceptions}}
+  {{#exceptions.0}}
+  </dl>
+  {{/exceptions.0}}
+  {{#seealso.0}}
+  <h6>{{__global.seealso}}</h6>
+  {{/seealso.0}}
+  {{#seealso}}
+  {{#isCref}}<div>{{{type.specName.0.value}}}</div>{{/isCref}}
+  {{^isCref}}<div>{{{url}}}</div>{{/isCref}}
+  {{/seealso}}
+</div>
+{{/variants}}

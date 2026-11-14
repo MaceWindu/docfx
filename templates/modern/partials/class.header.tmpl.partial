@@ -7,7 +7,7 @@
 
 <div class="facts text-secondary">
   <dl><dt>{{__global.namespace}}</dt><dd>{{{namespace.specName.0.value}}}</dd></dl>
-  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{assemblies.0}}.dll</dd></dl>{{/assemblies.0}}
+  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{#assembliesText}}{{.}}{{/assembliesText}}{{^assembliesText}}{{assemblies.0}}.dll{{/assembliesText}}</dd></dl>{{/assemblies.0}}{{#showAppliesTo}}<dl><dt>{{__global.appliesTo}}</dt><dd>{{>partials/appliesTo}}</dd></dl>{{/showAppliesTo}}
 </div>
 
 <div class="markdown summary">{{{summary}}}</div>
@@ -108,7 +108,7 @@
   {{^definition}}
     <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>
   {{/definition}}
-  </div>
+  {{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/inheritedMembers}}
 {{#inheritedMembers.0}}
 </dl>
@@ -138,9 +138,9 @@
 <h2 id="{{id}}">{{>partials/classSubtitle}}</h2>
 <dl class="parameters">
 {{#children}}
-  <dt id="{{id}}"><code>{{syntax.content.0.value}}</code></dt>
-  {{#remarks}}<dd>{{{summary}}}{{{remarks}}}</dd>{{/remarks}}
-  {{^remarks}}<dd>{{{summary}}}</dd>{{/remarks}}
+  <dt id="{{id}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}><code>{{syntax.content.0.value}}</code>{{#showAppliesToBadge}} <span class="applies-to ms-2 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</dt>
+  {{#remarks}}<dd>{{{summary}}}{{{remarks}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
+  {{^remarks}}<dd>{{{summary}}}{{#hasVariants}}{{>partials/apiVariants}}{{/hasVariants}}</dd>{{/remarks}}
 {{/children}}
 </dl>
 {{/children}}
@@ -157,3 +157,4 @@
 <h2 id="{{id}}_remarks">{{__global.remarks}}</h2>
 <div class="markdown level0 remarks">{{{remarks}}}</div>
 {{/remarks}}
+{{>partials/apiVariants}}

@@ -45,6 +45,14 @@ internal class ExtractMetadataConfig
 
     public string TargetFramework { get; init; }
 
+    public List<string> TargetFrameworks { get; init; }
+
+    public string DefaultFramework { get; init; }
+
+    public VariantIgnore VariantIgnore { get; init; }
+
+    public TargetFrameworkAxis Axis { get; init; }
+
     public bool AllowCompilationErrors { get; init; }
 
     public static bool UseClrTypeNames { get; set; }

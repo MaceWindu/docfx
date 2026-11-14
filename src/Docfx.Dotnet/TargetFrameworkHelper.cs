@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.RegularExpressions;
 using Docfx.Common;
 using Microsoft.CodeAnalysis;
 
@@ -18,7 +19,7 @@ namespace Docfx.Dotnet;
 /// framework can be read from. A project that targets a single framework is not given the suffix,
 /// and its framework is recognized by the preprocessor symbol the .NET SDK defines for it instead.
 /// </remarks>
-internal static class TargetFrameworkHelper
+internal static partial class TargetFrameworkHelper
 {
     // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows.
     private static readonly string[] s_platformSymbols = ["ANDROID", "BROWSER", "IOS", "MACCATALYST", "MACOS", "TIZEN", "TVOS", "WASI", "WINDOWS"];
@@ -26,6 +27,214 @@ internal static class TargetFrameworkHelper
     // The symbols the .NET SDK defines for every framework of a family; a project without any of them
     // (a non-SDK project, or `DisableImplicitFrameworkDefines`) does not say which framework it targets.
     private static readonly string[] s_frameworkFamilySymbols = ["NET", "NETCOREAPP", "NETFRAMEWORK", "NETSTANDARD"];
+
+    private const string AllTargetFrameworks = "*";
+
+    // The exact-version symbols only: `NET8_0_OR_GREATER`, `NET` and `NETFRAMEWORK` name no single framework.
+    // Case-sensitive, as C# symbols are: a project's own `net8_0` is not the SDK's.
+    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$")]
+    private static partial Regex TargetFrameworkSymbolRegex();
+
+    [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
+    private static partial Regex FrameworkNameRegex();
+
+    [GeneratedRegex(@"^(netstandard|netcoreapp|net)(\d+(?:\.\d+)*)(?:-([a-z]*))?", RegexOptions.IgnoreCase)]
+    private static partial Regex TargetFrameworkMonikerRegex();
+
+    private enum FrameworkFamily { Standard, Core, Framework }
+
+    // The lowest .NET Framework version implementing each .NET Standard version that it implements at all.
+    private static readonly (Version Standard, Version Framework)[] StandardOnFramework =
+    [
+        (new(1, 1), new(4, 5)),
+        (new(1, 2), new(4, 5, 1)),
+        (new(1, 3), new(4, 6)),
+        (new(2, 0), new(4, 6, 1)),
+    ];
+
+    /// <summary>
+    /// Orders <paramref name="frameworks"/> by how well each one stands in for <paramref name="target"/>:
+    /// the target itself, then the frameworks a project targeting it could reference, nearest first, then
+    /// the others in the order given.
+    /// </summary>
+    /// <remarks>
+    /// A simplified form of the NuGet compatibility rules, which covers the frameworks a library targets.
+    /// NuGet.Frameworks is not used because MSBuildWorkspace loads the copy that comes with the SDK.
+    /// </remarks>
+    internal static List<string> OrderByNearest(string target, IEnumerable<string> frameworks)
+    {
+        var parsedTarget = ParseMoniker(target);
+        return frameworks
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select((framework, index) => (framework, index, parsed: ParseMoniker(framework)))
+            .OrderBy(f => string.Equals(f.framework, target, StringComparison.OrdinalIgnoreCase) ? 0
+                : parsedTarget is not { } t || f.parsed is not { } p || !CanReference(t, p) ? 3
+                : p.Family == t.Family ? 1
+                : 2)
+            .ThenByDescending(f => f.parsed is { } p && parsedTarget is { } t && CanReference(t, p) ? p.Version : null)
+            .ThenBy(f => f.index)
+            .Select(f => f.framework)
+            .ToList();
+    }
+
+    private static (FrameworkFamily Family, Version Version, string? Platform)? ParseMoniker(string moniker)
+    {
+        var match = TargetFrameworkMonikerRegex().Match(moniker);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var digits = match.Groups[2].Value;
+        var platform = match.Groups[3].Success ? match.Groups[3].Value.ToLowerInvariant() : null;
+        return match.Groups[1].Value.ToLowerInvariant() switch
+        {
+            "netstandard" when Version.TryParse(digits, out var version) => (FrameworkFamily.Standard, version, platform),
+            "netcoreapp" when Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            "net" when digits.Contains('.') && Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            // `net462` is .NET Framework 4.6.2, one digit per part.
+            "net" when !digits.Contains('.') && digits.Length is 2 or 3 => (FrameworkFamily.Framework, Version.Parse(string.Join('.', digits.ToCharArray())), platform),
+            _ => null,
+        };
+    }
+
+    private static bool CanReference((FrameworkFamily Family, Version Version, string? Platform) target, (FrameworkFamily Family, Version Version, string? Platform) framework)
+    {
+        if (framework.Platform is not null && framework.Platform != target.Platform)
+        {
+            return false;
+        }
+
+        return (target.Family, framework.Family) switch
+        {
+            _ when target.Family == framework.Family => framework.Version <= target.Version,
+            (FrameworkFamily.Core, FrameworkFamily.Standard) => framework.Version <= (target.Version >= new Version(3, 0) ? new Version(2, 1) : target.Version >= new Version(2, 0) ? new Version(2, 0) : new Version(1, 6)),
+            (FrameworkFamily.Framework, FrameworkFamily.Standard) => StandardOnFramework.Any(s => framework.Version <= s.Standard && target.Version >= s.Framework),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Returns the projects, among those loaded from the same file as <paramref name="project"/>, for each
+    /// of <paramref name="targetFrameworks"/> in that order, with the framework each one targets.
+    /// </summary>
+    /// <returns>
+    /// The projects found, which is none when the file targets none of the frameworks: unlike a single
+    /// framework, a list states what to include, so nothing else is documented in place of a missing one.
+    /// A framework is <see langword="null"/> when it can only be read from the compilation.
+    /// </returns>
+    public static List<(Project Project, string? Framework)> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, bool fromSolution = false)
+    {
+        var candidates = GetProjectsFromSameFile(solution, project);
+
+        if (targetFrameworks.Contains(AllTargetFrameworks))
+        {
+            // The project the workspace opened goes first, so that the framework a project is documented
+            // at by default comes first among its own. Which framework provides the content is decided per
+            // entry, by the order the frameworks first appear across its projects, so with several projects
+            // that list their frameworks in different orders, `defaultFramework` is what chooses it.
+            return candidates
+                .OrderBy(p => p.Id == project.Id ? 0 : 1)
+                .Select(p => (p, GetTargetFrameworkFromName(p) ?? GetTargetFrameworkFromSymbols(p.ParseOptions?.PreprocessorSymbolNames ?? [])))
+                .ToList();
+        }
+
+        var selected = new List<(Project, string?)>();
+        var missing = new List<string>();
+        foreach (var targetFramework in targetFrameworks)
+        {
+            var available = candidates.Where(p => !selected.Any(s => s.Item1.Id == p.Id)).ToList();
+            // An exact name wins over one that differs only in the platform version, as with `targetFramework`.
+            if ((available.FirstOrDefault(p => string.Equals(GetTargetFrameworkFromName(p), targetFramework, StringComparison.OrdinalIgnoreCase))
+                ?? available.FirstOrDefault(p => Targets(p, targetFramework))) is { } match)
+            {
+                selected.Add((match, GetTargetFrameworkFromName(match) ?? targetFramework));
+            }
+            else
+            {
+                missing.Add(targetFramework);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            var message = $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.";
+            // as with `targetFramework`, the projects of a solution commonly target other frameworks
+            if (fromSolution)
+            {
+                Logger.LogInfo(message);
+            }
+            else
+            {
+                Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            }
+        }
+
+        return selected;
+    }
+
+    private static List<Project> GetProjectsFromSameFile(Solution solution, Project project)
+    {
+        return solution.Projects
+            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
+            .ToList();
+    }
+
+    private static bool Targets(Project project, string targetFramework)
+    {
+        return GetTargetFrameworkFromName(project) is { } name
+            ? IsSameFramework(name, targetFramework)
+            // a project whose symbols do not say is taken as it is
+            : TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework) ?? true;
+    }
+
+    /// <summary>
+    /// Reads the framework back from the preprocessor symbols the .NET SDK defines for it, with its platform
+    /// but not the platform version, which no symbol names exactly: <c>net8.0-windows</c> for
+    /// <c>net8.0-windows10.0.19041.0</c>.
+    /// </summary>
+    internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
+    {
+        var symbols = preprocessorSymbols.ToList();
+        if (symbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.') is not { } framework)
+        {
+            return null;
+        }
+
+        return s_platformSymbols.FirstOrDefault(p => symbols.Contains(p, StringComparer.Ordinal)) is { } platform
+            ? $"{framework}-{platform.ToLowerInvariant()}"
+            : framework;
+    }
+
+    /// <summary>
+    /// Reads the framework from the <c>TargetFrameworkAttribute</c> of an assembly, for a project whose
+    /// preprocessor symbols do not name it.
+    /// </summary>
+    internal static string? GetTargetFrameworkFromAttribute(IAssemblySymbol assembly)
+    {
+        var attribute = assembly.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "System.Runtime.Versioning.TargetFrameworkAttribute");
+        return attribute?.ConstructorArguments.FirstOrDefault().Value is string frameworkName ? ParseFrameworkName(frameworkName) : null;
+    }
+
+    /// <summary>
+    /// Converts a framework name such as <c>.NETCoreApp,Version=v8.0</c> to its moniker, <c>net8.0</c>.
+    /// </summary>
+    internal static string? ParseFrameworkName(string frameworkName)
+    {
+        var match = FrameworkNameRegex().Match(frameworkName);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var (major, minor) = (match.Groups[2].Value, match.Groups[3].Value);
+        return match.Groups[1].Value.ToUpperInvariant() switch
+        {
+            "NETSTANDARD" => $"netstandard{major}.{minor}",
+            "NETCOREAPP" => int.Parse(major) >= 5 ? $"net{major}.{minor}" : $"netcoreapp{major}.{minor}",
+            _ => $"net{major}{minor}{match.Groups[4].Value}",
+        };
+    }
 
     /// <summary>
     /// Returns the project, among those loaded from the same file as <paramref name="project"/>, that
@@ -37,9 +246,7 @@ internal static class TargetFrameworkHelper
     /// <returns>The project to document, and whether it is known to target <paramref name="targetFramework"/>.</returns>
     public static (Project project, bool matched) SelectProject(Solution solution, Project project, string targetFramework, bool fromSolution = false)
     {
-        var candidates = solution.Projects
-            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
-            .ToList();
+        var candidates = GetProjectsFromSameFile(solution, project);
 
         if (candidates.Count > 1)
         {

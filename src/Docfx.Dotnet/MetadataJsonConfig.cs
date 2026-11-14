@@ -197,6 +197,46 @@ internal class MetadataJsonItemConfig
     public string TargetFramework { get; set; }
 
     /// <summary>
+    /// The target frameworks to document together, e.g. `["net8.0", "netstandard2.0"]`, or `"*"` for every
+    /// framework a project targets. Each API gets one page, which states the frameworks it exists in; the
+    /// first framework listed provides the content of an API that exists in several.
+    /// </summary>
+    [JsonProperty("targetFrameworks")]
+    [JsonPropertyName("targetFrameworks")]
+    [Newtonsoft.Json.JsonConverter(typeof(StringOrListJsonConverter.NewtonsoftJson))]
+    [System.Text.Json.Serialization.JsonConverter(typeof(StringOrListJsonConverter.SystemTextJson))]
+    public List<string> TargetFrameworks { get; set; }
+
+    /// <summary>
+    /// The framework of `targetFrameworks` that provides the content of an API that exists in several,
+    /// e.g. `net10.0`, instead of the first one listed. A project that does not target it uses the nearest
+    /// framework it targets that can stand in for it, else its first one.
+    /// </summary>
+    [JsonProperty("defaultFramework")]
+    [JsonPropertyName("defaultFramework")]
+    public string DefaultFramework { get; set; }
+
+    /// <summary>
+    /// The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as
+    /// variants: `attributes`, `documentation`, and `inheritdoc` for the documentation of APIs that inherit it.
+    /// </summary>
+    [JsonProperty("variantIgnore")]
+    [JsonPropertyName("variantIgnore")]
+    [Newtonsoft.Json.JsonConverter(typeof(StringOrListJsonConverter.NewtonsoftJson))]
+    [System.Text.Json.Serialization.JsonConverter(typeof(StringOrListJsonConverter.SystemTextJson))]
+    public List<string> VariantIgnore { get; set; }
+
+    /// <summary>
+    /// An axis besides the target framework along which the projects of this item differ, such as the
+    /// version of a dependency, e.g. `[{ "name": "EF Core", "values": [{ "id": "ef9", "label": "EF Core 9",
+    /// "files": ["**/*.EF9.csproj"] }], "default": "ef9" }]`. Each project gets the first value whose files
+    /// match it, and APIs that several values share get one page.
+    /// </summary>
+    [JsonProperty("axes")]
+    [JsonPropertyName("axes")]
+    public List<MetadataAxisConfig> Axes { get; set; }
+
+    /// <summary>
     /// Disables generation of view source links.
     /// </summary>
     [JsonProperty("disableGitFeatures")]

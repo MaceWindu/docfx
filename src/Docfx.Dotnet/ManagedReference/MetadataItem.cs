@@ -158,6 +158,40 @@ internal class MetadataItem : ICloneable
     [JsonPropertyName("items")]
     public List<MetadataItem> Items { get; set; }
 
+    /// <summary>
+    /// The target frameworks this item exists in, set only when several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> AppliesTo { get; set; }
+
+    /// <summary>
+    /// The target frameworks of this item each of its <see cref="InheritedMembers"/> is inherited in, set only
+    /// when several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> InheritedMembersAppliesTo { get; set; }
+
+    /// <summary>
+    /// What differs in the frameworks that do not share the content of this item.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<MetadataItemVariant> Variants { get; set; }
+
+    /// <summary>
+    /// Whether the documentation of this item is inherited rather than written for it: through
+    /// <c>inheritdoc</c>, or as an override or implementation without a comment of its own.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsDocumentationInherited { get; set; }
+
     [YamlMember(Alias = "references")]
     [JsonProperty("references")]
     [JsonPropertyName("references")]

@@ -189,6 +189,7 @@
 {{#seealso.0}}
 </div>
 {{/seealso.0}}
+{{>partials/apiVariants}}
 {{/children}}
 {{/children}}
 {{#implements.0}}

@@ -84,7 +84,42 @@ public static partial class DotnetApiCatalog
 
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
-            var assemblies = await Compile(config);
+            var (assemblies, frameworks) = await Compile(config);
+
+            // A single framework has nothing to merge, and its output must not differ from plain selection.
+            if (frameworks?.Values.Distinct(StringComparer.OrdinalIgnoreCase).Skip(1).Any() != true)
+            {
+                frameworks = null;
+            }
+
+            // Named after what the entry sets, which with an axis alone is not `targetFrameworks`.
+            var merged = config.Axis is not null ? "'axes'" : "'targetFrameworks' with more than one framework";
+
+            if (frameworks is not null && config.OutputFormat is not MetadataOutputFormat.Mref)
+            {
+                Logger.LogError(
+                    $"{merged} is only supported by the 'mref' output format, not '{config.OutputFormat}'.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
+
+            // Source files and assemblies have no target framework to say an API applies to.
+            if (frameworks is not null && assemblies.Any(a => !frameworks.ContainsKey(a.compilation)))
+            {
+                Logger.LogError(
+                    $"{merged} applies to project and solution input only. "
+                    + "Document source files and assemblies in a metadata item of their own.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
+
+            if (frameworks is not null && config.DefaultFramework is { } defaultFramework &&
+                !frameworks.Values.Any(unit => string.Equals(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework, StringComparison.OrdinalIgnoreCase)))
+            {
+                Logger.LogWarning(
+                    $"No project is documented for the default framework '{defaultFramework}', so the nearest framework each project targets provides the content.",
+                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            }
 
             switch (config.OutputFormat)
             {
@@ -109,10 +144,37 @@ public static partial class DotnetApiCatalog
                     break;
 
                 case MetadataOutputFormat.Mref:
-                    CreateManagedReference(assemblies, config, options);
+                    CreateManagedReference(assemblies, config, options, frameworks);
                     break;
             }
         }
+    }
+
+    private static VariantIgnore ParseVariantIgnore(List<string> values)
+    {
+        var result = VariantIgnore.None;
+        foreach (var value in values ?? [])
+        {
+            switch (value?.Trim().ToLowerInvariant())
+            {
+                case "attributes":
+                    result |= VariantIgnore.Attributes;
+                    break;
+                case "documentation":
+                    result |= VariantIgnore.Documentation;
+                    break;
+                case "inheritdoc":
+                    result |= VariantIgnore.InheritedDocumentation;
+                    break;
+                default:
+                    Logger.LogWarning(
+                        $"Unknown 'variantIgnore' value '{value}'. The supported values are 'attributes', 'documentation' and 'inheritdoc'.",
+                        code: WarningCodes.Metadata.InvalidVariantIgnore);
+                    break;
+            }
+        }
+
+        return result;
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)
@@ -129,6 +191,19 @@ public static partial class DotnetApiCatalog
 
         ExtractMetadataConfig.UseClrTypeNames = configModel?.UseClrTypeNames ?? false;
 
+        // The patterns of an axis are relative to the same folders as the patterns that found the projects.
+        var axis = TargetFrameworkAxis.Create(
+            configModel?.Axes,
+            (projects?.Items ?? []).Select(item => Path.GetFullPath(Path.Combine(EnvironmentContext.BaseDirectory, item.Src ?? ""))).Distinct());
+
+        var targetFrameworks = configModel?.TargetFrameworks?
+            .Where(framework => !string.IsNullOrWhiteSpace(framework))
+            .Select(framework => framework.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() is { Count: > 0 } frameworks ? frameworks : null;
+
+        var targetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim();
+
         return new ExtractMetadataConfig
         {
             ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
@@ -137,7 +212,13 @@ public static partial class DotnetApiCatalog
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
             MSBuildProperties = configModel?.Properties,
-            TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
+            TargetFramework = targetFramework,
+            // An axis tells apart projects that would otherwise be documented as one, so every framework
+            // of each of them is documented unless the framework or frameworks are given.
+            TargetFrameworks = targetFrameworks ?? (axis is null || targetFramework is not null ? null : ["*"]),
+            DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
+            VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
+            Axis = axis,
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,

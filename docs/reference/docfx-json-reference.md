@@ -479,6 +479,90 @@ The target framework to document projects at, e.g. `net8.0`. When it is not set,
 
 Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. So is a project that does not say which framework it targets, such as a non-SDK project or one that sets `DisableImplicitFrameworkDefines`. For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, that is logged as information, and the warning is logged for each solution none of whose projects is known to target the framework. A framework is matched with its platform but not the platform version: `net8.0` does not select `net8.0-windows`, nor the reverse, while `net8.0-windows` selects `net8.0-windows10.0.19041.0`. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
 
+### `targetFrameworks`
+
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and marked with them on the page.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": [ "net8.0", "netstandard2.0" ]
+    }
+  ]
+}
+```
+
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
+
+Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
+
+An API is identified by its UID alone. A type that the project defines in some frameworks and takes from the framework in others, such as a polyfill of a type newer frameworks include, therefore gets one page, which applies to the frameworks that define it, and references to it link to that page in every framework, not to the framework's documentation where it comes from the framework.
+
+### `defaultFramework`
+
+The framework of [`targetFrameworks`](#targetframeworks) that provides the content of an API that exists in several, instead of the first one listed. It is also listed first in `appliesTo`. This is useful with `"*"`, where the order is that of the project's `TargetFrameworks`.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": "*",
+      "defaultFramework": "net8.0"
+    }
+  ]
+}
+```
+
+A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements, then the project's first framework. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged.
+
+### `axes`
+
+An axis besides the target framework along which the projects of this metadata item differ, such as the version of a dependency they are built against. Each project gets the first value whose `files` match it, relative to the `src` of the item, and the APIs that several values share get one page, which lists the frameworks it exists in for each value. The `default` value, or the first one, provides the content of an API that exists in several.
+
+```json
+{
+  "metadata": [
+    {
+      "src": [ { "files": [ "src/MyLib.EF/*.csproj" ] } ],
+      "axes": [
+        {
+          "name": "EF Core",
+          "values": [
+            { "id": "ef8", "label": "EF Core 8", "files": [ "**/MyLib.EF8.csproj" ] },
+            { "id": "ef9", "label": "EF Core 9", "files": [ "**/MyLib.EF9.csproj" ] }
+          ],
+          "default": "ef9"
+        }
+      ]
+    }
+  ]
+}
+```
+
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value: as without an axis, a project that does not target it is documented at its default framework, with a `TargetFrameworkNotFound` warning. A project that matches no value is reported as an `InvalidAxis` error and not documented; for the projects of a solution, which commonly holds tools and tests that are not built against the dependency, that is logged as information.
+
+Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
+
+### `variantIgnore`
+
+The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.
+
+- `attributes`: attributes, including the attribute lines of a declaration.
+- `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
+- `inheritdoc`: the same, for an API whose documentation is inherited: through `inheritdoc`, or as an override or interface implementation without a comment of its own. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFrameworks": "*",
+      "variantIgnore": [ "attributes", "inheritdoc" ]
+    }
+  ]
+}
+```
+
 ### `noRestore`
 
 Do not run `dotnet restore` before building the projects. Use this option when the projects have already been restored.
@@ -646,3 +730,25 @@ Choose the URL pattern of the generated link for `View Source` and `Improve this
 ### `_noindex`
 
 File(s) specified are not returned in search results
+
+### `_disableApiAppliesTo`
+
+Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks).
+
+### `_disableApiAppliesToFrameworks`
+
+On API pages built with [`axes`](#axes), show only the values of the axis an API applies to, such as `Applies to: EF Core 8, EF Core 9`, without their frameworks. Pages without an axis are not affected.
+
+### `_frameworkNames`
+
+The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0` or `.NET 8` for `net8.0`.
+
+```json
+{
+  "build": {
+    "globalMetadata": {
+      "_frameworkNames": { "netstandard2.0": "Any .NET" }
+    }
+  }
+}
+```

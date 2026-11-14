@@ -682,6 +682,85 @@
             "type": "string",
             "description": "The target framework to document projects at, e.g. `net8.0`. Unlike the `TargetFramework` MSBuild property in `properties`, it applies only to the projects this metadata item documents, not to the projects they reference."
           },
+          "targetFrameworks": {
+            "description": "The target frameworks to document together, or `*` for every framework a project targets. Each API gets one page, which states the frameworks it exists in; the first framework listed provides the content of an API that exists in several. Mutually exclusive with `targetFramework`.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "defaultFramework": {
+            "description": "The framework of `targetFrameworks` that provides the content of an API that exists in several, instead of the first one listed. A project that does not target it uses the nearest framework it targets that can stand in for it, else its first one.",
+            "type": "string"
+          },
+          "axes": {
+            "description": "An axis besides the target framework along which the projects of this item differ, such as the version of a dependency. Each project gets the first value whose files match it, and APIs that several values share get one page. One axis is supported.",
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [ "name", "values" ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The name of the axis, e.g. `EF Core`."
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "The values of the axis, in the order they are shown.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [ "id", "files" ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "The id of the value, e.g. `ef9`."
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "The name the value is shown with, e.g. `EF Core 9`. Defaults to the id."
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Glob patterns of the project files that have this value, relative to the `src` of the item."
+                      }
+                    }
+                  }
+                },
+                "default": {
+                  "type": "string",
+                  "description": "The id of the value that provides the content of an API that exists in several. Defaults to the first value."
+                }
+              }
+            }
+          },
+          "variantIgnore": {
+            "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [ "attributes", "documentation", "inheritdoc" ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [ "attributes", "documentation", "inheritdoc" ]
+                }
+              }
+            ]
+          },
           "disableGitFeatures": {
             "type": "boolean",
             "default": false,

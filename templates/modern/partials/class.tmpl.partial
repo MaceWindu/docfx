@@ -14,8 +14,8 @@
 <a id="{{id}}" data-uid="{{uid}}" data-overload></a>
 {{/overload}}
 
-<h3 id="{{id}}" data-uid="{{uid}}">
-  {{name.0.value}}
+<h3 id="{{id}}" data-uid="{{uid}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
+  {{name.0.value}}{{#showAppliesToBadge}} <span class="applies-to ms-2 fs-6 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
   {{#sourceurl}}<a class="header-action link-secondary" title="View source" href="{{sourceurl}}"><i class="bi bi-code-slash"></i></a>{{/sourceurl}}
 </h3>
 
@@ -126,6 +126,7 @@
   </dd>
 </dl>
 {{/seealso.0}}
+{{>partials/apiVariants}}
 
 {{/children}}
 {{/children}}
