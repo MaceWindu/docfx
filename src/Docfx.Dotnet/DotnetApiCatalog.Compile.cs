@@ -44,8 +44,8 @@ partial class DotnetApiCatalog
         }
 
         // Projects of a solution that do not target `targetFramework` are only reported as information, as
-        // solutions commonly hold analyzers, tools and tests that target other frameworks; but if none of
-        // them does, the option most likely has a typo, which is worth a warning.
+        // solutions commonly hold analyzers, tools and tests that target other frameworks; but if no project
+        // of a solution does, the option most likely has a typo, which is worth a warning.
         var solutionProjectCount = 0;
         var solutionProjectMatches = 0;
 
@@ -57,7 +57,9 @@ partial class DotnetApiCatalog
         }
 
         var targetFrameworks = config.TargetFramework is null ? config.TargetFrameworks : null;
-        var frameworks = targetFrameworks is null ? null : new Dictionary<Compilation, string>();
+        // With an axis and `targetFramework`, each project is documented at that framework, or its default one,
+        // and the values of the axis are merged.
+        var frameworks = targetFrameworks is null && config.Axis is null ? null : new Dictionary<Compilation, string>();
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -95,6 +97,8 @@ partial class DotnetApiCatalog
             foreach (var solution in solutionFiles.Select(s => s.NormalizedPath))
             {
                 Logger.LogInfo($"Loading solution {solution}");
+                solutionProjectCount = 0;
+                solutionProjectMatches = 0;
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat)
@@ -102,13 +106,13 @@ partial class DotnetApiCatalog
                         projectCompilations.UnionWith(await LoadCompilationsFromProject(project.AbsolutePath, fromSolution: true));
                     }
                 }
-            }
 
-            if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
-            {
-                Logger.LogWarning(
-                    $"No project of the solutions targets '{solutionTargetFramework}', each is documented at its default target framework instead.",
-                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
+                {
+                    Logger.LogWarning(
+                        $"No project of solution '{solution}' is known to target '{solutionTargetFramework}', each is documented at its default target framework instead.",
+                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                }
             }
         }
 
@@ -242,13 +246,36 @@ partial class DotnetApiCatalog
                 return [];
             }
 
-            if (targetFrameworks is null)
+            if (frameworks is null)
             {
                 return await project.GetCompilationAsync() is { } single ? [single] : [];
             }
 
+            // Every framework of a project comes from the same file, so it matches the same value of the axis.
+            string? axisValue = null;
+            if (config.Axis is { } axis && (axisValue = axis.Match(project.FilePath!)) is null)
+            {
+                var message = $"Project '{project.FilePath}' matches none of the values of axis '{axis.Name}', so it is not documented.";
+                // as with the frameworks, a solution commonly holds analyzers, tools and tests that are not on the axis
+                if (fromSolution)
+                {
+                    Logger.LogInfo(message);
+                }
+                else
+                {
+                    Logger.LogError(message, code: ErrorCodes.Metadata.InvalidAxis);
+                }
+                return [];
+            }
+
+            // With `targetFramework`, the project selected above, which is at its default framework if it does
+            // not target that one.
+            List<(Project Project, string? Framework)> selection = targetFrameworks is null
+                ? [(project, TargetFrameworkHelper.GetTargetFrameworkFromName(project) ?? TargetFrameworkHelper.GetTargetFrameworkFromSymbols(project.ParseOptions?.PreprocessorSymbolNames ?? []))]
+                : TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution);
+
             var compilations = new List<Compilation>();
-            foreach (var (selected, selectedFramework) in TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution))
+            foreach (var (selected, selectedFramework) in selection)
             {
                 if (await selected.GetCompilationAsync() is not { } compilation)
                 {
@@ -263,17 +290,9 @@ partial class DotnetApiCatalog
                     continue;
                 }
 
-                if (config.Axis is { } axis)
+                if (axisValue is not null)
                 {
-                    if (axis.Match(selected.FilePath!) is not { } value)
-                    {
-                        Logger.LogError(
-                            $"Project '{selected.FilePath}' matches none of the values of axis '{axis.Name}', so it is not documented.",
-                            code: ErrorCodes.Metadata.InvalidAxis);
-                        continue;
-                    }
-
-                    framework = TargetFrameworkAxis.GetUnit(value, framework);
+                    framework = TargetFrameworkAxis.GetUnit(axisValue, framework);
                 }
 
                 frameworks![compilation] = framework;

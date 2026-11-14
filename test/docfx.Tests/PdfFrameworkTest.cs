@@ -57,9 +57,58 @@ public class PdfFrameworkTest
     public void ThePagesOfAPdfOfOneFrameworkAreToldWhichOne()
     {
         Assert.Null(PdfBuilder.GetAppliesToScript(Parse(null, null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9"};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
+        Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null,"axisValues":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
+        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9","axisValues":null};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
+
+        // pages carry value ids without their axis, so they are told the values of the axis picked from
+        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"d1","axisValues":["d1","d2"]};""", PdfBuilder.GetAppliesToScript(TwoAxes("d1")));
     }
+
+    // The API of two metadata items, each with an axis of its own, which `docfx metadata` writes to their entries.
+    private const string TwoAxesToc = """
+        {
+          "pdf": true,
+          "pdfAxisValue": "{value}",
+          "items": [
+            { "name": "EF", "axis": { "name": "EF Core", "values": [ { "id": "ef3" }, { "id": "ef8" } ] }, "items": [
+              { "name": "Everywhere", "href": "ef/Everywhere.html", "appliesTo": [ { "version": "ef3", "frameworks": [ "netstandard2.0" ] }, { "version": "ef8", "frameworks": [ "net8.0" ] } ] },
+              { "name": "FromEF8", "href": "ef/FromEF8.html", "appliesTo": [ { "version": "ef8", "frameworks": [ "net8.0" ] } ] }
+            ] },
+            { "name": "Drivers", "axis": { "name": "Driver", "values": [ { "id": "d1" }, { "id": "d2" } ] }, "items": [
+              { "name": "OnlyD1", "href": "drivers/OnlyD1.html", "appliesTo": [ { "version": "d1", "frameworks": [ "net8.0" ] } ] },
+              { "name": "OnlyD2", "href": "drivers/OnlyD2.html", "appliesTo": [ { "version": "d2", "frameworks": [ "net8.0" ] } ] }
+            ] }
+          ]
+        }
+        """;
+
+    [Theory]
+    // a value of one axis says nothing about the API of the other
+    [InlineData("ef3", "EF, Everywhere, Drivers, OnlyD1, OnlyD2")]
+    [InlineData("d2", "EF, Everywhere, FromEF8, Drivers, OnlyD2")]
+    public void AnAxisValueLeavesOutOnlyWhatItsOwnAxisDoesNotHave(string value, string expected)
+    {
+        using var listener = new TestListenerScope();
+        var outline = TwoAxes(value);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal(expected, string.Join(", ", Names(outline.items)));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+    }
+
+    [Fact]
+    public void AValueOfNoAxisOfTheTableOfContentsWarns()
+    {
+        using var listener = new TestListenerScope();
+
+        PdfBuilder.LeaveOutUnavailable(TwoAxes("ef9"));
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("'pdfAxisValue'"));
+    }
+
+    private static PdfBuilder.Outline TwoAxes(string value) =>
+        JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc.Replace("{value}", value));
 
     [Fact]
     public void AnEmptyFrameworkOrValueSelectsNothing()

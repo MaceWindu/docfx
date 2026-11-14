@@ -23,10 +23,15 @@ internal class SetDerivedClass : IResolverPipeline
     {
         foreach (var item in items ?? Enumerable.Empty<MetadataItem>())
         {
-            // Handle class inheritance
-            var inheritance = item.Inheritance;
-            if (inheritance is { Count: > 0 })
+            // Handle class inheritance, including the base classes of other target frameworks, recorded as variants
+            var superClasses = new HashSet<string>();
+            foreach (var inheritance in (item.Variants ?? []).Select(v => v.Content?.Inheritance).Prepend(item.Inheritance))
             {
+                if (inheritance is not { Count: > 0 })
+                {
+                    continue;
+                }
+
                 var superClass = inheritance[inheritance.Count - 1];
 
                 if (reference.TryGetValue(superClass, out ReferenceItem referenceItem))
@@ -35,7 +40,7 @@ internal class SetDerivedClass : IResolverPipeline
                 }
 
                 // ignore System.Object's derived class
-                if (superClass != "System.Object")
+                if (superClass != "System.Object" && superClasses.Add(superClass))
                 {
                     ref var derivedClasses = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassMapping, superClass, out var exists);
                     if (exists)
