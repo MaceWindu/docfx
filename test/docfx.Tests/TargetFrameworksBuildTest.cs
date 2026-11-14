@@ -189,6 +189,17 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
+    public async Task ATypePageWithMembersOnPagesOfTheirOwnMarksTheMembersItLists()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        var page = await Page(site, "Lib.Shared.html");
+
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.OnlyNet8Member.html#", page);
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0 netstandard2.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.Everywhere.html#", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
     public async Task AnOverloadPageAppliesWhereverAnyOverloadDoes()
     {
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");

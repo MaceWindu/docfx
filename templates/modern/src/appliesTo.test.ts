@@ -316,3 +316,96 @@ test('a link to content hidden for the selection goes to the content shown', () 
   assert.strictEqual(shownTarget('Lib_Shared_Size_remarks').id, 'Lib_Shared_Size_remarks')
   assert.strictEqual(shownTarget('missing'), null)
 })
+
+// An API of an axis whose own content is for EF Core 8; EF Core 3.1 builds for .NET Standard 2.0, and differently for
+// .NET Framework 4.6.2.
+const efPage = `${site}
+  <article>
+    <h1 id="Lib_Query" data-applies-to="ef8:net8.0 ef3:netstandard2.0 ef3:net462">Query</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="ef8:net8.0"><p id="own">EF Core 8</p></div>
+      <div class="api-content" data-applies-to="ef3:netstandard2.0" data-search-ignore hidden><p id="ef3">EF Core 3.1</p></div>
+      <div class="api-content" data-applies-to="ef3:net462" data-search-ignore hidden><p id="ef3net462">EF Core 3.1 on .NET Framework</p></div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="ef3:netstandard2.0"></div>
+    <div class="api-variant" id="variant2" data-applies-to="ef3:net462"></div>
+  </article>`
+
+test('a value picked alone keeps what differs in the other frameworks of that value', () => {
+  const { document } = installDom(efPage)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+
+  applySelection({ value: 'ef3' })
+  // the content of EF Core 3.1 is shown in place, and its .NET Framework variant listed under it
+  assert.ok(hidden('own'))
+  assert.ok(!hidden('ef3'))
+  assert.ok(hidden('variant1'))
+  assert.ok(!hidden('variant2'))
+  assert.ok(!document.querySelector('.api-variants-heading').hidden)
+
+  // EF Core 8 has nothing in other frameworks
+  applySelection({ value: 'ef8' })
+  assert.ok(!hidden('own'))
+  assert.ok(hidden('variant1') && hidden('variant2'))
+  assert.ok(document.querySelector('.api-variants-heading').hidden)
+
+  // a framework picked shows its content only
+  applySelection({ value: 'ef3', framework: 'net462' })
+  assert.ok(!hidden('ef3net462'))
+  assert.ok(hidden('variant1') && hidden('variant2'))
+})
+
+test('a value of another axis says nothing about the page', () => {
+  installDom(efPage)
+  // a PDF of the driver `d1` over the API of two axes is told the values of the driver axis
+  const driver = { value: 'd1', axisValues: ['d1', 'd2'] }
+  assert.ok(isAvailable(parseUnits('ef8:net8.0'), driver))
+  assert.ok(!isAvailable(parseUnits('d2:net8.0'), driver))
+  assert.ok(isAvailable(parseUnits('d1:net8.0'), driver))
+})
+
+const printPage = `${site}
+  <body>
+    <article>
+      <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1>
+      <div class="facts"></div>
+      <h2 id="events">Events</h2>
+      <a id="Lib_Changed_" data-overload></a>
+      <h3 id="Lib_Changed" data-applies-to="net8.0">Changed</h3>
+      <p>Only on .NET 8.</p>
+      <h2 id="methods">Methods</h2>
+      <h3 id="Lib_Run" data-applies-to="net8.0 net462">Run</h3>
+      <p>Everywhere.</p>
+      <h3 id="Lib_Stop" data-applies-to="net8.0">Stop</h3>
+      <p>Only on .NET 8.</p>
+      <h3 id="classes">Classes</h3>
+      <dl class="jumplist" data-applies-to="net8.0 net462"><dt>Everywhere</dt></dl>
+      <h3 id="interfaces">Interfaces</h3>
+      <dl class="jumplist" data-applies-to="net8.0"><dt>IOnlyNet8</dt></dl>
+    </article>
+  </body>`
+
+test('in print, what does not exist in the selection is left out', () => {
+  const { document } = installDom(printPage)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+
+  applySelection({ framework: 'net462' }, undefined, true)
+  // members, and a section with none left
+  assert.ok(hidden('Lib_Changed') && hidden('events'))
+  assert.ok(!hidden('Lib_Run') && !hidden('methods'))
+  assert.ok(hidden('Lib_Stop'))
+  // the types of a namespace page, and a group of them with none left
+  assert.ok(!hidden('classes'))
+  assert.ok(hidden('interfaces'))
+  assert.ok(document.querySelectorAll('dl.jumplist')[1].hidden)
+  // nothing is marked, as nothing is left to mark
+  assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner'), [])
+  assert.ok(!document.body.hasAttribute('data-applies-to-unavailable'))
+
+  // the page of an API that does not exist in the selection says so to `docfx pdf`
+  applySelection({ framework: 'netcoreapp1.0' }, undefined, true)
+  assert.ok(document.body.hasAttribute('data-applies-to-unavailable'))
+  assert.strictEqual(document.querySelector('.applies-to-banner'), null)
+})
