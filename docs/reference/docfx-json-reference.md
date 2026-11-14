@@ -454,7 +454,7 @@ Specifies an optional set of MSBuild properties used when interpreting project f
 }
 ```
 > [!Note]
-> Make sure to specify `"TargetFramework": <one of the frameworks>` in your docfx.json when the project is targeting for multiple platforms.
+> MSBuild applies these properties to every project it loads, including the projects referenced by the ones being documented. To choose which framework of a multi-targeted project is documented, use [`targetFramework`](#targetframework) rather than the `TargetFramework` property.
 
 > [!Note]
 > When generating metadata from source code files.
@@ -462,6 +462,22 @@ Specifies an optional set of MSBuild properties used when interpreting project f
 >   - `DefineConstants`
 >   - `AllowUnsafeBlocks`
 > If other properties are specified. These properties are ignored silently.
+
+### `targetFramework`
+
+The target framework to document projects at, e.g. `net8.0`. When it is not set, a project that targets multiple frameworks is documented at the first framework in its `TargetFrameworks`.
+
+```json
+{
+  "metadata": [
+    {
+      "targetFramework": "net8.0"
+    }
+  ]
+}
+```
+
+Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. So is a project that does not say which framework it targets, such as a non-SDK project or one that sets `DisableImplicitFrameworkDefines`. For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, that is logged as information, and the warning is logged for each solution none of whose projects is known to target the framework. A framework is matched with its platform but not the platform version: `net8.0` does not select `net8.0-windows`, nor the reverse, while `net8.0-windows` selects `net8.0-windows10.0.19041.0`. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
 
 ### `noRestore`
 

@@ -150,22 +150,28 @@ To troubleshoot MSBuild load problems, run `docfx metadata --logLevel verbose` t
 
 Docfx build the project using `Release` config by default, additional MSBuild properties can be specified with `properties`.
 
-If your project targets multiple target frameworks, docfx internally builds each target framework of the project. Try specify the `TargetFramework` MSBuild property to speed up project build:
+### Projects that target multiple frameworks
+
+When a project targets multiple frameworks, docfx loads every one of them but documents only one: the first framework in `TargetFrameworks`. Use [`targetFramework`](../reference/docfx-json-reference.md#targetframework) to choose another:
 
 ```json
 {
   "metadata": {
     "src": [{
-      "files": ["**/bin/Release/**.dll"],
+      "files": ["src/MyLib/MyLib.csproj"],
       "src": "../"
     }],
     "dest": "api",
-    "properties": {
-      "TargetFramework": "net8.0"
-    }
+    "targetFramework": "net8.0"
   },
 }
 ```
+
+`targetFramework` picks a framework among the ones the project was loaded with. The projects it references are left alone, and each one is built for the framework MSBuild resolves for that reference, exactly as in a normal build.
+
+Setting the `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json-reference.md#properties) instead also loads only that framework, which is faster, but MSBuild applies a global property to every project it loads, including referenced projects. A project that references a `netstandard2.0` library then loads that library for `net8.0` as well, which no longer matches the reference MSBuild resolved for it: docfx logs `Found project reference without a matching metadata reference` and `Unresolved metadata reference removed from project`, and the library may fail to build for a framework it was never meant to target.
+
+If a project listed in `src` does not target the requested framework, or does not say which framework it targets, docfx logs a `TargetFrameworkNotFound` warning and documents the framework the project selects by default. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets the framework; see [`targetFramework`](../reference/docfx-json-reference.md#targetframework).
 
 ## Generate from source code
 

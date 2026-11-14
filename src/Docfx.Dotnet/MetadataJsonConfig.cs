@@ -188,6 +188,15 @@ internal class MetadataJsonItemConfig
     public Dictionary<string, string> Properties { get; set; }
 
     /// <summary>
+    /// The target framework to document projects at, e.g. `net8.0`. Unlike setting the `TargetFramework`
+    /// MSBuild property in `properties`, it applies only to the projects this metadata item documents,
+    /// not to the projects they reference.
+    /// </summary>
+    [JsonProperty("targetFramework")]
+    [JsonPropertyName("targetFramework")]
+    public string TargetFramework { get; set; }
+
+    /// <summary>
     /// Disables generation of view source links.
     /// </summary>
     [JsonProperty("disableGitFeatures")]
