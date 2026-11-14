@@ -31,7 +31,8 @@ internal static partial class TargetFrameworkHelper
     private const string AllTargetFrameworks = "*";
 
     // The exact-version symbols only: `NET8_0_OR_GREATER`, `NET` and `NETFRAMEWORK` name no single framework.
-    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$", RegexOptions.IgnoreCase)]
+    // Case-sensitive, as C# symbols are: a project's own `net8_0` is not the SDK's.
+    [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$")]
     private static partial Regex TargetFrameworkSymbolRegex();
 
     [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
@@ -154,7 +155,10 @@ internal static partial class TargetFrameworkHelper
         var missing = new List<string>();
         foreach (var targetFramework in targetFrameworks)
         {
-            if (candidates.FirstOrDefault(p => Targets(p, targetFramework) && !selected.Any(s => s.Item1.Id == p.Id)) is { } match)
+            var available = candidates.Where(p => !selected.Any(s => s.Item1.Id == p.Id)).ToList();
+            // An exact name wins over one that differs only in the platform version, as with `targetFramework`.
+            if ((available.FirstOrDefault(p => string.Equals(GetTargetFrameworkFromName(p), targetFramework, StringComparison.OrdinalIgnoreCase))
+                ?? available.FirstOrDefault(p => Targets(p, targetFramework))) is { } match)
             {
                 selected.Add((match, GetTargetFrameworkFromName(match) ?? targetFramework));
             }
@@ -167,7 +171,7 @@ internal static partial class TargetFrameworkHelper
         if (missing.Count > 0)
         {
             var message = $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.";
-            // as with 	argetFramework, the projects of a solution commonly target other frameworks
+            // as with `targetFramework`, the projects of a solution commonly target other frameworks
             if (fromSolution)
             {
                 Logger.LogInfo(message);
@@ -191,17 +195,27 @@ internal static partial class TargetFrameworkHelper
     private static bool Targets(Project project, string targetFramework)
     {
         return GetTargetFrameworkFromName(project) is { } name
-            ? string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase)
-            // a project whose symbols do not say is taken as it is, as by `targetFramework`
+            ? IsSameFramework(name, targetFramework)
+            // a project whose symbols do not say is taken as it is
             : TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework) ?? true;
     }
 
     /// <summary>
-    /// Reads the framework back from the preprocessor symbol the .NET SDK defines for it.
+    /// Reads the framework back from the preprocessor symbols the .NET SDK defines for it, with its platform
+    /// but not the platform version, which no symbol names exactly: <c>net8.0-windows</c> for
+    /// <c>net8.0-windows10.0.19041.0</c>.
     /// </summary>
     internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
     {
-        return preprocessorSymbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.');
+        var symbols = preprocessorSymbols.ToList();
+        if (symbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.') is not { } framework)
+        {
+            return null;
+        }
+
+        return s_platformSymbols.FirstOrDefault(p => symbols.Contains(p, StringComparer.Ordinal)) is { } platform
+            ? $"{framework}-{platform.ToLowerInvariant()}"
+            : framework;
     }
 
     /// <summary>
@@ -241,14 +255,21 @@ internal static partial class TargetFrameworkHelper
     /// as information for one that comes from a solution, which commonly holds analyzers, tools and test
     /// projects that target other frameworks.
     /// </summary>
-    /// <returns>The project to document, and whether it targets <paramref name="targetFramework"/>.</returns>
+    /// <returns>The project to document, and whether it is known to target <paramref name="targetFramework"/>.</returns>
     public static (Project project, bool matched) SelectProject(Solution solution, Project project, string targetFramework, bool fromSolution = false)
     {
         var candidates = GetProjectsFromSameFile(solution, project);
 
         if (candidates.Count > 1)
         {
-            if (candidates.FirstOrDefault(p => string.Equals(GetTargetFrameworkFromName(p), targetFramework, StringComparison.OrdinalIgnoreCase)) is { } match)
+            // An exact name wins over one that differs only in the platform version, should a project
+            // target several versions of one platform.
+            if (candidates.FirstOrDefault(p => string.Equals(GetTargetFrameworkFromName(p), targetFramework, StringComparison.OrdinalIgnoreCase)) is { } exact)
+            {
+                return (exact, true);
+            }
+
+            if (candidates.FirstOrDefault(p => GetTargetFrameworkFromName(p) is { } tfm && IsSameFramework(tfm, targetFramework)) is { } match)
             {
                 return (match, true);
             }
@@ -266,8 +287,8 @@ internal static partial class TargetFrameworkHelper
                 Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting the target framework it has instead.");
                 return (project, false);
             default:
-                Logger.LogInfo($"Project '{project.FilePath}' defines no target framework symbols, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
-                return (project, true);
+                Report($"Project '{project.FilePath}' defines no target framework symbols, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
+                return (project, false);
         }
 
         void Report(string message)
@@ -296,7 +317,18 @@ internal static partial class TargetFrameworkHelper
         }
 
         var start = name.LastIndexOf('(');
-        return start < 0 ? null : name[(start + 1)..^1];
+        return start < 0 ? null : name[(start + 1)..^1].Trim();
+    }
+
+    /// <summary>
+    /// Whether two target frameworks are the same framework on the same platform, whatever the platform
+    /// version: <c>net8.0-windows</c> and <c>net8.0-windows10.0.19041.0</c> are, <c>net8.0</c> and
+    /// <c>net8.0-windows</c> are not.
+    /// </summary>
+    internal static bool IsSameFramework(string a, string b)
+    {
+        return string.Equals(GetTargetFrameworkSymbol(a), GetTargetFrameworkSymbol(b), StringComparison.Ordinal)
+            && string.Equals(GetTargetFrameworkPlatform(a), GetTargetFrameworkPlatform(b), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -335,7 +367,9 @@ internal static partial class TargetFrameworkHelper
     /// <returns><see langword="null"/> when the symbols do not say which framework the project targets.</returns>
     internal static bool? TargetsFramework(IEnumerable<string> preprocessorSymbols, string targetFramework)
     {
-        var symbols = preprocessorSymbols.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // C# symbols are case-sensitive, and the SDK defines these in upper case: a project's own `Windows`
+        // or `Net` symbol is not one of them.
+        var symbols = preprocessorSymbols.ToHashSet(StringComparer.Ordinal);
         if (!s_frameworkFamilySymbols.Any(symbols.Contains))
         {
             return null;

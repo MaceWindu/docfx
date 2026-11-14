@@ -525,11 +525,11 @@ The target framework to document projects at, e.g. `net8.0`. When it is not set,
 }
 ```
 
-Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, that is logged as information, and the warning is logged only if no project of the solution targets the framework. A framework is matched with its platform: `net8.0` does not select `net8.0-windows`, nor the reverse. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
+Unlike the `TargetFramework` property in [`properties`](#properties), it applies only to the projects this metadata item documents, so referenced projects keep their own target frameworks. It applies to project and solution input, not to assemblies or source files. A project that does not target the framework is documented at its default framework instead, with a `TargetFrameworkNotFound` warning. So is a project that does not say which framework it targets, such as a non-SDK project or one that sets `DisableImplicitFrameworkDefines`. For the projects of a solution, which commonly holds analyzers, tools and tests that target other frameworks, that is logged as information, and the warning is logged for each solution none of whose projects is known to target the framework. A framework is matched with its platform but not the platform version: `net8.0` does not select `net8.0-windows`, nor the reverse, while `net8.0-windows` selects `net8.0-windows10.0.19041.0`. See [Projects that target multiple frameworks](../docs/dotnet-api-docs.md#projects-that-target-multiple-frameworks).
 
 ### `targetFrameworks`
 
-The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members and extension methods are combined.
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and marked with them on the page.
 
 ```json
 {
@@ -544,6 +544,8 @@ The target frameworks to document together, or `"*"` for every framework a proje
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
+
+An API is identified by its UID alone. A type that the project defines in some frameworks and takes from the framework in others, such as a polyfill of a type newer frameworks include, therefore gets one page, which applies to the frameworks that define it, and references to it link to that page in every framework, not to the framework's documentation where it comes from the framework.
 
 ### `defaultFramework`
 
@@ -586,7 +588,7 @@ An axis besides the target framework along which the projects of this metadata i
 }
 ```
 
-One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value. A project that matches no value is reported as an `InvalidAxis` error and not documented.
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value: as without an axis, a project that does not target it is documented at its default framework, with a `TargetFrameworkNotFound` warning. A project that matches no value is reported as an `InvalidAxis` error and not documented; for the projects of a solution, which commonly holds tools and tests that are not built against the dependency, that is logged as information.
 
 Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
 
@@ -874,10 +876,12 @@ The names to show for target frameworks on API pages built with [`targetFramewor
 
 ### `_enableApiAppliesToPicker`
 
-In the `modern` template, adds dropdowns to the navigation bar of API pages built with [`targetFrameworks`](#targetframeworks): one for the target frameworks and, with [`axes`](#axes), one for the values of the axis. They list what the current table of contents applies to, and start at "All", which shows the pages as without the option. Once the reader picks a framework or value:
+In the `modern` template, adds dropdowns to the navigation bar of the pages whose table of contents has API pages built with [`targetFrameworks`](#targetframeworks): one for the target frameworks the table of contents lists and, with [`axes`](#axes), one for the values of the axis. They start at "All", which shows the pages as without the option. Once the reader picks a framework or value:
 
 - each API shows its content for that selection: a variant replaces the content it differs in, and "In other frameworks" is hidden. A framework the API is not built for is stood in for by the nearest one it is, as in a project referencing it: .NET Standard 2.0 for .NET 10, when that is what the API targets.
 - members that do not exist in the selection are dimmed and marked, and a page whose API does not exist in it says so.
-- the table of contents leaves out the APIs that do not exist in the selection.
+- the table of contents leaves out the APIs that do not exist in the selection, except the page being read and its parents.
 
-The choice is kept across pages. `?framework=net8.0` in a link picks a framework, and the axis name in lower case with dashes picks a value, such as `?ef-core=ef9`. Search and PDF output are not affected.
+The axis of a metadata item is written to its API table of contents, and to each of its top-level entries, which a table of contents that includes it keeps. A table of contents that includes the API of several metadata items, each with an axis of its own, offers on each page the axis of the part the page is in, and keeps a value for each axis; a page in none of them, such as an article beside them, offers only the frameworks, or the axis when there is one only.
+
+The choice is kept across pages, per site. `?framework=net8.0` in a link picks a framework, and the axis name in lower case with dashes picks a value, such as `?ef-core=ef9`. A framework or axis value that the table of contents does not list is ignored, whether it comes from a link or was kept from another part of the site, so that a typo, or a framework the site has no API for, does not empty the table of contents. Framework labels follow [`_frameworkNames`](#_frameworknames) on every page. Search and PDF output are not affected.

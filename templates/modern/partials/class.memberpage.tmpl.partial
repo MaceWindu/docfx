@@ -6,7 +6,7 @@
 <h2 class="section" id="{{id}}">{{>partials/classSubtitle}}</h2>
 
 {{#children}}
-<dl class="jumplist">
+<dl class="jumplist"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
   <dt><xref uid="{{uid}}" altProperty="fullName" displayProperty="name"/></dt>
   <dd>{{{summary}}}</dd>
 </dl>

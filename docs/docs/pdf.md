@@ -128,7 +128,9 @@ items:
 
 ### `pdfAxisValue`
 
-For API documented with an axis ([`axes`](../reference/docfx-json-reference.md#axes)), such as an EF Core version, the id of the value to print the API pages for, such as `ef9`, the same way as `pdfFramework`. APIs without that axis are not affected. It can be combined with `pdfFramework`.
+For API documented with an axis ([`axes`](../reference/docfx-json-reference.md#axes)), such as an EF Core version, the id of the value to print the API pages for, such as `ef9`, the same way as `pdfFramework`. APIs without that axis, or with another one, are not affected. Without `pdfFramework`, each page keeps what differs in the other frameworks of that value. It can be combined with `pdfFramework`.
+
+The API pages left out are found by the entries of the table of contents that `docfx metadata` writes, so include it, as in `href: api/toc.yml`. An API page from another entry, such as a hand-written one, is printed in full, with a warning if its API does not exist in the selection.
 
 ### `pdfCoverPage`
 
