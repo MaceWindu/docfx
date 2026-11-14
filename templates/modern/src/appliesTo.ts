@@ -11,11 +11,13 @@ import { isExternalHref, isSameURL, loc, meta } from './helper'
 export type Unit = { value?: string, framework: string }
 
 /**
- * What the reader picked. A missing part is "all". `within` limits it to some units, those of the copy of a variant
- * shown whole that the pick cannot tell apart, as `narrowSelection` reads them. `part` is what the part of the docs the
- * API is in is built for, by which a framework picked stands for the one of them a project targeting it gets.
+ * What the reader picked. A missing part is "all". `axisValues`, the ids of the axis `value` is one of, is set where
+ * a page of another axis can show, as in a PDF of the API of several metadata items. `within` limits it to some units,
+ * those of the copy of a variant shown whole that the pick cannot tell apart, as `narrowSelection` reads them. `part`
+ * is what the part of the docs the API is in is built for, by which a framework picked stands for the one of them a
+ * project targeting it gets.
  */
-export type Selection = { value?: string, framework?: string, within?: Unit[], part?: Unit[] }
+export type Selection = { value?: string, framework?: string, axisValues?: string[], within?: Unit[], part?: Unit[] }
 
 /** One entry of `appliesTo` in the table of contents, as written by `docfx metadata`. */
 export type AppliesToGroup = { version?: string, label?: string, frameworks?: string[] }
@@ -207,8 +209,9 @@ function standsIn(framework: string, unit: Unit, part: Unit[] | null | undefined
  * default, `null` when it is not known.
  */
 export function matches(unit: Unit, selection: Selection, part: Unit[] | null | undefined = selection.part): boolean {
-  // a value picked for the axis of one part of the docs says nothing about a part without that axis
-  return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
+  // a value picked for the axis of one part of the docs says nothing about a part without that axis, or with another
+  const valueApplies = !!selection.value && unit.value !== undefined && (!selection.axisValues || selection.axisValues.includes(unit.value))
+  return (!valueApplies || unit.value === selection.value) &&
     (!selection.framework || standsIn(selection.framework, unit, part)) &&
     (!selection.within || selection.within.some(w =>
       (w.value === undefined || unit.value === undefined || w.value === unit.value) && isSameFramework(w.framework, unit.framework)))
@@ -1029,14 +1032,16 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     })
   })
 
-  // in print, a section whose members are all left out, such as "Events", goes too
+  // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
+  // namespace page, where the headings of such groups are `h3`s without frameworks of their own.
   if (print) {
-    document.querySelectorAll<HTMLElement>('article h2').forEach(section => {
+    document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
+      const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
       const following: HTMLElement[] = []
-      for (let e = section.nextElementSibling; e && e.tagName !== 'H2'; e = e.nextElementSibling) {
+      for (let e = section.nextElementSibling; e && !ends.test(e.tagName); e = e.nextElementSibling) {
         following.push(e as HTMLElement)
       }
-      const members = following.flatMap(e => e.matches('h3, dt') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      const members = following.flatMap(e => e.matches('h3, dt, dl.jumplist') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
       if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
         section.hidden = true
         following.forEach(e => { e.hidden = true })
@@ -1044,14 +1049,15 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     })
   }
 
-  // a PDF of one framework leaves out the pages of APIs that do not exist in it, and keeps "Applies to" as it is: it
-  // has no axis to label a value with
+  // A PDF of one framework leaves out the pages of APIs that do not exist in it, by their entries in the table of
+  // contents; `docfx pdf` warns about a page it printed all the same. It keeps "Applies to" as it is: it has no axis
+  // to label a value with.
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
   const units = title ? parseUnits(title.dataset.appliesTo) : []
+  const unavailable = !!title && !isAvailable(units, selection)
   if (print) {
-    return
-  }
-  if (title && !isAvailable(units, selection)) {
+    document.body?.toggleAttribute('data-applies-to-unavailable', unavailable)
+  } else if (unavailable) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
@@ -1307,8 +1313,11 @@ export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'
 
 declare global {
   interface Window {
-    /** Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework` and `pdfAxisValue`. */
-    docfxAppliesTo?: { framework?: string, value?: string }
+    /**
+     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, and the ids of
+     * the axis that value is one of, when the table of contents names it.
+     */
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[] }
   }
 }
 
@@ -1316,7 +1325,7 @@ declare global {
 export function applyPrintSelection() {
   const selection = window.docfxAppliesTo
   if (selection) {
-    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined }, undefined, true)
+    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined, axisValues: selection.axisValues || undefined }, undefined, true)
   }
 }
 
