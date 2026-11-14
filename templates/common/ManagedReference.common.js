@@ -14,6 +14,12 @@ exports.transform = function (model) {
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
+  if (showAppliesTo) handleInheritedMembers(model, appliesToOptions);
+  // A type that frameworks build into assemblies of different names lists each of them. Set only then, so
+  // that the model of every other page stays as it is.
+  if (model.assemblies && model.assemblies.length > 1) {
+    model.assembliesText = model.assemblies.map(function (assembly) { return assembly + '.dll'; }).join(', ');
+  }
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
@@ -167,6 +173,17 @@ function handleAppliesTo(vm, parent, options) {
     // A member is only marked when it differs from its type, or every member would carry the same badge.
     vm.showAppliesToBadge = true;
   }
+}
+
+// A member inherited in only some frameworks of the type, as its base type differs, is marked with them.
+function handleInheritedMembers(model, options) {
+  var inheritedIn = model.inheritedMembersAppliesTo || {};
+  (model.inheritedMembers || []).forEach(function (member) {
+    var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
+    // set on every member, so that mustache does not look up the values of the type
+    member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    member.showAppliesToBadge = appliesTo.length > 0;
+  });
 }
 
 function groupChildren(model, category) {
