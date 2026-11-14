@@ -11,6 +11,8 @@ exports.transform = function (model) {
   langs = model.langs;
   var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
   var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
+  // the picker labels frameworks as the page does
+  if (model._enableApiAppliesToPicker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -23,7 +25,10 @@ exports.transform = function (model) {
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
-      if (showAppliesTo) handleAppliesTo(item, model, appliesToOptions);
+      if (showAppliesTo) {
+        handleAppliesTo(item, model, appliesToOptions);
+        setVariantViews(item);
+      }
       else delete item.variants;
     });
   }
@@ -47,6 +52,10 @@ exports.transform = function (model) {
         break;
     }
   }
+
+  // The copies of the type list its children, such as the values of an enum, as the page does: grouped, and each
+  // with what it applies to.
+  if (showAppliesTo) setVariantViews(model);
 
   if (model.summary && !model.description) {
     model.description = model.summary.replace(/<.*?>/gi, '').replace(/(\r\n|\n|\r)/gm, ' ').trim();
@@ -149,16 +158,13 @@ function handleAppliesTo(vm, parent, options) {
     if (variant.syntax) {
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
-      // the value of a field, property or event is labelled as in the API's own section, not as a return value
-      var value = variant.syntax.return || "";
-      variant.syntax.fieldValue = kind === "field" ? value : "";
-      variant.syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
-      variant.syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
-      variant.syntax.return = variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType ? "" : value;
+      setValue(variant.syntax, variant.syntax.return, kind);
     }
   });
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
   vm.hasVariants = vm.variants.length > 0;
+  vm.primaryAppliesToData = "";
+  vm.variantViews = [];
 
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {
@@ -184,6 +190,66 @@ function handleInheritedMembers(model, options) {
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     member.showAppliesToBadge = appliesTo.length > 0;
   });
+}
+
+// Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed: a PDF of
+// one framework needs it whether the site has the picker or not.
+function setVariantViews(vm) {
+  if (!vm.hasVariants || !vm.appliesToData) return;
+  var kind = vm.type ? vm.type.toLowerCase() : "";
+  var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
+  vm.primaryAppliesToData = getAppliesToFrameworks(vm).filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+  vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
+}
+
+// The value of a field, property or event is labelled as in the API's own section, not as a return value.
+function setValue(syntax, value, kind) {
+  value = value || "";
+  syntax.fieldValue = kind === "field" ? value : "";
+  syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
+  syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
+  syntax.return = syntax.fieldValue || syntax.propertyValue || syntax.eventType ? "" : value;
+}
+
+// The API as it is in the frameworks of a variant: its own content, with what the variant records in place.
+function getVariantView(vm, variant, kind, index) {
+  var view = {};
+  for (var key in vm) {
+    if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
+  }
+  // headings of the copy must not repeat the ids of the API's own
+  var suffix = '_variant' + (index + 1);
+  view.id = vm.id + suffix;
+  // nor the ids of what it lists, such as the values of an enum
+  if (vm.children) view.children = vm.children.map(function (child) { return withIdSuffix(child, suffix); });
+  view.appliesToData = variant.appliesToData;
+  view.variantViews = [];
+  if (variant.summary) view.summary = variant.summary;
+  if (variant.remarks) view.remarks = variant.remarks;
+  ['inheritance', 'example', 'exceptions', 'seealso'].forEach(function (field) {
+    if (variant[field].length > 0) view[field] = variant[field];
+  });
+  if (variant.syntax) {
+    var own = vm.syntax || {};
+    var syntax = {
+      content: variant.syntax.content || own.content,
+      parameters: variant.syntax.parameters.length > 0 ? variant.syntax.parameters : (own.parameters || []),
+      typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
+    };
+    setValue(syntax, variant.syntax.return || variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType || own.return, kind);
+    view.syntax = syntax;
+  }
+  return view;
+}
+
+function withIdSuffix(item, suffix) {
+  var copy = {};
+  for (var key in item) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) copy[key] = item[key];
+  }
+  if (copy.id) copy.id = copy.id + suffix;
+  if (copy.children) copy.children = copy.children.map(function (child) { return withIdSuffix(child, suffix); });
+  return copy;
 }
 
 function groupChildren(model, category) {

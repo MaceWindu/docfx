@@ -5,6 +5,7 @@ import AnchorJs from 'anchor-js'
 import { render, html, TemplateResult } from 'lit-html'
 import { breakWordLit, meta, isExternalHref, loc, options } from './helper'
 import { themePicker } from './theme'
+import { appliesToPicker, loadChoices, onSelectionChange } from './appliesTo'
 import { TocNode } from './toc'
 
 export type NavItem = {
@@ -29,6 +30,13 @@ export async function renderNavbar(): Promise<NavItem[]> {
   const { iconLinks } = await options()
   const navItems = await loadNavItems()
   const activeItem = findActiveItem(navItems)
+
+  // The picker needs the table of contents: the navbar does not wait for it, and shows the picker once it is there.
+  let choices: Awaited<ReturnType<typeof loadChoices>> = { frameworks: [] }
+  loadChoices().then(loaded => {
+    choices = loaded
+    return loaded.frameworks.length > 0 ? renderCore() : undefined
+  }).catch(console.error)
 
   const menuItem = item => {
     const current = (item === activeItem ? 'page' : false)
@@ -57,6 +65,7 @@ export async function renderNavbar(): Promise<NavItem[]> {
     const icons = html`
       <form class="icons">
         ${iconLinks?.map(i => html`<a href="${i.href}" title="${i.title}" class="btn border-0"><i class="bi bi-${i.icon}"></i></a>`)}
+        ${appliesToPicker(choices)}
         ${await themePicker(renderCore)}
       </form>`
 
@@ -64,6 +73,7 @@ export async function renderNavbar(): Promise<NavItem[]> {
   }
 
   await renderCore()
+  onSelectionChange(renderCore)
 
   return activeItem ? [activeItem] : []
 
@@ -98,6 +108,11 @@ export function renderBreadcrumb(breadcrumb: (NavItem | TocNode)[]) {
 
 export async function renderInThisArticle() {
   await renderAnchors()
+  updateInThisArticle()
+}
+
+/** Renders "In this article" again, for the headings of the content shown now. */
+export function updateInThisArticle() {
   const affix = document.getElementById('affix')
   if (affix) {
     render(inThisArticle(), affix)
@@ -121,7 +136,8 @@ async function renderAnchors() {
 }
 
 function inThisArticle(): TemplateResult {
-  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3'))
+  // the content of an API for other frameworks is hidden until picked, and has headings of its own
+  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3')).filter(h => !h.closest('[hidden]'))
 
   if (headings.length > 0) {
     return html`
@@ -136,7 +152,7 @@ function inThisArticle(): TemplateResult {
 // The frameworks a member applies to are shown in its heading, but are not part of its name.
 function headingTitle(heading: HTMLHeadingElement): string {
   const title = heading.cloneNode(true) as HTMLHeadingElement
-  title.querySelectorAll('.applies-to').forEach(e => e.remove())
+  title.querySelectorAll('.applies-to, .applies-to-unavailable-badge').forEach(e => e.remove())
   return title.textContent
 }
 

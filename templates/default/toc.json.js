@@ -16,6 +16,11 @@ exports.transform = function (model) {
       model = extension.postTransform(model);
     }
 
+    // the picker labels frameworks as API pages do, on every page of the table of contents
+    if (model._enableApiAppliesToPicker && model._frameworkNames) {
+      model.frameworkNames = model._frameworkNames;
+    }
+
     for (var key in model) {
       if (key[0] === '_') {
         delete model[key]

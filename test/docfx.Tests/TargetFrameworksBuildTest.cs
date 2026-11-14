@@ -107,6 +107,19 @@ public class TargetFrameworksBuildTest : TestBase
                     Strict,
             #endif
                 }
+
+            #if NET8_0
+                /// <summary>Levels on net8.</summary>
+            #else
+                /// <summary>Levels on older frameworks.</summary>
+            #endif
+                public enum Level
+                {
+                    /// <summary>Low everywhere.</summary>
+                    Low,
+                    /// <summary>High everywhere.</summary>
+                    High,
+                }
             }
             """);
     }
@@ -339,6 +352,82 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Theory]
     [Trait("Related", "docfx")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EachVariantIsRenderedAsAWholeForThePickerAndPdf(bool picker)
+    {
+        var options = "\"globalMetadata\": { \"_frameworkNames\": { \"net8.0\": \"Modern\" }" + (picker ? ", \"_enableApiAppliesToPicker\": true" : "") + " },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        // the dropdowns come with the option only, and label frameworks as the page does
+        Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
+        Assert.Equal(picker, Regex.IsMatch(page, "<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">"));
+
+        // a PDF of one framework needs the content of each variant whether the site has the picker or not
+        Assert.Contains("<div class=\"api-contents\">", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+
+        // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.NotEmpty(copy);
+        Assert.Contains("Property Value", copy);
+        Assert.DoesNotContain("Returns", copy);
+
+        // the API's own content applies to the frameworks no variant does
+        Assert.Contains("<div class=\"api-content\" data-applies-to=\"net8.0\">", page);
+
+        // pages other than API pages label frameworks as API pages do, from the table of contents
+        var toc = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, "toc.json"), TestContext.Current.CancellationToken));
+        Assert.Equal(picker ? "Modern" : null, (string)toc["frameworkNames"]?["net8.0"]);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AnEnumValueHasItsDeclarationAndDescriptionForEachVariant()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Mode.html");
+
+        // Strict is 2 on .NET 8 and 1 on .NET Standard 2.0, described differently: the picker swaps both
+        Assert.Contains(
+            "<span class=\"api-contents\"><span class=\"api-content\" data-applies-to=\"net8.0\"><code>Strict = 2</code></span>" +
+            "<span class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden><code>Strict = 1</code></span></span>",
+            page);
+        Assert.Matches(
+            "<dd><div class=\"api-contents\"><div class=\"api-content\" data-applies-to=\"net8.0\">[^<]*<p>Strict on net8\\.</p>\\s*</div>" +
+            "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>[^<]*<p>Strict on older frameworks\\.</p>\\s*</div></div>",
+            page);
+
+        // a value without variants is as before
+        Assert.Matches("<dt id=\"Lib_Mode_Plain\"[^>]*><code>Plain = 0</code></dt>\\s*<dd>[^<]*<p>Plain everywhere\\.</p>\\s*</dd>", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAnEnumListsItsValuesOnce()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Level.html");
+
+        // the enum is described differently on .NET Standard 2.0, so the page has a copy of it for that framework
+        var start = page.IndexOf("<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var copy = page[start..ElementEnd(page, start)];
+        Assert.Contains("Levels on older frameworks.", copy);
+
+        // which lists the values as the page does, once each, with ids of its own
+        Assert.Equal(1, Regex.Count(copy, "<h2 "));
+        Assert.Equal(1, Regex.Count(copy, "<dt id=\"Lib_Level_Low_variant1\""));
+        Assert.Equal(1, Regex.Count(copy, "<dt id=\"Lib_Level_High_variant1\""));
+        Assert.Equal(1, Regex.Count(page, "id=\"Lib_Level_Low\""));
+
+        // without the variants of the enum under each value
+        Assert.Equal(1, Regex.Count(page, "api-variants-heading"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
     [InlineData(false, "<strong>Version 1</strong> (.NET 8), <strong>Version 2</strong> (.NET 8)", "<strong>Version 1</strong> (.NET 8)")]
     [InlineData(true, "<strong>Version 1</strong>, <strong>Version 2</strong>", "<strong>Version 1</strong>")]
     public async Task AnAxisIsShownWithTheLabelsOfItsValues(bool hideFrameworks, string appliesTo, string variantLabel)
@@ -385,16 +474,26 @@ public class TargetFrameworksBuildTest : TestBase
                 }
               ],
               "build": {
-                "content": [ { "files": [ "api/**.yml" ] } ],
+                "content": [ { "files": [ "api/**.yml", "toc.yml" ] } ],
                 "template": [ "default", "modern" ],
                 "globalMetadata": { "_disableApiAppliesToFrameworks": {{(hideFrameworks ? "true" : "false")}} },
                 "dest": "_site"
               }
             }
             """, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_projectFolder, "toc.yml"), """
+            - name: API
+              href: api/toc.yml
+            """, TestContext.Current.CancellationToken);
 
         await DotnetApiCatalog.GenerateManagedReferenceYamlFiles(configPath);
         await Docset.Build(configPath);
+
+        // a table of contents that includes the API one drops the axis of its root, and keeps that of its entries
+        var toc = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(_projectFolder, "_site", "toc.json"), TestContext.Current.CancellationToken));
+        var api = toc["items"].Single(i => (string)i["name"] == "API");
+        Assert.Equal("Version", (string)api["items"].Single()["axis"]["name"]);
+        Assert.Equal(["v1", "v2"], api["items"].Single()["axis"]["values"].Select(v => (string)v["id"]));
 
         var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
         Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
@@ -403,7 +502,45 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
     }
 
-    private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+    /// <returns>The page as a reader sees it, without the content kept hidden for the picker and PDFs.</returns>
+    private static async Task<string> Page(string site, string name) => WithoutHiddenContent(await RawPage(site, name));
+
+    private static Task<string> RawPage(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+
+    private static string WithoutHiddenContent(string page)
+    {
+        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" data-search-ignore hidden>");
+        for (var match = hidden.Match(page); match.Success; match = hidden.Match(page))
+        {
+            page = page[..match.Index] + page[ElementEnd(page, match.Index)..];
+        }
+
+        return page;
+    }
+
+    /// <returns>The end of the &lt;div&gt; at <paramref name="start"/>: after the &lt;/div&gt; that balances it.</returns>
+    private static int ElementEnd(string page, int start)
+    {
+        var depth = 1;
+        var end = start + "<div".Length;
+        while (depth > 0)
+        {
+            var open = page.IndexOf("<div", end, StringComparison.Ordinal);
+            var close = page.IndexOf("</div>", end, StringComparison.Ordinal);
+            if (open >= 0 && open < close)
+            {
+                depth++;
+                end = open + "<div".Length;
+            }
+            else
+            {
+                depth--;
+                end = close + "</div>".Length;
+            }
+        }
+
+        return end;
+    }
 
     /// <returns>The variant with this declaration, up to the heading of the next member.</returns>
     private static string VariantOf(string page, string declaration)

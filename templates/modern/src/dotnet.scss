@@ -137,4 +137,17 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
       display: block;
       height: 0px;
   }
+
+  // a member that does not exist in the framework or axis value the reader picked
+  .applies-to-unavailable:not(h3) {
+    opacity: .5;
+  }
+
+  h3.applies-to-unavailable {
+    color: var(--bs-secondary-color);
+  }
+
+  .applies-to-banner {
+    font-size: 14px;
+  }
 }

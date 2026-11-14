@@ -196,7 +196,7 @@ Documentation that one framework has and another lacks, or that differs only in 
 
 Projects that build the same assembly against different versions of a dependency, one project per version, can be documented as one set of pages too, with [`axes`](../reference/docfx-json-reference.md#axes).
 
-Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. An API is identified by its UID, so a type a project defines only for some frameworks, such as a polyfill, gets one page that links to it from every framework, including those where the type comes from the framework itself. The labels of frameworks can be changed with the `_frameworkNames` template option.
+Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. An API is identified by its UID, so a type a project defines only for some frameworks, such as a polyfill, gets one page that links to it from every framework, including those where the type comes from the framework itself. The labels of frameworks can be changed with the `_frameworkNames` template option, and the [`_enableApiAppliesToPicker`](../reference/docfx-json-reference.md#_enableapiappliestopicker) template option lets readers pick a framework or axis value to see the API pages for it.
 
 ## Generate from source code
 

@@ -49,6 +49,7 @@ Name         | Type    | Description
 `_disableApiAppliesTo`  | bool    | Whether to show which target frameworks an API applies to.
 `_disableApiAppliesToFrameworks` | bool | Whether to show the frameworks of each axis value an API applies to.
 `_frameworkNames`       | object  | The names to show for target frameworks, by framework.
+`_enableApiAppliesToPicker` | bool | Whether to let readers pick a target framework or axis value, and show API pages for it.
 `_googleAnalyticsTagId` | string  | Enables Google Analytics web traffic analysis.
 `_lang`                  | string  | Primary language of the page. If unset, the `<html>` tag will not have `lang` property.
 `_layout`                | string  | Determines the layout of the page. Supported values are `landing` and `chromeless`.

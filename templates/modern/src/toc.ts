@@ -4,10 +4,9 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
+import { Selection, Toc, TocEntry, entrySelection, fetchToc, getChoices, getSelection, isEntryShown, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
 
-export type TocNode = {
-  name?: string
-  href?: string
+export type TocNode = TocEntry & {
   expanded?: boolean
   items?: TocNode[]
 }
@@ -24,7 +23,9 @@ export async function renderToc(): Promise<TocNode[]> {
   const disableTocFilter = meta('docfx:disabletocfilter') === 'true'
 
   const tocUrl = new URL(tocrel.replace(/.html$/gi, '.json'), window.location.href)
-  const { items, pdf, pdfFileName } = await (await fetch(tocUrl)).json()
+  const toc = await fetchToc(tocUrl) as Toc & { items: TocNode[], pdf?: boolean, pdfFileName?: string }
+  const { items, pdf, pdfFileName } = toc
+  const picker = isPickerEnabled()
 
   const tocFilterUrl = disableTocFilter ? '' : (localStorage?.getItem('tocFilterUrl') || '')
   let tocFilter = disableTocFilter ? '' : (localStorage?.getItem('tocFilter') || '')
@@ -44,6 +45,9 @@ export async function renderToc(): Promise<TocNode[]> {
   const tocContainer = document.getElementById('toc')
   if (tocContainer) {
     renderToc()
+    if (picker) {
+      onSelectionChange(renderToc)
+    }
 
     const activeElements = tocContainer.querySelectorAll('li.active')
     const lastActiveElement = activeElements[activeElements.length - 1]
@@ -57,10 +61,24 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 
   if (selectedNodes.length > 0) {
-    renderNextArticle(items, selectedNodes[0])
+    const keep = picker ? (node: TocEntry) => activeNodes.includes(node) : () => true
+    const renderNext = () => renderNextArticle(shownEntries(items, selection(), frameworks(), keep), selectedNodes[0])
+    renderNext()
+    if (picker) {
+      onSelectionChange(renderNext)
+    }
   }
 
   return activeNodes.slice(0, -1)
+
+  function frameworks(): string[] {
+    return getChoices(toc, activeNodes).frameworks
+  }
+
+  // the selection at the root; an entry with an axis of its own has the value picked for that axis below it
+  function selection(): Selection {
+    return picker ? getSelection(toc.axis, frameworks()) : {}
+  }
 
   function initTocNodes(node: TocNode): boolean {
     let active
@@ -95,20 +113,26 @@ export async function renderToc(): Promise<TocNode[]> {
   function renderToc() {
     render(html`
       ${renderTocFilter()}
-      <div class="flex-fill overflow-y-auto">${renderTocNodes(items) || renderNoFilterResult()}</div>
+      <div class="flex-fill overflow-y-auto">${renderTocNodes(items, selection()) || renderNoFilterResult()}</div>
       ${renderDownloadPdf()}`, tocContainer)
   }
 
-  function renderTocNodes(nodes: TocNode[]): TemplateResult {
+  function renderTocNodes(nodes: TocNode[], selection: Selection): TemplateResult {
     const result = nodes.map(node => {
       const { href, name, items, expanded } = node
       if (!name) {
         return null
       }
 
+      // APIs that do not exist in what the reader picked are left out, except the page being read and its parents
+      const own = picker ? entrySelection(node, selection, frameworks()) : selection
+      if (!activeNodes.includes(node) && !isEntryShown(node, own)) {
+        return null
+      }
+
       const isLeaf = !items || items.length <= 0
 
-      const children = isLeaf ? null : renderTocNodes(items)
+      const children = isLeaf ? null : renderTocNodes(items, own)
       if (tocFilter !== '' && !children && !name.toLowerCase().includes(tocFilter.toLowerCase())) {
         return null
       }
@@ -163,35 +187,19 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 }
 
-function renderNextArticle(items: TocNode[], node: TocNode) {
+/** Links the articles before and after `node` among the entries with a link that the table of contents shows. */
+function renderNextArticle(tocNodes: TocEntry[], node: TocEntry) {
   const nextArticle = document.getElementById('nextArticle')
   if (!nextArticle) {
     return
   }
 
-  const tocNodes = flattenTocNodesWithHref(items)
   const i = tocNodes.findIndex(n => n === node)
   const prev = tocNodes[i - 1]
   const next = tocNodes[i + 1]
-  if (!prev && !next) {
-    return
-  }
 
   const prevButton = prev ? html`<div class="prev"><span><i class='bi bi-chevron-left'></i> ${loc('prevArticle')}</span> <a href="${prev.href}" rel="prev">${breakWordLit(prev.name)}</a></div>` : null
   const nextButton = next ? html`<div class="next"><span>${loc('nextArticle')} <i class='bi bi-chevron-right'></i></span> <a href="${next.href}" rel="next">${breakWordLit(next.name)}</a></div>` : null
 
-  render(html`${prevButton} ${nextButton}`, nextArticle)
-
-  function flattenTocNodesWithHref(items: TocNode[]) {
-    const result = []
-    for (const item of items) {
-      if (item.href) {
-        result.push(item)
-      }
-      if (item.items) {
-        result.push(...flattenTocNodesWithHref(item.items))
-      }
-    }
-    return result
-  }
+  render(prev || next ? html`${prevButton} ${nextButton}` : html``, nextArticle)
 }
