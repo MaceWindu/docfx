@@ -34,6 +34,7 @@ public class TargetFrameworksBuildTest : TestBase
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
                 <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+                <AssemblyName Condition="'$(TargetFramework)' == 'netstandard2.0'">Lib.Legacy</AssemblyName>
                 <GenerateDocumentationFile>true</GenerateDocumentationFile>
               </PropertyGroup>
             </Project>
@@ -41,6 +42,16 @@ public class TargetFrameworksBuildTest : TestBase
         File.WriteAllText(Path.Combine(folder, "Lib.cs"), """
             namespace Lib
             {
+                public class Base
+                {
+                    public void Everywhere() { }
+            #if NET8_0
+                    public void OnlyNet8Base() { }
+            #endif
+                }
+
+                public class Child : Base { }
+
                 public class Shared
                 {
                     public int Everywhere { get; set; }
@@ -123,6 +134,32 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
         Assert.Contains(string.Format(Badge, Net8), page);
         Assert.DoesNotContain(string.Format(Badge, Both), page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AMemberInheritedInSomeFrameworksIsMarkedWithThem(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Child.html");
+
+        Assert.Matches("Base\\.OnlyNet8Base\\(\\)</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span></div>", page);
+        Assert.DoesNotMatch("Base\\.Everywhere\\(\\)</a>\\s*<span", page);
+        Assert.DoesNotMatch("object\\.ToString\\(\\)</a>\\s*<span", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task ATypeBuiltIntoAssembliesOfDifferentNamesListsEach(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+
+        Assert.Contains("Lib.dll, Lib.Legacy.dll", await Page(site, "Lib.Shared.html"));
+        Assert.DoesNotContain("Lib.Legacy.dll", await Page(site, "Lib.OnlyNet8.html"));
     }
 
     [Fact]

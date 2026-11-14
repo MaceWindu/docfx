@@ -103,6 +103,22 @@ internal static partial class TargetFrameworkVariants
         primary.Implements = Union(primary.Implements, other.Implements);
         primary.InheritedMembers = Union(primary.InheritedMembers, other.InheritedMembers);
         primary.ExtensionMethods = Union(primary.ExtensionMethods, other.ExtensionMethods);
+        // A framework can build a type into an assembly of its own name.
+        primary.AssemblyNameList = Union(primary.AssemblyNameList, other.AssemblyNameList);
+
+        // A member inherited in only some frameworks, as its base type differs, is marked with them on the page.
+        foreach (var uid in other.InheritedMembers ?? [])
+        {
+            primary.InheritedMembersAppliesTo ??= [];
+            if (primary.InheritedMembersAppliesTo.TryGetValue(uid, out var frameworks))
+            {
+                frameworks.Add(framework);
+            }
+            else
+            {
+                primary.InheritedMembersAppliesTo[uid] = [framework];
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(primary.Summary))
         {

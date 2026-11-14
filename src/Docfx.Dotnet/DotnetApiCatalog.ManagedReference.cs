@@ -223,6 +223,15 @@ partial class DotnetApiCatalog
     internal static void TagAppliesTo(MetadataItem item, string framework)
     {
         item.AppliesTo = [framework];
+        if (item.InheritedMembers is { Count: > 0 } inherited)
+        {
+            item.InheritedMembersAppliesTo = [];
+            foreach (var uid in inherited)
+            {
+                item.InheritedMembersAppliesTo.TryAdd(uid, [framework]);
+            }
+        }
+
         foreach (var child in item.Items ?? [])
         {
             TagAppliesTo(child, framework);
@@ -287,12 +296,21 @@ partial class DotnetApiCatalog
                 }
             }
 
+            // A value of an enum only this framework has goes after the one it follows here, so that the
+            // declaring order is that of the source. Other children are appended: the order of overloads is
+            // that of the frameworks, primary first.
+            var isEnum = existingNode.Type is MemberType.Enum;
+            var insertAt = 0;
             foreach (var item in node.Items ?? [])
             {
                 if (MergeNode(item))
                 {
                     existingNode.Items ??= [];
-                    existingNode.Items.Add(item);
+                    existingNode.Items.Insert(isEnum ? insertAt++ : existingNode.Items.Count, item);
+                }
+                else if (isEnum && existingNode.Items?.FindIndex(i => i.Name == item.Name) is int index and >= 0)
+                {
+                    insertAt = index + 1;
                 }
             }
             return false;

@@ -481,7 +481,7 @@ Unlike the `TargetFramework` property in [`properties`](#properties), it applies
 
 ### `targetFrameworks`
 
-The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members and extension methods are combined.
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and marked with them on the page.
 
 ```json
 {
@@ -496,6 +496,8 @@ The target frameworks to document together, or `"*"` for every framework a proje
 It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
+
+An API is identified by its UID alone. A type that the project defines in some frameworks and takes from the framework in others, such as a polyfill of a type newer frameworks include, therefore gets one page, which applies to the frameworks that define it, and references to it link to that page in every framework, not to the framework's documentation where it comes from the framework.
 
 ### `defaultFramework`
 
@@ -538,7 +540,7 @@ An axis besides the target framework along which the projects of this metadata i
 }
 ```
 
-One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value. A project that matches no value is reported as an `InvalidAxis` error and not documented.
+One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value: as without an axis, a project that does not target it is documented at its default framework, with a `TargetFrameworkNotFound` warning. A project that matches no value is reported as an `InvalidAxis` error and not documented; for the projects of a solution, which commonly holds tools and tests that are not built against the dependency, that is logged as information.
 
 Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
 

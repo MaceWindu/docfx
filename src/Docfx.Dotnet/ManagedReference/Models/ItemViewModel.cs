@@ -356,6 +356,16 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> InheritedMembers { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="InheritedMembers"/> is inherited in, for those inherited in only
+    /// some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "inheritedMembersAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("inheritedMembersAppliesTo")]
+    [JsonPropertyName("inheritedMembersAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> InheritedMembersAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.ExtensionMethods)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children
     [JsonProperty(Constants.PropertyName.ExtensionMethods)]

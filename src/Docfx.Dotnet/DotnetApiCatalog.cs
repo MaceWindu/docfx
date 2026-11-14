@@ -92,10 +92,13 @@ public static partial class DotnetApiCatalog
                 frameworks = null;
             }
 
+            // Named after what the entry sets, which with an axis alone is not `targetFrameworks`.
+            var merged = config.Axis is not null ? "'axes'" : "'targetFrameworks' with more than one framework";
+
             if (frameworks is not null && config.OutputFormat is not MetadataOutputFormat.Mref)
             {
                 Logger.LogError(
-                    $"'targetFrameworks' with more than one framework is only supported by the 'mref' output format, not '{config.OutputFormat}'.",
+                    $"{merged} is only supported by the 'mref' output format, not '{config.OutputFormat}'.",
                     code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
                 return;
             }
@@ -104,7 +107,7 @@ public static partial class DotnetApiCatalog
             if (frameworks is not null && assemblies.Any(a => !frameworks.ContainsKey(a.compilation)))
             {
                 Logger.LogError(
-                    "'targetFrameworks' with more than one framework applies to project and solution input only. "
+                    $"{merged} applies to project and solution input only. "
                     + "Document source files and assemblies in a metadata item of their own.",
                     code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
                 return;
@@ -201,20 +204,6 @@ public static partial class DotnetApiCatalog
 
         var targetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim();
 
-        // With an axis, one framework is still documented for each of its values, which are merged: a list of one.
-        if (axis is not null && targetFramework is not null)
-        {
-            if (targetFrameworks is not null)
-            {
-                Logger.LogWarning(
-                    "Both 'targetFramework' and 'targetFrameworks' are set. They are mutually exclusive, 'targetFrameworks' is ignored.",
-                    code: WarningCodes.Metadata.ConflictingTargetFramework);
-            }
-
-            targetFrameworks = [targetFramework];
-            targetFramework = null;
-        }
-
         return new ExtractMetadataConfig
         {
             ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
@@ -225,8 +214,8 @@ public static partial class DotnetApiCatalog
             MSBuildProperties = configModel?.Properties,
             TargetFramework = targetFramework,
             // An axis tells apart projects that would otherwise be documented as one, so every framework
-            // of each of them is documented unless the frameworks are given.
-            TargetFrameworks = targetFrameworks ?? (axis is null ? null : ["*"]),
+            // of each of them is documented unless the framework or frameworks are given.
+            TargetFrameworks = targetFrameworks ?? (axis is null || targetFramework is not null ? null : ["*"]),
             DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
             VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
             Axis = axis,

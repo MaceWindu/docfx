@@ -190,13 +190,13 @@ If a project listed in `src` does not target the requested framework, or does no
 }
 ```
 
-Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
+Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them, and so is an inherited member that is inherited in fewer frameworks. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
 
 Documentation that one framework has and another lacks, or that differs only in whitespace, is not shown as a difference. Inherited documentation is the common case: the reference assemblies of older frameworks often have none. [`variantIgnore`](../reference/docfx-json-reference.md#variantignore) leaves out attribute or documentation differences altogether.
 
 Projects that build the same assembly against different versions of a dependency, one project per version, can be documented as one set of pages too, with [`axes`](../reference/docfx-json-reference.md#axes).
 
-Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. The labels of frameworks can be changed with the `_frameworkNames` template option.
+Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. An API is identified by its UID, so a type a project defines only for some frameworks, such as a polyfill, gets one page that links to it from every framework, including those where the type comes from the framework itself. The labels of frameworks can be changed with the `_frameworkNames` template option.
 
 ## Generate from source code
 

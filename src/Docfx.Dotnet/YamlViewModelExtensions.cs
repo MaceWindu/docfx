@@ -268,6 +268,29 @@ internal static class YamlViewModelExtensions
             .ToList();
     }
 
+    /// <summary>
+    /// The frameworks of the inherited members inherited in only some of the frameworks of <paramref name="model"/>,
+    /// in the order of its own; a member inherited in all of them is not listed, as it needs no mark.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToInheritedMembersAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        if (model.InheritedMembersAppliesTo is not { } inheritedIn || model.AppliesTo is not { } frameworks)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, List<AppliesToViewModel>>();
+        foreach (var uid in model.InheritedMembers ?? [])
+        {
+            if (inheritedIn.TryGetValue(uid, out var units) && units.Count < frameworks.Count)
+            {
+                result[uid] = ToAppliesToViewModel(frameworks.Where(f => units.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList(), axis);
+            }
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
     public static ItemViewModel ToItemViewModel(this MetadataItem model, ExtractMetadataConfig config)
     {
         if (model == null)
@@ -307,6 +330,7 @@ internal static class YamlViewModelExtensions
             Inheritance = model.Inheritance,
             Implements = model.Implements,
             InheritedMembers = model.InheritedMembers,
+            InheritedMembersAppliesTo = ToInheritedMembersAppliesTo(model, config.Axis),
             ExtensionMethods = model.ExtensionMethods,
             Attributes = model.Attributes,
         };

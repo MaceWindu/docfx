@@ -7,7 +7,7 @@
 
 <div class="facts text-secondary">
   <dl><dt>{{__global.namespace}}</dt><dd>{{{namespace.specName.0.value}}}</dd></dl>
-  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{assemblies.0}}.dll</dd></dl>{{/assemblies.0}}{{#showAppliesTo}}<dl><dt>{{__global.appliesTo}}</dt><dd>{{>partials/appliesTo}}</dd></dl>{{/showAppliesTo}}
+  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{#assembliesText}}{{.}}{{/assembliesText}}{{^assembliesText}}{{assemblies.0}}.dll{{/assembliesText}}</dd></dl>{{/assemblies.0}}{{#showAppliesTo}}<dl><dt>{{__global.appliesTo}}</dt><dd>{{>partials/appliesTo}}</dd></dl>{{/showAppliesTo}}
 </div>
 
 <div class="markdown summary">{{{summary}}}</div>
@@ -108,7 +108,7 @@
   {{^definition}}
     <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>
   {{/definition}}
-  </div>
+  {{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/inheritedMembers}}
 {{#inheritedMembers.0}}
 </dl>

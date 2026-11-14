@@ -82,6 +82,11 @@ public class TargetFrameworkHelperTest
     [InlineData("netcoreapp3.1", "NETCOREAPP", "NETCOREAPP3_1")]
     [InlineData("net462", "NETFRAMEWORK", "NET462", "NET461_OR_GREATER")]
     [InlineData(null, "NET", "NETFRAMEWORK", "DEBUG", "NET8_0_OR_GREATER")]
+    // the platform is kept, as a multi-targeted project's name keeps it, but no symbol names its version
+    [InlineData("net8.0-windows", "NET", "NET8_0", "WINDOWS", "WINDOWS10_0_19041_0_OR_GREATER")]
+    // symbols are case-sensitive: a project's own symbols are not the SDK's
+    [InlineData("net8.0", "NET", "NET8_0", "Windows")]
+    [InlineData(null, "net8_0")]
     public void GetTargetFrameworkFromSymbols(string expected, params string[] symbols)
     {
         TargetFrameworkHelper.GetTargetFrameworkFromSymbols(symbols).Should().Be(expected);
