@@ -177,6 +177,29 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
+    public async Task ANamespacePageMarksTheTypesItListsWithTheirFrameworks()
+    {
+        // so that a PDF of one framework, and the picker, can leave out the types that do not exist in it
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.html");
+
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a class=\"xref\" href=\"Lib.OnlyNet8.html\">", page);
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0 netstandard2.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.html\">", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ATypePageWithMembersOnPagesOfTheirOwnMarksTheMembersItLists()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        var page = await Page(site, "Lib.Shared.html");
+
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.OnlyNet8Member.html#", page);
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0 netstandard2.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.Everywhere.html#", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
     public async Task AnOverloadPageAppliesWhereverAnyOverloadDoes()
     {
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");

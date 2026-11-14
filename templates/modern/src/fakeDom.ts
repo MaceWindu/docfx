@@ -99,6 +99,15 @@ export class FakeElement {
     return this.attributes.has(name)
   }
 
+  toggleAttribute(name: string, force: boolean): boolean {
+    if (force) {
+      this.setAttribute(name, '')
+    } else {
+      this.removeAttribute(name)
+    }
+    return force
+  }
+
   appendChild(child: FakeElement): FakeElement {
     child.remove()
     child.parentElement = this
@@ -244,6 +253,7 @@ export function installDom(markup: string, url = 'https://example.org/docs/api/L
 
   const document = {
     documentElement: root,
+    get body() { return root.querySelector('body') || root },
     querySelectorAll: (selector: string) => root.querySelectorAll(selector),
     querySelector: (selector: string) => root.querySelector(selector),
     getElementById: (id: string) => root.querySelectorAll('[id]').find(e => e.id === id) || null,

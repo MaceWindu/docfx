@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Buffers;
@@ -54,11 +54,20 @@ static class PdfBuilder
             => pageTreeMembers.MediaBox ?? MediaBox.Letter;
     }
 
-    class Outline
+    internal class Outline
     {
         public string name { get; init; } = "";
         public string? href { get; init; }
-        public Outline[]? items { get; init; }
+        public Outline[]? items { get; set; }
+
+        /// <summary>The frameworks and axis values the API of this item applies to, from `docfx metadata`.</summary>
+        public AppliesTo[]? appliesTo { get; init; }
+
+        /// <summary>The axis of the API below this item, which `docfx metadata` writes to its top-level items.</summary>
+        public Axis? axis { get; init; }
+
+        public string? pdfFramework { get; init; }
+        public string? pdfAxisValue { get; init; }
 
         public bool pdf { get; init; }
         public string? pdfFileName { get; init; }
@@ -75,6 +84,115 @@ static class PdfBuilder
         public int pdfTocHeadingDepth { get; init; } = 3;
     }
 
+    internal class AppliesTo
+    {
+        public string? version { get; init; }
+        public string[]? frameworks { get; init; }
+    }
+
+    internal class Axis
+    {
+        public string? name { get; init; }
+        public AxisValue[]? values { get; init; }
+    }
+
+    internal class AxisValue
+    {
+        public string? id { get; init; }
+    }
+
+    /// <summary>
+    /// Leaves out of <paramref name="outline"/> the items whose API does not exist in its <c>pdfFramework</c> and
+    /// <c>pdfAxisValue</c>, by the rule the picker of the modern template follows: a framework an API is not
+    /// built for is stood in for by one it is, and an axis value says nothing about an API without that axis, or
+    /// with another one.
+    /// </summary>
+    internal static void LeaveOutUnavailable(Outline outline)
+    {
+        var (framework, value) = (Selected(outline.pdfFramework), Selected(outline.pdfAxisValue));
+        if (framework is null && value is null)
+        {
+            return;
+        }
+
+        // A selection that nothing in the table of contents applies to is most likely a typo, and would leave every
+        // API out of the PDF without saying so.
+        var groups = Descendants(outline).SelectMany(node => node.appliesTo ?? []).ToList();
+        var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
+        if (value is not null && (axes.Count > 0 ? !axes.Any(axis => HasValue(axis, value)) : groups.Count > 0 && !groups.Any(group => group.version == value)))
+        {
+            Logger.LogWarning($"'pdfAxisValue' of '{outline.pdfFileName ?? outline.name}' is '{value}', which is not a value of an axis of its API.");
+        }
+        if (groups.Count > 0 && framework is not null && !groups.Any(group => (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))))
+        {
+            Logger.LogWarning($"'pdfFramework' of '{outline.pdfFileName ?? outline.name}' is '{framework}', which none of its API applies to.");
+        }
+
+        Visit(outline, outline.axis);
+
+        void Visit(Outline node, Axis? axis)
+        {
+            if (node.items is null)
+            {
+                return;
+            }
+
+            var kept = new List<Outline>();
+            foreach (var item in node.items)
+            {
+                var itemAxis = item.axis ?? axis;
+                if (!IsAvailable(item, itemAxis))
+                {
+                    continue;
+                }
+
+                // A heading that only groups other items goes when they all do.
+                var groupsOthers = item.href is null && item.items is { Length: > 0 };
+                Visit(item, itemAxis);
+                if (!groupsOthers || item.items is { Length: > 0 })
+                {
+                    kept.Add(item);
+                }
+            }
+            node.items = [.. kept];
+        }
+
+        bool IsAvailable(Outline node, Axis? axis)
+        {
+            // a table of contents from before axes were written to it names none
+            var valueApplies = value is not null && (axis is null || HasValue(axis, value));
+            return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
+                (!valueApplies || group.version is null || group.version == value) &&
+                (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
+        }
+    }
+
+    /// <summary>
+    /// The script that makes the pages of <paramref name="outline"/> show its framework and axis value, as the
+    /// picker would, or <see langword="null"/> when it sets neither. Pages carry the ids of axis values but not
+    /// their axis, so the script names the values of the axes that have the value, when the outline names its axes.
+    /// </summary>
+    internal static string? GetAppliesToScript(Outline outline)
+    {
+        var (framework, value) = (Selected(outline.pdfFramework), Selected(outline.pdfAxisValue));
+        if (framework is null && value is null)
+        {
+            return null;
+        }
+
+        var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
+        var axisValues = value is null || axes.Count == 0 ? null
+            : axes.Where(axis => HasValue(axis, value)).SelectMany(axis => axis.values!).Select(v => v.id).Distinct().ToArray();
+        return $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value, axisValues })};";
+    }
+
+    private static bool HasValue(Axis axis, string value) => (axis.values ?? []).Any(v => v.id == value);
+
+    private static IEnumerable<Outline> Descendants(Outline node) => (node.items ?? []).SelectMany(item => Descendants(item).Prepend(item));
+
+    // An empty pdfFramework or pdfAxisValue selects nothing, as the template reads it.
+    private static string? Selected(string? option) => string.IsNullOrWhiteSpace(option) ? null : option.Trim();
+
     public static Task Run(BuildJsonConfig config, string configDirectory, string? outputDirectory = null, CancellationToken cancellationToken = default)
     {
         var outputFolder = Path.GetFullPath(Path.Combine(
@@ -88,7 +206,8 @@ static class PdfBuilder
     public static async Task CreatePdf(string outputFolder, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var pdfTocs = GetPdfTocs().ToDictionary(p => p.url, p => p.toc);
+        var pdfTocList = GetPdfTocs().ToList();
+        var pdfTocs = pdfTocList.ToDictionary(p => p.url, p => p.toc);
         if (pdfTocs.Count == 0)
             return;
 
@@ -128,13 +247,33 @@ static class PdfBuilder
         await using var browser = await playwright.Chromium.LaunchAsync();
         await using var context = await browser.NewContextAsync(new() { UserAgent = "docfx/pdf" });
 
-        if (Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT") is { } timeout)
+        var timeout = Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT");
+        if (timeout is not null)
         {
             context.SetDefaultTimeout(int.Parse(timeout));
         }
 
         using var pageLimiter = new SemaphoreSlim(Environment.ProcessorCount, Environment.ProcessorCount);
         var pagePool = new ConcurrentBag<IPage>();
+        var openPages = 0;
+        var checkedPages = new ConcurrentDictionary<(Outline, string), bool>();
+
+        // A PDF for one framework or axis value gets pages of its own: the script that selects them runs on every
+        // page of a context, and the pages of the shared context are reused across PDFs.
+        var outlineContexts = new Dictionary<Outline, (IBrowserContext Context, ConcurrentBag<IPage> Pool)>();
+        foreach (var (_, toc, script) in pdfTocList)
+        {
+            if (script is not null)
+            {
+                var outlineContext = await browser.NewContextAsync(new() { UserAgent = "docfx/pdf" });
+                await outlineContext.AddInitScriptAsync(script);
+                if (timeout is not null)
+                {
+                    outlineContext.SetDefaultTimeout(int.Parse(timeout));
+                }
+                outlineContexts[toc] = (outlineContext, new());
+            }
+        }
         var headerFooterTemplateCache = new ConcurrentDictionary<string, string>();
         var headerFooterPageCache = new ConcurrentDictionary<(string Header, string Footer, PageSize Size, double Width, double Height), Task<byte[]>>();
 
@@ -155,6 +294,16 @@ static class PdfBuilder
 
                 task.Value = task.MaxValue;
                 task.StopTask();
+
+                // Its pages are not used by any other PDF.
+                if (outlineContexts.TryGetValue(toc, out var own))
+                {
+                    while (own.Pool.TryTake(out var drained))
+                    {
+                        Interlocked.Decrement(ref openPages);
+                    }
+                    await own.Context.DisposeAsync();
+                }
             });
         });
 
@@ -185,7 +334,7 @@ static class PdfBuilder
         Logger.LogVerbose($"PDF done in {stopwatch.Elapsed}");
         return;
 
-        IEnumerable<(string url, Outline toc)> GetPdfTocs()
+        IEnumerable<(string url, Outline toc, string? script)> GetPdfTocs()
         {
             var manifestPath = Path.Combine(outputFolder, "manifest.json");
             var manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(File.ReadAllText(manifestPath));
@@ -203,7 +352,12 @@ static class PdfBuilder
 
                 var outline = JsonSerializer.Deserialize<Outline>(File.ReadAllBytes(tocFile));
                 if (outline?.pdf is true)
-                    yield return (jsonOutput.RelativePath, outline);
+                {
+                    // the script names the axes of all of the table of contents, before what is left out
+                    var script = GetAppliesToScript(outline);
+                    LeaveOutUnavailable(outline);
+                    yield return (jsonOutput.RelativePath, outline, script);
+                }
             }
         }
 
@@ -214,10 +368,43 @@ static class PdfBuilder
             return Results.Content(TocHtmlTemplate(new Uri(baseUrl!, url), pdfTocs[url], pageNumbers, headings).ToString(), "text/html", Encoding.UTF8);
         }
 
+        // A page of the pool of a context, or a new one. The pages of a PDF of one framework or axis value are not
+        // used by other PDFs, which run at the same time: an idle page of another pool is closed instead, so that no
+        // more pages are open than can be used at once.
+        async Task<IPage> RentPage(IBrowserContext pageContext, ConcurrentBag<IPage> pool)
+        {
+            if (pool.TryTake(out var pooled))
+            {
+                return pooled;
+            }
+
+            if (Interlocked.Increment(ref openPages) > Environment.ProcessorCount)
+            {
+                foreach (var other in outlineContexts.Values.Select(c => c.Pool).Prepend(pagePool))
+                {
+                    if (other != pool && other.TryTake(out var idle))
+                    {
+                        Interlocked.Decrement(ref openPages);
+                        try
+                        {
+                            await idle.CloseAsync();
+                        }
+                        catch (PlaywrightException)
+                        {
+                            // its context was closed when its PDF was done, which closed the page too
+                        }
+                        break;
+                    }
+                }
+            }
+            return await pageContext.NewPageAsync();
+        }
+
         async Task<(byte[]? bytes, List<HeadingInfo> headings)> PrintPdf(Outline outline, Uri url, int headingDepth)
         {
             await pageLimiter.WaitAsync(cancellationToken);
-            var page = pagePool.TryTake(out var pooled) ? pooled : await context.NewPageAsync();
+            var (pageContext, pool) = outlineContexts.TryGetValue(outline, out var own) ? own : (context, pagePool);
+            var page = await RentPage(pageContext, pool);
             var headings = new List<HeadingInfo>();
 
             try
@@ -260,6 +447,17 @@ static class PdfBuilder
                     }
                 }
 
+                // The page of an API the PDF's framework or axis value does not have, which the table of contents did
+                // not leave out as its entry says nothing of the API, such as an entry with a `uid` or a hand-written one.
+                var pagePath = url.AbsolutePath;
+                if (own.Context is not null && !IsTocPage(url) && checkedPages.TryAdd((outline, pagePath), true)
+                    && await page.EvaluateAsync<bool>("() => !!document.body && document.body.hasAttribute('data-applies-to-unavailable')"))
+                {
+                    Logger.LogWarning(
+                        $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
+                        "but is printed: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
+                }
+
                 // Extract headings from the page if needed
                 if (outline.pdfTocSource == "headings" && headingDepth > 0 && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage))
                 {
@@ -276,7 +474,7 @@ static class PdfBuilder
             }
             finally
             {
-                pagePool.Add(page);
+                pool.Add(page);
                 pageLimiter.Release();
             }
         }
@@ -293,6 +491,11 @@ static class PdfBuilder
                 {
                     var tagName = await element.EvaluateAsync<string>("e => e.tagName");
                     var level = int.Parse(tagName[1].ToString());
+                    // Content the page does not show, such as the members a PDF of one framework leaves out, or
+                    // the content of an API for another framework, is not printed either.
+                    if (await element.EvaluateAsync<bool>("e => !!e.closest('[hidden]')"))
+                        continue;
+
                     var id = await element.GetAttributeAsync("id") ?? "";
                     var text = (await element.InnerTextAsync()).Trim();
 
@@ -328,7 +531,7 @@ static class PdfBuilder
             async Task<byte[]> PrintHeaderFooterCore()
             {
                 await pageLimiter.WaitAsync(cancellationToken);
-                var page = pagePool.TryTake(out var pooled) ? pooled : await context.NewPageAsync();
+                var page = await RentPage(context, pagePool);
 
                 try
                 {

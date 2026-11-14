@@ -10,8 +10,11 @@ import { isExternalHref, isSameURL, loc, meta } from './helper'
  */
 export type Unit = { value?: string, framework: string }
 
-/** What the reader picked. A missing part is "all". */
-export type Selection = { value?: string, framework?: string }
+/**
+ * What the reader picked. A missing part is "all". `axisValues`, the ids of the axis `value` is one of, is set where
+ * a page of another axis can show, as in a PDF of the API of several metadata items.
+ */
+export type Selection = { value?: string, framework?: string, axisValues?: string[] }
 
 /** One entry of `appliesTo` in the table of contents, as written by `docfx metadata`. */
 export type AppliesToGroup = { version?: string, label?: string, frameworks?: string[] }
@@ -123,8 +126,9 @@ export function rank(target: string, framework: string): number {
 }
 
 export function matches(unit: Unit, selection: Selection): boolean {
-  // a value picked for the axis of one part of the docs says nothing about a part without that axis
-  return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
+  // a value picked for the axis of one part of the docs says nothing about a part without that axis, or with another
+  const valueApplies = !!selection.value && unit.value !== undefined && (!selection.axisValues || selection.axisValues.includes(unit.value))
+  return (!valueApplies || unit.value === selection.value) &&
     (!selection.framework || rank(selection.framework, unit.framework) < Infinity)
 }
 
@@ -475,18 +479,38 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
 /**
  * Shows the page for the selection: the content of each API for the framework that stands in best, without the
  * other frameworks' differences; members that do not exist in the selection dimmed; a banner when the API itself
- * does not exist in it.
+ * does not exist in it. In print, for a PDF of one framework, such members are left out instead.
  */
-export function applySelection(selection: Selection, axis?: Axis) {
+export function applySelection(selection: Selection, axis?: Axis, print = false) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
 
+  // the variants listed under "In other frameworks" whose content is shown in place of the API's own
+  const shownInPlace = new Set<Element>()
   document.querySelectorAll('.api-contents').forEach(container => {
     const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content')) as HTMLElement[]
     const chosen = any ? chooseGroup(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : 0
     blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
+    // the copy of each variant follows the API's own content, in the order "In other frameworks" lists them
+    if (chosen > 0) {
+      const shown = variantsAfter(container)[chosen - 1]
+      if (shown) shownInPlace.add(shown)
+    }
   })
-  document.querySelectorAll<HTMLElement>('.api-variants-heading, .api-variant').forEach(e => { e.hidden = any })
+
+  // A framework picked shows its content in place of what differs elsewhere. A value picked alone keeps what differs
+  // in the other frameworks of that value, and says nothing about an API without that axis, or with another.
+  const value: Selection = { value: selection.value, axisValues: selection.axisValues }
+  document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => {
+    e.hidden = !!selection.framework || (!!selection.value && (shownInPlace.has(e) || !isAvailable(parseUnits(e.dataset.appliesTo), value)))
+  })
+  document.querySelectorAll<HTMLElement>('.api-variants-heading').forEach(heading => {
+    const variants: HTMLElement[] = []
+    for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
+      variants.push(e as HTMLElement)
+    }
+    heading.hidden = variants.length > 0 && variants.every(v => v.hidden)
+  })
 
   document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
   document.querySelectorAll('.applies-to-unavailable').forEach(e => e.classList.remove('applies-to-unavailable'))
@@ -499,6 +523,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
+    if (print) {
+      for (const e of memberElements(heading)) {
+        (e as HTMLElement).hidden = true
+      }
+      return
+    }
     const badge = document.createElement('span')
     badge.className = 'applies-to-unavailable-badge badge text-bg-secondary fs-6 fw-normal ms-2'
     badge.textContent = loc('appliesToUnavailable', { selection: label })
@@ -508,13 +538,58 @@ export function applySelection(selection: Selection, axis?: Axis) {
     }
   })
 
+  // the types a namespace page lists
+  document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
+    if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+      if (print) {
+        entry.hidden = true
+      } else {
+        entry.classList.add('applies-to-unavailable')
+      }
+    }
+  })
+
+  // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
+  // namespace page, where the headings of such groups are `h3`s without frameworks of their own.
+  if (print) {
+    document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
+      const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
+      const following: HTMLElement[] = []
+      for (let e = section.nextElementSibling; e && !ends.test(e.tagName); e = e.nextElementSibling) {
+        following.push(e as HTMLElement)
+      }
+      const members = following.flatMap(e => e.matches('h3, dt, dl.jumplist') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
+        section.hidden = true
+        following.forEach(e => { e.hidden = true })
+      }
+    })
+  }
+
+  // A PDF of one framework leaves out the pages of APIs that do not exist in it, by their entries in the table of
+  // contents; `docfx pdf` warns about a page it printed all the same.
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
-  if (title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
+  const unavailable = !!title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)
+  if (print) {
+    document.body?.toggleAttribute('data-applies-to-unavailable', unavailable)
+  } else if (unavailable) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
     title.parentElement.querySelector('.facts')?.after(banner)
   }
+}
+
+/** The elements of "In other frameworks" after the content of an API, one for each variant. */
+function variantsAfter(contents: Element): Element[] {
+  const heading = contents.nextElementSibling
+  const variants: Element[] = []
+  if (heading?.classList.contains('api-variants-heading')) {
+    for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
+      variants.push(e)
+    }
+  }
+  return variants
 }
 
 /**
@@ -531,6 +606,24 @@ export function memberElements(heading: Element): Element[] {
     elements.push(e)
   }
   return elements
+}
+
+declare global {
+  interface Window {
+    /**
+     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, and the ids of
+     * the axis that value is one of, when the table of contents names it.
+     */
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[] }
+  }
+}
+
+/** In a PDF of one framework or axis value, shows the pages for it. */
+export function applyPrintSelection() {
+  const selection = window.docfxAppliesTo
+  if (selection) {
+    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined, axisValues: selection.axisValues || undefined }, undefined, true)
+  }
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */
