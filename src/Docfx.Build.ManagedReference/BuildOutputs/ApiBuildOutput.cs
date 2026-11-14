@@ -186,6 +186,11 @@ public class ApiBuildOutput
     [JsonPropertyName("variants")]
     public List<ApiVariantBuildOutput> Variants { get; set; }
 
+    [YamlMember(Alias = "inheritedMembersAppliesTo")]
+    [JsonProperty("inheritedMembersAppliesTo")]
+    [JsonPropertyName("inheritedMembersAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> InheritedMembersAppliesTo { get; set; }
+
     [YamlMember(Alias = "attributes")]
     [JsonProperty("attributes")]
     [JsonPropertyName("attributes")]
@@ -277,6 +282,7 @@ public class ApiBuildOutput
             Platform = model.Platform,
             AppliesTo = model.AppliesTo,
             Variants = model.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, references, model.SupportedLanguages)).ToList(),
+            InheritedMembersAppliesTo = model.InheritedMembersAppliesTo,
             Attributes = model.Attributes,
             Metadata = model.Metadata.Concat(metadata.Where(p => !model.Metadata.ContainsKey(p.Key))).ToDictionary(p => p.Key, p => p.Value),
         };
