@@ -1246,6 +1246,12 @@ public class TargetFrameworkTest : TestBase
         Assert.Equal(["Bases.Child", "Bases.Derived"], Page("Bases.Base.yml").Items[0].DerivedClasses);
         Assert.Equal(["Bases.Derived"], Page("Bases.OtherBase.yml").Items[0].DerivedClasses);
 
+        // A class that derives from a base in every framework of the base needs no mark either.
+        var derivedFromBase = Page("Bases.Base.yml").Items[0].DerivedClassesAppliesTo;
+        Assert.Equal(["Bases.Derived"], derivedFromBase.Keys);
+        Assert.Equal(["net8.0"], derivedFromBase["Bases.Derived"].Single().Frameworks);
+        Assert.Equal(["netstandard2.0"], Page("Bases.OtherBase.yml").Items[0].DerivedClassesAppliesTo["Bases.Derived"].Single().Frameworks);
+
         // Members inherited in every framework of the type need no mark, and are not listed.
         var derived = Page("Bases.Derived.yml").Items[0].InheritedMembersAppliesTo;
         Assert.Equal(["net8.0"], derived["Bases.Base.Everywhere"].Single().Frameworks);
