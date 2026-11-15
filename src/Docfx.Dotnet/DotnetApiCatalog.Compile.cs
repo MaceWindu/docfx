@@ -38,7 +38,10 @@ partial class DotnetApiCatalog
         }
 
         var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
-        var targetFrameworkOption = config.TargetFramework is not null ? "targetFramework" : config.TargetFrameworks is not null ? "targetFrameworks" : null;
+        var targetFrameworkOption = config.TargetFramework is not null ? "targetFramework"
+            : config.TargetFrameworksFromAxes ? "axes"
+            : config.TargetFrameworks is not null ? "targetFrameworks"
+            : null;
         if (targetFrameworkOption is not null && !hasProjectInput)
         {
             Logger.LogInfo($"'{targetFrameworkOption}' applies to project and solution input only, and this metadata item has none.");

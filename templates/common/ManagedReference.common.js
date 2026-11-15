@@ -9,8 +9,10 @@ exports.transform = function (model) {
   if (!model) return null;
 
   langs = model.langs;
-  var showAppliesTo = !model._disableApiAppliesTo && getAppliesToFrameworks(model).length > 0;
-  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks };
+  var showAppliesTo = getAppliesToFrameworks(model).length > 0;
+  // `_disableApiAppliesTo` hides the labels only: what differs in other frameworks is still shown, and
+  // `data-applies-to`, which a framework picker and a framework PDF read, is still written.
+  var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, hideLabels: !!model._disableApiAppliesTo };
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -167,6 +169,9 @@ function handleAppliesTo(vm, parent, options) {
 
   vm.appliesToData = frameworks.join(' ');
   vm.appliesToGroups = getAppliesToGroups(vm, options);
+  if (options.hideLabels) {
+    return;
+  }
   if (!parent) {
     vm.showAppliesTo = true;
   } else if (frameworks.slice().sort().join(' ') !== getAppliesToFrameworks(parent).sort().join(' ')) {
@@ -183,14 +188,14 @@ function handleInheritedMembers(model, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
     // set on every member, so that mustache does not look up the values of the type
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
-    member.showAppliesToBadge = appliesTo.length > 0;
+    member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   // in the order of the derived classes, which carry no uid
   var derivedIn = model.derivedClassesAppliesTo || [];
   (model.derivedClasses || []).forEach(function (derived, index) {
     var appliesTo = derivedIn[index] || [];
     derived.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
-    derived.showAppliesToBadge = appliesTo.length > 0;
+    derived.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
 }
 

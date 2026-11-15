@@ -519,7 +519,7 @@ The framework of [`targetFrameworks`](#targetframeworks) that provides the conte
 }
 ```
 
-A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements, then the project's first framework. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged.
+A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements. Frameworks that cannot stand in for it follow in the order they first appear across the projects of the entry. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged.
 
 ### `axes`
 
@@ -551,9 +551,9 @@ Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8)
 
 ### `variantIgnore`
 
-The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.
+The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces, and the attributes of parameters and return values, which pages do not show). Nothing else is ignored by default.
 
-- `attributes`: attributes, including the attribute lines of a declaration.
+- `attributes`: the attributes of an API, including the attribute lines of its declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
 - `inheritdoc`: the same, for an API whose documentation is inherited: through `inheritdoc`, or as an override or interface implementation without a comment of its own. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
 
@@ -738,7 +738,7 @@ File(s) specified are not returned in search results
 
 ### `_disableApiAppliesTo`
 
-Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks).
+Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks): the `Applies to` line, and the marks of members, inherited members and derived classes that exist in fewer frameworks. What differs in other frameworks is still shown, and each API's frameworks are still recorded in the HTML as `data-applies-to`.
 
 ### `_disableApiAppliesToFrameworks`
 

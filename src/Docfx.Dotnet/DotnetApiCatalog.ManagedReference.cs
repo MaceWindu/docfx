@@ -20,18 +20,31 @@ partial class DotnetApiCatalog
         // Symbols of different compilations cannot be used together, and each framework is a compilation
         // of its own, so extension methods and the documented assemblies are worked out per framework.
         // The first group provides the content of an API that several share, so the default value of an
-        // axis goes first, then the default framework and those nearest to it; the order is otherwise kept.
-        var frameworkOrder = config.DefaultFramework is { } defaultFramework && frameworks is not null
-            ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))
+        // axis goes first, then the default framework and those nearest to it, or else the frameworks in
+        // the order `targetFrameworks` lists them: the projects are loaded in the order of `src`, so a
+        // project that targets only a later framework would otherwise put it first. `"*"` keeps the order.
+        var frameworkOrder = frameworks is null ? []
+            : config.DefaultFramework is { } defaultFramework
+                ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))
+            : config.TargetFrameworks is { } listed && !listed.Contains(TargetFrameworkHelper.AllTargetFrameworks) ? listed
             : [];
         List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
             ? [assemblies]
             : assemblies
                 .GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase)
                 .OrderBy(group => config.Axis is { } axis && TargetFrameworkAxis.SplitUnit(group.Key).Value != axis.Default ? 1 : 0)
-                .ThenBy(group => frameworkOrder.FindIndex(f => string.Equals(f, TargetFrameworkAxis.SplitUnit(group.Key).Framework, StringComparison.OrdinalIgnoreCase)))
+                .ThenBy(group => FrameworkRank(TargetFrameworkAxis.SplitUnit(group.Key).Framework))
                 .Select(group => group.ToList())
                 .ToList();
+
+        int FrameworkRank(string framework)
+        {
+            // `net8.0-windows` lists the project loaded as `net8.0-windows10.0.19041.0`, and `net8.0-windows7.0`
+            // the one loaded as `net8.0-windows`.
+            var index = frameworkOrder.FindIndex(f => string.Equals(f, framework, StringComparison.OrdinalIgnoreCase)
+                || TargetFrameworkHelper.MatchesFramework(framework, f) || TargetFrameworkHelper.MatchesFramework(f, framework));
+            return index < 0 ? int.MaxValue : index;
+        }
 
         foreach (var group in frameworkGroups)
         {

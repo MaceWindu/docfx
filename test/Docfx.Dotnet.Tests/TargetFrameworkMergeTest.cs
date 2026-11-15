@@ -370,6 +370,21 @@ public class TargetFrameworkMergeTest
         (result["N.T"].Variants is not null).Should().Be(expectVariant);
     }
 
+    [Fact]
+    public void AttributesOfParametersAndReturnValuesAreNotADifference()
+    {
+        // as `NotNullWhen`, public in one framework and missing or internal in another; an attribute whose
+        // constructor is implicitly declared is never recorded, so `A` declares one
+        var result = Merge(
+            ("namespace N { public class A : System.Attribute { public A() { } } public class T { [return: A] public string M([A] string s) => s; } }", First),
+            ("namespace N { public class T { public string M(string s) => s; } }", Second));
+
+        var item = result["N.T.M(System.String)"];
+        item.Syntax.Parameters.Should().ContainSingle().Which.Attributes.Should().NotBeEmpty();
+        item.Syntax.Return.Attributes.Should().NotBeEmpty();
+        item.Variants.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(nameof(VariantIgnore.None), true)]
     [InlineData(nameof(VariantIgnore.Documentation), false)]

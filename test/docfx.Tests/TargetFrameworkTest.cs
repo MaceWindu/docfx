@@ -681,6 +681,18 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworksFirstListedFrameworkProvidesTheContentWhicheverProjectIsLoadedFirst()
+    {
+        var single = CreateProject("Single", "<TargetFramework>net8.0</TargetFramework>", "namespace Single { public class Widget { } }");
+        var project = CreateMultiTargetedProject();
+
+        await Exec(new() { Src = Src(single, project), TargetFrameworks = ["netstandard2.0", "net8.0"] });
+
+        Assert.Equal(["netstandard2.0", "net8.0"], AppliesTo("Lib.Shared.yml"));
+        Assert.Equal("netstandard2.0", Page("Lib.Shared.yml").Items[0].Summary.Trim());
+    }
+
+    [Fact]
     public async Task DefaultFrameworkProvidesTheContentAndIsListedFirst()
     {
         var project = CreateMultiTargetedProject();
@@ -937,6 +949,19 @@ public class TargetFrameworkTest : TestBase
         var shared = Page("Lib.Shared.yml").Items[0];
         Assert.Equal(["v1", "v2"], shared.AppliesTo.Select(a => a.Version));
         Assert.All(shared.AppliesTo, a => Assert.Equal(["net8.0"], a.Frameworks));
+    }
+
+    [Fact]
+    public async Task AnAxisAndATargetFrameworkPropertyTogetherWarnNamingTheAxis()
+    {
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v2")], Properties = new() { ["TargetFramework"] = "net8.0" } });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.StartsWith("Both 'axes' and the MSBuild property 'TargetFramework'", warning.Message);
     }
 
     [Fact]
