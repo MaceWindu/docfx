@@ -226,6 +226,18 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Matches("Child</a>\\s*</div>", page);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ClassesDerivedAndMembersInheritedInSomeFrameworksCarryThem()
+    {
+        // so that a PDF of one framework, and the picker, can leave out those that do not exist in it
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a class=\"xref\" href=\"Lib.Switches.html\">", await Page(site, "Lib.Base.html"));
+        Assert.Matches("<div>\\s*<a class=\"xref\" href=\"Lib.Child.html\">", await Page(site, "Lib.Base.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a class=\"xref\" href=\"Lib.Base.html#Lib_Base_OnlyNet8Base\"", await Page(site, "Lib.Child.html"));
+    }
+
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]

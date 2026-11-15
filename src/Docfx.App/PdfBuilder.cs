@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Buffers;
@@ -103,6 +103,33 @@ static class PdfBuilder
     }
 
     /// <summary>
+    /// The outline of a table of contents, or <see langword="null"/> when it has no <c>pdf: true</c>. Only those are
+    /// read whole: <c>appliesTo</c> and <c>axis</c> have a shape of their own, and a table of contents written by
+    /// hand that uses either name for something else must not stop the PDFs of the others.
+    /// </summary>
+    internal static Outline? ReadPdfOutline(byte[] json, string path)
+    {
+        using (var document = JsonDocument.Parse(json))
+        {
+            if (document.RootElement.ValueKind is not JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("pdf", out var pdf) || pdf.ValueKind is JsonValueKind.False or JsonValueKind.Null)
+            {
+                return null;
+            }
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Outline>(json);
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Leaves out of <paramref name="outline"/> the items whose API does not exist in its <c>pdfFramework</c> and
     /// <c>pdfAxisValue</c>, by the rule the picker of the modern template follows: a framework an API is not
     /// built for is stood in for by one it is, and an axis value says nothing about an API without that axis, or
@@ -120,16 +147,30 @@ static class PdfBuilder
         // API out of the PDF without saying so.
         var groups = Descendants(outline).SelectMany(node => node.appliesTo ?? []).ToList();
         var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
+        var warned = false;
         if (value is not null && (axes.Count > 0 ? !axes.Any(axis => HasValue(axis, value)) : groups.Count > 0 && !groups.Any(group => group.version == value)))
         {
             Logger.LogWarning($"'pdfAxisValue' of '{outline.pdfFileName ?? outline.name}' is '{value}', which is not a value of an axis of its API.");
+            warned = true;
         }
         if (groups.Count > 0 && framework is not null && !groups.Any(group => (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))))
         {
             Logger.LogWarning($"'pdfFramework' of '{outline.pdfFileName ?? outline.name}' is '{framework}', which none of its API applies to.");
+            warned = true;
         }
 
+        // Per axis that has the value, whether any of its API of that value is kept: a framework and a value that
+        // each exist, but never together, would leave all of it out without saying so.
+        var keptOfValue = new Dictionary<string, bool>();
         Visit(outline, outline.axis);
+        foreach (var (axisName, anyKept) in keptOfValue)
+        {
+            if (!anyKept && !warned)
+            {
+                var api = axisName.Length > 0 ? $"the API of axis '{axisName}'" : "its API";
+                Logger.LogWarning($"'pdfFramework' '{framework}' and 'pdfAxisValue' '{value}' of '{outline.pdfFileName ?? outline.name}' leave out all of {api} that has '{value}': none of it exists in both.");
+            }
+        }
 
         void Visit(Outline node, Axis? axis)
         {
@@ -142,7 +183,13 @@ static class PdfBuilder
             foreach (var item in node.items)
             {
                 var itemAxis = item.axis ?? axis;
-                if (!IsAvailable(item, itemAxis))
+                var available = IsAvailable(item, itemAxis);
+                if (framework is not null && value is not null && ValueApplies(itemAxis) && item.appliesTo?.Any(group => group.version == value) is true)
+                {
+                    var key = itemAxis?.name ?? "";
+                    keptOfValue[key] = keptOfValue.GetValueOrDefault(key) || available;
+                }
+                if (!available)
                 {
                     continue;
                 }
@@ -158,10 +205,12 @@ static class PdfBuilder
             node.items = [.. kept];
         }
 
+        // a table of contents from before axes were written to it names none
+        bool ValueApplies(Axis? axis) => value is not null && (axis is null || HasValue(axis, value));
+
         bool IsAvailable(Outline node, Axis? axis)
         {
-            // a table of contents from before axes were written to it names none
-            var valueApplies = value is not null && (axis is null || HasValue(axis, value));
+            var valueApplies = ValueApplies(axis);
             return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
                 (!valueApplies || group.version is null || group.version == value) &&
                 (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
@@ -171,9 +220,12 @@ static class PdfBuilder
     /// <summary>
     /// The script that makes the pages of <paramref name="outline"/> show its framework and axis value, as the
     /// picker would, or <see langword="null"/> when it sets neither. Pages carry the ids of axis values but not
-    /// their axis, so the script names the values of the axes that have the value, when the outline names its axes.
+    /// their axis, so the script names the values of the axes that have the value, when the outline names its axes,
+    /// and the pages of the axes that do not have it, which the value says nothing about, as on the C# side: their
+    /// own values may have the same ids as those of the axis of the value. <paramref name="tocPath"/> is the path of
+    /// the table of contents in the site, which its links are relative to.
     /// </summary>
-    internal static string? GetAppliesToScript(Outline outline)
+    internal static string? GetAppliesToScript(Outline outline, string tocPath = "toc.json")
     {
         var (framework, value) = (Selected(outline.pdfFramework), Selected(outline.pdfAxisValue));
         if (framework is null && value is null)
@@ -184,7 +236,31 @@ static class PdfBuilder
         var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
         var axisValues = value is null || axes.Count == 0 ? null
             : axes.Where(axis => HasValue(axis, value)).SelectMany(axis => axis.values!).Select(v => v.id).Distinct().ToArray();
-        return $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value, axisValues })};";
+        var otherAxisPages = value is null || axes.Count == 0 ? null
+            : PagesWithAxis(outline, outline.axis)
+                .Where(page => !HasValue(page.Axis, value))
+                .Select(page => SitePath(tocPath, page.Href))
+                .OfType<string>()
+                .Distinct()
+                .ToArray();
+        return $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value, axisValues, otherAxisPages = otherAxisPages is { Length: > 0 } ? otherAxisPages : null })};";
+
+        static IEnumerable<(string Href, Axis Axis)> PagesWithAxis(Outline node, Axis? axis) =>
+            (node.items ?? []).SelectMany(item =>
+            {
+                var itemAxis = item.axis ?? axis;
+                IEnumerable<(string Href, Axis Axis)> own = item.href is not null && itemAxis is not null ? [(item.href, itemAxis)] : [];
+                return own.Concat(PagesWithAxis(item, itemAxis));
+            });
+    }
+
+    // The path of the page a link of the table of contents at `tocPath` goes to, as the page's `location.pathname`
+    // has it; none for a link to another site.
+    private static string? SitePath(string tocPath, string href)
+    {
+        var root = new Uri("http://localhost/");
+        var url = new Uri(new Uri(root, tocPath.Replace('\\', '/')), href);
+        return url.Scheme == root.Scheme && url.Authority == root.Authority ? url.AbsolutePath : null;
     }
 
     private static bool HasValue(Axis axis, string value) => (axis.values ?? []).Any(v => v.id == value);
@@ -380,11 +456,11 @@ static class PdfBuilder
                 if (!File.Exists(tocFile))
                     continue;
 
-                var outline = JsonSerializer.Deserialize<Outline>(File.ReadAllBytes(tocFile));
+                var outline = ReadPdfOutline(File.ReadAllBytes(tocFile), jsonOutput.RelativePath);
                 if (outline?.pdf is true)
                 {
                     // the script names the axes of all of the table of contents, before what is left out
-                    var script = GetAppliesToScript(outline);
+                    var script = GetAppliesToScript(outline, jsonOutput.RelativePath);
                     LeaveOutUnavailable(outline);
                     yield return (jsonOutput.RelativePath, outline, script);
                 }

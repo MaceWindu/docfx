@@ -750,12 +750,18 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
   // as a base type differs, and
   // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
-    list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
-      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)) {
+    const entries = Array.from(list.querySelectorAll<HTMLElement>('dd div'))
+    entries.filter(entry => entry.dataset.appliesTo && !isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)).forEach(entry => {
+      if (print) {
+        entry.hidden = true
+      } else {
         entry.classList.add('applies-to-unavailable')
         entry.appendChild(unavailableBadge(label, true))
       }
     })
+    if (print && entries.length > 0 && entries.every(entry => entry.hidden)) {
+      list.hidden = true
+    }
   })
 
   // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
@@ -959,10 +965,11 @@ export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'
 declare global {
   interface Window {
     /**
-     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, and the ids of
-     * the axis that value is one of, when the table of contents names it.
+     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, the ids of the
+     * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
+     * not have the value, whose own values may have the same ids.
      */
-    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[] }
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[] }
   }
 }
 
@@ -970,7 +977,13 @@ declare global {
 export function applyPrintSelection() {
   const selection = window.docfxAppliesTo
   if (selection) {
-    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined, axisValues: selection.axisValues || undefined }, undefined, true)
+    // the value of another axis says nothing about this page
+    const otherAxis = !!selection.otherAxisPages?.includes(window.location.pathname)
+    applySelection({
+      framework: selection.framework || undefined,
+      value: otherAxis ? undefined : selection.value || undefined,
+      axisValues: otherAxis ? undefined : selection.axisValues || undefined
+    }, undefined, true)
   }
 }
 

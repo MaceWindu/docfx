@@ -5,9 +5,9 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
-  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
-  shownTarget, sortFrameworks, unitsOf, validFramework
+  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applyPrintSelection, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups,
+  distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel, getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection,
+  keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries, shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
 import { installDom } from './fakeDom'
 
@@ -958,6 +958,8 @@ const printPage = `${site}
     <article>
       <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1>
       <div class="facts"></div>
+      <dl class="typelist derived"><dt>Derived</dt><dd><div id="Derived_All">All</div><div id="Derived_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
+      <dl class="typelist inheritedMembers" id="inherited"><dt>Inherited Members</dt><dd><div id="Inherited_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
       <h2 id="events">Events</h2>
       <a id="Lib_Changed_" data-overload></a>
       <h3 id="Lib_Changed" data-applies-to="net8.0">Changed</h3>
@@ -987,6 +989,9 @@ test('in print, what does not exist in the selection is left out', () => {
   assert.ok(!hidden('classes'))
   assert.ok(hidden('interfaces'))
   assert.ok(document.querySelectorAll('dl.jumplist')[1].hidden)
+  // the classes derived, and the members inherited, in other frameworks only, and a list with none left
+  assert.ok(!hidden('Derived_All') && hidden('Derived_Net8'))
+  assert.ok(hidden('Inherited_Net8') && hidden('inherited'))
   // nothing is marked, as nothing is left to mark
   assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner'), [])
   assert.ok(!document.body.hasAttribute('data-applies-to-unavailable'))
@@ -995,4 +1000,34 @@ test('in print, what does not exist in the selection is left out', () => {
   applySelection({ framework: 'netcoreapp1.0' }, undefined, true)
   assert.ok(document.body.hasAttribute('data-applies-to-unavailable'))
   assert.strictEqual(document.querySelector('.applies-to-banner'), null)
+})
+
+test('in print, the value of another axis says nothing about a page whose axis has the same ids', () => {
+  // EF Core has ef8 and ef9, the drivers have ef8 too; a PDF of ef9 prints a page of the drivers
+  const markup = `${site}<body><article>
+    <h1 id="Driver" data-applies-to="ef8:net8.0 x:net8.0">Driver</h1><div class="facts"></div>
+    <h3 id="Driver_Ef8" data-applies-to="ef8:net8.0">Ef8</h3><p>ef8 of the drivers</p>
+  </article></body>`
+  const print = (otherAxisPages?: string[]) => {
+    const { document, window } = installDom(markup, 'https://example.org/docs/api/Driver.html')
+    Object.assign(window, { docfxAppliesTo: { value: 'ef9', axisValues: ['ef8', 'ef9'], otherAxisPages } })
+    applyPrintSelection()
+    return !!document.getElementById('Driver_Ef8').closest('[hidden]')
+  }
+
+  assert.ok(!print(['/docs/api/Driver.html']))
+  // on a page `docfx pdf` does not know the axis of, the values of the axes that have the value count
+  assert.ok(print(undefined))
+})
+
+test('a class derived, or a member inherited, in other frameworks only is dimmed on the page', () => {
+  const { document } = installDom(printPage)
+  const dimmed = (id: string) => document.getElementById(id).classList.contains('applies-to-unavailable')
+
+  applySelection({ framework: 'net462' })
+  assert.ok(!dimmed('Derived_All') && dimmed('Derived_Net8') && dimmed('Inherited_Net8'))
+  assert.ok(!document.getElementById('inherited').hidden)
+
+  applySelection({})
+  assert.ok(!dimmed('Derived_Net8') && !dimmed('Inherited_Net8'))
 })
