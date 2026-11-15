@@ -4,8 +4,8 @@
 import test from 'node:test'
 import assert from 'node:assert'
 import {
-  Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, findPath, frameworkLabel, getChoices, getSelection,
-  isAvailable, keepLinkSelection, memberElements, parseUnits, rank, shownEntries, shownTarget, sortFrameworks, unitsOf, validFramework
+  Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, chooseGroups, findPath, frameworkLabel, getChoices, getSelection, hashId,
+  isAvailable, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, shownEntries, shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
 import { installDom } from './fakeDom'
 
@@ -96,6 +96,29 @@ test('choose the content for an axis value', () => {
   assert.strictEqual(chooseGroup([parseUnits('net10.0'), parseUnits('net462')], { value: 'ef3', framework: 'net472' }), 1)
 })
 
+test('one dimension picked keeps what differs in the other', () => {
+  // Driver 1 differs between net8.0 and netstandard2.0; Driver 2 is the same on both but differs from Driver 1 on net8.0.
+  const groups = [parseUnits('d1:net8.0'), parseUnits('d1:netstandard2.0'), parseUnits('d2:net8.0 d2:netstandard2.0')]
+
+  // a value: the content of each of its frameworks, the API's own first
+  assert.deepStrictEqual(chooseGroups(groups, { value: 'd1' }), [0, 1])
+  assert.deepStrictEqual(chooseGroups(groups, { value: 'd2' }), [2])
+  // a framework: the content of each value that stands in best for it
+  assert.deepStrictEqual(chooseGroups(groups, { framework: 'net8.0' }), [0, 2])
+  assert.deepStrictEqual(chooseGroups(groups, { framework: 'netstandard2.0' }), [1, 2])
+  // .NET 10 has the net8.0 builds of both, not the netstandard2.0 one of Driver 1
+  assert.deepStrictEqual(chooseGroups(groups, { framework: 'net10.0' }), [0, 2])
+  assert.deepStrictEqual(chooseGroups(groups, { framework: 'net462' }), [1, 2])
+  assert.deepStrictEqual(chooseGroups(groups, { framework: 'net45' }), [])
+  // both: one
+  assert.deepStrictEqual(chooseGroups(groups, { value: 'd1', framework: 'net10.0' }), [0])
+
+  // without an axis, a framework has one content
+  assert.deepStrictEqual(chooseGroups([parseUnits('net8.0'), parseUnits('netstandard2.0')], { framework: 'net10.0' }), [0])
+  // the API's own content goes first when it is one of them, as it has no entry under "In other frameworks"
+  assert.deepStrictEqual(chooseGroups([parseUnits('d1:netstandard2.0'), parseUnits('d2:net8.0')], { framework: 'net8.0' }), [0, 1])
+})
+
 test('frameworks in picker order', () => {
   assert.deepStrictEqual(
     sortFrameworks(['net462', 'netstandard2.0', 'net8.0', 'net10.0', 'net9.0', 'net8.0']),
@@ -132,6 +155,8 @@ test('valid frameworks', () => {
   assert.strictEqual(validFramework('net46', listed), undefined)
   assert.strictEqual(validFramework('netstandard1.0', listed), undefined)
   assert.strictEqual(validFramework('uap10.0', ['uap10.0']), 'uap10.0')
+  // not one a listed framework stands in for: the reader would see .NET Standard 2.0 labelled .NET Framework 4.8
+  assert.strictEqual(validFramework('net48', listed), undefined)
 })
 
 const site = `
@@ -152,9 +177,18 @@ test('selection from a link, else from what was picked last', () => {
   // a page without the axis has no value
   assert.deepStrictEqual(getSelection(undefined, frameworks), { framework: 'net8.0', value: undefined })
 
-  // a framework kept from another part of the site that this table of contents does not list is left out
+  // a framework kept from another part of the site that this table of contents does not list is left out, and
+  // forgotten, so that the next page does not apply it before its table of contents is loaded
   storage.set('docfx.axis./docs/.framework', 'net6.0')
   assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: 'ef9' })
+  assert.ok(!storage.has('docfx.axis./docs/.framework'))
+  // not before the table of contents is loaded, nor by one that lists no frameworks; on a page without a link's
+  // framework, which would come first
+  const later = installDom(site, 'https://example.org/docs/api/A.html')
+  later.storage.set('docfx.axis./docs/.framework', 'net6.0')
+  assert.deepStrictEqual(getSelection(ef).framework, 'net6.0')
+  getSelection(ef, [])
+  assert.strictEqual(later.storage.get('docfx.axis./docs/.framework'), 'net6.0')
   // so is a value that is not one of the axis
   installDom(site, 'https://example.org/docs/api/A.html?ef-core=ef99')
   assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: undefined })
@@ -213,6 +247,20 @@ test('the axis of the part of the docs a page is in', () => {
   // with one, an article has it, such as the index of the API
   const single = { items: [mergedToc().items[0], { name: 'Index', href: 'index.html' }] }
   assert.strictEqual(getChoices(single, findPath(single.items, tocUrl, { pathname: '/docs/index.html' })).axis, ef)
+
+  // an API page of a part without an axis has none, even when another part has the only one
+  const withCore: Toc = {
+    items: [
+      { name: 'Core', items: [{ name: 'Db', href: 'core/Db.html', appliesTo: [{ frameworks: ['net10.0', 'net462'] }] }] },
+      mergedToc().items[0],
+      { name: 'Index', href: 'index.html' }
+    ]
+  }
+  const axisAt = (path: string) => getChoices(withCore, findPath(withCore.items, tocUrl, { pathname: path })).axis
+  assert.strictEqual(axisAt('/docs/core/Db.html'), undefined)
+  assert.strictEqual(axisAt('/docs/ef/OnlyEf9.html'), ef)
+  assert.strictEqual(axisAt('/docs/index.html'), ef)
+  assert.strictEqual(axisAt('/docs/elsewhere.html'), ef)
 
   // the table of contents is read once
   assert.strictEqual(getChoices(toc).frameworks, getChoices(toc).frameworks)
@@ -295,6 +343,52 @@ test('the page shows the content for the selection', () => {
   assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable, .applies-to-unavailable-badge, .applies-to-banner'), [])
 })
 
+test('one dimension picked keeps what differs in the other on the page', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Reader" data-applies-to="d1:net8.0 d1:netstandard2.0 d2:net8.0">Reader</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d1:net8.0"><p id="own">own</p></div>
+      <div class="api-content" data-applies-to="d1:netstandard2.0" hidden><p id="copy1">copy1</p></div>
+      <div class="api-content" data-applies-to="d2:net8.0" hidden><p id="copy2">copy2</p></div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="d1:netstandard2.0"></div>
+    <div class="api-variant" id="variant2" data-applies-to="d2:net8.0"></div>
+  </article>`)
+  const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
+  const heading = () => document.querySelector<HTMLElement>('.api-variants-heading').hidden
+  const all = ['own', 'copy1', 'copy2', 'variant1', 'variant2']
+
+  applySelection({ value: 'd1' })
+  assert.deepStrictEqual(hidden(...all), [false, true, true, false, true])
+  assert.ok(!heading())
+
+  applySelection({ framework: 'net8.0' })
+  assert.deepStrictEqual(hidden(...all), [false, true, true, true, false])
+
+  // Driver 2 is shown in place of the API's own content, so not under "In other frameworks" too
+  applySelection({ value: 'd2' })
+  assert.deepStrictEqual(hidden(...all), [true, true, false, true, true])
+  assert.ok(heading())
+
+  applySelection({ value: 'd1', framework: 'net8.0' })
+  assert.deepStrictEqual(hidden(...all), [false, true, true, true, true])
+  assert.ok(heading())
+
+  applySelection({})
+  assert.deepStrictEqual(hidden(...all), [false, true, true, false, false])
+  assert.ok(!heading())
+})
+
+test('the id a fragment points to', () => {
+  assert.strictEqual(hashId('#Lib_Run%2A'), 'Lib_Run*')
+  assert.strictEqual(hashId('#Lib_Run'), 'Lib_Run')
+  // not valid percent-encoding: as it is, rather than stopping the picker
+  assert.strictEqual(hashId('#%E0%A4'), '%E0%A4')
+})
+
 test('the elements of a member', () => {
   const { document } = installDom(page)
   const ids = (id: string) => memberElements(document.getElementById(id) as unknown as Element).map(e => e.tagName + (e.id ? '#' + e.id : ''))
@@ -315,4 +409,19 @@ test('a link to content hidden for the selection goes to the content shown', () 
   assert.strictEqual(shownTarget('Lib_Shared_Size_variant1_remarks').id, 'Lib_Shared_Size_remarks')
   assert.strictEqual(shownTarget('Lib_Shared_Size_remarks').id, 'Lib_Shared_Size_remarks')
   assert.strictEqual(shownTarget('missing'), null)
+})
+
+test('a link on the page to content hidden for the selection scrolls to the content shown', () => {
+  installDom(page, 'https://example.org/docs/api/Lib.Shared.html#Lib_Shared_Size_remarks')
+  const scrolled = (id: string) => !!(globalThis.document.getElementById(id) as unknown as { scrolledIntoView?: boolean }).scrolledIntoView
+  applySelection({ framework: 'netstandard2.0' })
+
+  scrollToShownTarget(true)
+  assert.ok(scrolled('Lib_Shared_Size_variant1_remarks'))
+  assert.ok(!scrolled('Lib_Shared_Size_remarks'))
+
+  // the browser scrolls to what is not hidden itself
+  installDom(page, 'https://example.org/docs/api/Lib.Shared.html#Lib_Shared_Do')
+  scrollToShownTarget(true)
+  assert.ok(!scrolled('Lib_Shared_Do'))
 })

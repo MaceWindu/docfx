@@ -1173,7 +1173,7 @@ public class TargetFrameworkTest : TestBase
 
         // The table of contents names the axis for a picker: pages carry only its value ids and labels.
         var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
-        const string AxisJson = """{"name":"Version","values":[{"id":"v1","label":"Version 1"},{"id":"v2","label":"Version 2"}],"default":"v2"}""";
+        const string AxisJson = """{"name":"Version","values":[{"id":"v1","label":"Version 1"},{"id":"v2","label":"Version 2"}]}""";
         Assert.Equal(AxisJson, JsonUtility.Serialize(toc.Metadata["axis"]));
 
         // so does each of its entries, which a table of contents that includes this one keeps

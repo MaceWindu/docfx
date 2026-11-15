@@ -129,7 +129,6 @@ internal sealed class TargetFrameworkAxis
     {
         ["name"] = Name,
         ["values"] = _values.Select(v => new Dictionary<string, object> { ["id"] = v.Id, ["label"] = v.Label }).ToList(),
-        ["default"] = Default,
     };
 
     public int IndexOf(string? id) => _values.FindIndex(v => v.Id == id);
