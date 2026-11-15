@@ -194,6 +194,15 @@ internal class MetadataItem : ICloneable
     public Dictionary<string, List<string>> InheritedMembersAppliesTo { get; set; }
 
     /// <summary>
+    /// The target frameworks each of <see cref="DerivedClasses"/> derives from this item in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> DerivedClassesAppliesTo { get; set; }
+
+    /// <summary>
     /// What differs in the frameworks that do not share the content of this item.
     /// </summary>
     [YamlIgnore]

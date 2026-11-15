@@ -352,6 +352,16 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> DerivedClasses { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="DerivedClasses"/> derives from this item in, for those that do so
+    /// in only some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "derivedClassesAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("derivedClassesAppliesTo")]
+    [JsonPropertyName("derivedClassesAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> DerivedClassesAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.Implements)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children
     [JsonProperty(Constants.PropertyName.Implements)]

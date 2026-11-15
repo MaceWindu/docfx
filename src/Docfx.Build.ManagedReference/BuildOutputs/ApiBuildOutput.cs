@@ -200,6 +200,15 @@ public class ApiBuildOutput
     [JsonPropertyName("inheritedMembersAppliesTo")]
     public Dictionary<string, List<AppliesToViewModel>> InheritedMembersAppliesTo { get; set; }
 
+    /// <summary>
+    /// The frameworks of each of <see cref="DerivedClasses"/>, in their order and empty where it needs no mark:
+    /// a derived class is rendered as a type reference, which carries no uid to look it up by.
+    /// </summary>
+    [YamlMember(Alias = "derivedClassesAppliesTo")]
+    [JsonProperty("derivedClassesAppliesTo")]
+    [JsonPropertyName("derivedClassesAppliesTo")]
+    public List<List<AppliesToViewModel>> DerivedClassesAppliesTo { get; set; }
+
     [YamlMember(Alias = "attributes")]
     [JsonProperty("attributes")]
     [JsonPropertyName("attributes")]
@@ -293,6 +302,9 @@ public class ApiBuildOutput
             AppliesTo = model.AppliesTo,
             Variants = model.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, references, model.SupportedLanguages)).ToList(),
             InheritedMembersAppliesTo = model.InheritedMembersAppliesTo,
+            DerivedClassesAppliesTo = model.DerivedClassesAppliesTo is { } derivedIn
+                ? model.DerivedClasses?.Select(uid => derivedIn.TryGetValue(uid, out var appliesTo) ? appliesTo : []).ToList()
+                : null,
             Attributes = model.Attributes,
             Metadata = model.Metadata.Concat(metadata.Where(p => !model.Metadata.ContainsKey(p.Key))).ToDictionary(p => p.Key, p => p.Value),
         };

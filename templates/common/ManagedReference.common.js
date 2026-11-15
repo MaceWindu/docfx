@@ -181,7 +181,8 @@ function handleAppliesTo(vm, parent, options) {
   }
 }
 
-// A member inherited in only some frameworks of the type, as its base type differs, is marked with them.
+// A member inherited, or a class derived, in only some frameworks of the type, as a base type differs, is marked
+// with them.
 function handleInheritedMembers(model, options) {
   var inheritedIn = model.inheritedMembersAppliesTo || {};
   (model.inheritedMembers || []).forEach(function (member) {
@@ -189,6 +190,13 @@ function handleInheritedMembers(model, options) {
     // set on every member, so that mustache does not look up the values of the type
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     member.showAppliesToBadge = appliesTo.length > 0;
+  });
+  // in the order of the derived classes, which carry no uid
+  var derivedIn = model.derivedClassesAppliesTo || [];
+  (model.derivedClasses || []).forEach(function (derived, index) {
+    var appliesTo = derivedIn[index] || [];
+    derived.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    derived.showAppliesToBadge = appliesTo.length > 0;
   });
 }
 

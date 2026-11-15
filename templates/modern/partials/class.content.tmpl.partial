@@ -76,7 +76,7 @@
   <dd>
 {{/derivedClasses.0}}
 {{#derivedClasses}}
-    <div>{{{specName.0.value}}}</div>
+    <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/derivedClasses}}
 {{#derivedClasses.0}}
   </dd>
