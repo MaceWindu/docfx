@@ -34,12 +34,14 @@ partial class DotnetApiCatalog
             Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
         }
 
+        // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
         if (config.TargetFramework is not null && hasProjectInput &&
-            msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
+            msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
         {
+            var onlyOne = propertyName.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) ? " and leaves only one target framework to select from" : "";
             Logger.LogWarning(
                 $"Both 'targetFramework' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
-                + "so it also applies to every referenced project and leaves only one target framework to select from. Remove it from 'properties'.",
+                + $"so it also applies to every referenced project{onlyOne}. Remove it from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
 
@@ -48,6 +50,12 @@ partial class DotnetApiCatalog
         // of a solution does, the option most likely has a typo, which is worth a warning.
         var solutionProjectCount = 0;
         var solutionProjectMatches = 0;
+
+        // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too.
+        var listedProjects = files.TryGetValue(FileType.Project, out var listed)
+            ? listed.Select(f => f.NormalizedPath).ToHashSet(FilePathComparer.OSPlatformSensitiveComparer)
+            : [];
+        var reportedProjects = new HashSet<string>(FilePathComparer.OSPlatformSensitiveComparer);
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -199,7 +207,8 @@ partial class DotnetApiCatalog
             // `TargetFramework` would also retarget every project this one references.
             if (config.TargetFramework is { } targetFramework)
             {
-                (project, var matched) = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework, fromSolution);
+                var report = !(fromSolution && listedProjects.Contains(path)) && reportedProjects.Add(path);
+                (project, var matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework, fromSolution, report);
                 if (fromSolution)
                 {
                     solutionProjectCount++;
