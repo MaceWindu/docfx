@@ -620,22 +620,16 @@ static class PdfBuilder
             try
             {
                 // One call per page: a call per heading costs a round trip to the browser each, which adds up on
-                // the thousands of headings of an API PDF. Content the page hides, such as a tab that is not
-                // selected, is not printed, so its headings are left out.
+                // the thousands of headings of an API PDF. Content the page does not show, such as the members a PDF
+                // of one framework leaves out, or the content of an API for another framework, is not printed either.
                 var elements = await page.EvaluateAsync<string[][]>(
                     "selector => Array.from(document.querySelectorAll(selector)).filter(e => !e.closest('[hidden]')).map(e => [e.tagName, e.getAttribute('id') || '', e.innerText])",
                     selector);
                 foreach (var element in elements)
                 {
-                    var tagName = await element.EvaluateAsync<string>("e => e.tagName");
-                    var level = int.Parse(tagName[1].ToString());
-                    // Content the page does not show, such as the members a PDF of one framework leaves out, or
-                    // the content of an API for another framework, is not printed either.
-                    if (await element.EvaluateAsync<bool>("e => !!e.closest('[hidden]')"))
-                        continue;
-
-                    var id = await element.GetAttributeAsync("id") ?? "";
-                    var text = (await element.InnerTextAsync()).Trim();
+                    var level = int.Parse(element[0][1].ToString());
+                    var id = element[1];
+                    var text = element[2].Trim();
 
                     // Skip headings without id or text
                     if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(text))
