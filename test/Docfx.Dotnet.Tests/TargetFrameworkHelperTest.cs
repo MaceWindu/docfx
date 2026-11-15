@@ -83,6 +83,8 @@ public class TargetFrameworkHelperTest
     // symbols are case-sensitive: a project's own symbols are not the SDK's
     [InlineData("net8.0", "NET", "NET8_0", "Windows")]
     [InlineData(null, "net8_0")]
+    // nor is a project's own `WINDOWS` without the platform's versions
+    [InlineData("net8.0", "NET", "NET8_0", "WINDOWS")]
     public void GetTargetFrameworkFromSymbols(string expected, params string[] symbols)
     {
         TargetFrameworkHelper.GetTargetFrameworkFromSymbols(symbols).Should().Be(expected);

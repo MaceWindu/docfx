@@ -216,6 +216,7 @@ public static partial class DotnetApiCatalog
             // An axis tells apart projects that would otherwise be documented as one, so every framework
             // of each of them is documented unless the framework or frameworks are given.
             TargetFrameworks = targetFrameworks ?? (axis is null || targetFramework is not null ? null : ["*"]),
+            TargetFrameworksFromAxes = targetFrameworks is null && axis is not null && targetFramework is null,
             DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
             VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
             Axis = axis,

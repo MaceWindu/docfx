@@ -32,7 +32,7 @@ internal static partial class TargetFrameworkHelper
     // (a non-SDK project, or `DisableImplicitFrameworkDefines`) does not say which framework it targets.
     private static readonly string[] s_frameworkFamilySymbols = ["NET", "NETCOREAPP", "NETFRAMEWORK", "NETSTANDARD"];
 
-    private const string AllTargetFrameworks = "*";
+    internal const string AllTargetFrameworks = "*";
 
     // The exact-version symbols only: `NET8_0_OR_GREATER`, `NET` and `NETFRAMEWORK` name no single framework.
     // Case-sensitive, as C# symbols are: a project's own `net8_0` is not the SDK's.
@@ -191,7 +191,7 @@ internal static partial class TargetFrameworkHelper
     private static bool Targets(Project project, string targetFramework)
     {
         return GetTargetFrameworkFromName(project) is { } name
-            ? MatchesFramework(name, targetFramework)
+            ? MatchesFramework(name, targetFramework, GetPlatformVersion(project, name))
             // a project whose symbols do not say is taken as it is
             : TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework) ?? true;
     }
@@ -203,13 +203,14 @@ internal static partial class TargetFrameworkHelper
     /// </summary>
     internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
     {
-        var symbols = preprocessorSymbols.ToList();
-        if (symbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s))?.ToLowerInvariant().Replace('_', '.') is not { } framework)
+        var symbols = preprocessorSymbols.ToHashSet(StringComparer.Ordinal);
+        if (symbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s)) is not { } frameworkSymbol)
         {
             return null;
         }
 
-        return s_platformSymbols.FirstOrDefault(p => symbols.Contains(p, StringComparer.Ordinal)) is { } platform
+        var framework = frameworkSymbol.ToLowerInvariant().Replace('_', '.');
+        return GetPlatformFromSymbols(symbols, frameworkSymbol).Platform is { } platform
             ? $"{framework}-{platform.ToLowerInvariant()}"
             : framework;
     }
