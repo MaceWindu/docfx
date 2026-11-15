@@ -291,6 +291,33 @@ internal static class YamlViewModelExtensions
         return result.Count == 0 ? null : result;
     }
 
+    /// <summary>
+    /// The frameworks of the derived classes that derive from <paramref name="model"/> in only some of its
+    /// frameworks, in the order of its own; a class that derives from it in all of them is not listed.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToDerivedClassesAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        if (model.DerivedClassesAppliesTo is not { } derivedIn || model.AppliesTo is not { } frameworks)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, List<AppliesToViewModel>>();
+        foreach (var uid in model.DerivedClasses ?? [])
+        {
+            if (derivedIn.TryGetValue(uid, out var units))
+            {
+                var shared = frameworks.Where(f => units.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
+                if (shared.Count < frameworks.Count)
+                {
+                    result[uid] = ToAppliesToViewModel(shared, axis);
+                }
+            }
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
     public static ItemViewModel ToItemViewModel(this MetadataItem model, ExtractMetadataConfig config)
     {
         if (model == null)
@@ -327,6 +354,7 @@ internal static class YamlViewModelExtensions
             Exceptions = model.Exceptions,
             SeeAlsos = model.SeeAlsos,
             DerivedClasses = model.DerivedClasses,
+            DerivedClassesAppliesTo = ToDerivedClassesAppliesTo(model, config.Axis),
             Inheritance = model.Inheritance,
             Implements = model.Implements,
             InheritedMembers = model.InheritedMembers,

@@ -52,6 +52,12 @@ public class TargetFrameworksBuildTest : TestBase
 
                 public class Child : Base { }
 
+            #if NET8_0
+                public class Switches : Base { }
+            #else
+                public class Switches { }
+            #endif
+
                 public class Shared
                 {
                     public int Everywhere { get; set; }
@@ -148,6 +154,19 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Matches("Base\\.OnlyNet8Base\\(\\)</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span></div>", page);
         Assert.DoesNotMatch("Base\\.Everywhere\\(\\)</a>\\s*<span", page);
         Assert.DoesNotMatch("object\\.ToString\\(\\)</a>\\s*<span", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AClassDerivedInSomeFrameworksIsMarkedWithThem(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Base.html");
+
+        Assert.Matches("Switches</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
+        Assert.Matches("Child</a>\\s*</div>", page);
     }
 
     [Theory]
