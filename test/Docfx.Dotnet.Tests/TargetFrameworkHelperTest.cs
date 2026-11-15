@@ -46,12 +46,27 @@ public class TargetFrameworkHelperTest
     [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard2.0", true)]
     [InlineData("NETFRAMEWORK;NET462", "net462", true)]
     [InlineData("NETFRAMEWORK;NET462", "net48", false)]
-    // the platform version is not compared, as for a multi-targeted project
+    // the platform version is compared only when the framework gives one, as for a multi-targeted project
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows", true)]
-    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.19041", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.17763.0", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER", "net8.0-windows10.0.22621.0", false)]
     // symbols are case-sensitive: a project's own `Windows` is not the SDK's platform symbol
     [InlineData("NET;NETCOREAPP;NET8_0;Windows", "net8.0", true)]
+    // nor is its own `WINDOWS`: the SDK's comes with the platform's versions, and for .NET 5 and later only
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows10.0.19041.0", false)]
+    [InlineData("NETFRAMEWORK;NET462;WINDOWS;WINDOWS7_0_OR_GREATER", "net462", true)]
+    [InlineData("NETSTANDARD;NETSTANDARD2_0;ANDROID;ANDROID21_0_OR_GREATER", "netstandard2.0", true)]
     [InlineData("net;netcoreapp;net8_0", "net8.0", null)]
+    // a family names no framework, though every framework of it defines its symbol
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "netcoreapp", false)]
+    [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard", false)]
+    [InlineData("NETFRAMEWORK;NET462", "netframework", false)]
+    [InlineData("TRACE", "net", false)]
     // a non-SDK project, or one with DisableImplicitFrameworkDefines, does not say
     [InlineData("TRACE;DEBUG", "net48", null)]
     [InlineData("", "net8.0", null)]
@@ -66,13 +81,32 @@ public class TargetFrameworkHelperTest
     [InlineData("net8.0", "net9.0", false)]
     [InlineData("net8.0", "net8.0-windows", false)]
     [InlineData("net8.0-windows", "net8.0", false)]
-    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", true)]
-    [InlineData("net8.0-windows10.0.17763.0", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows10.0.19041", true)]
+    [InlineData("net8.0-windows10.0.17763.0", "net8.0-windows10.0.19041.0", false)]
+    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", false)]
+    [InlineData("net8.0-android34.0", "net8.0-android34", true)]
     [InlineData("net8.0-windows", "net8.0-android", false)]
-    public void IsSameFramework(string a, string b, bool expected)
+    [InlineData("net8.0", "net", false)]
+    // the version a framework without one stands for, as its symbols give it
+    [InlineData("net8.0-windows", "net8.0-windows7.0", true, "7.0")]
+    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", false, "7.0")]
+    [InlineData("net8.0-windows10.0.17763.0", "net8.0-windows10.0.19041.0", false, "10.0.19041.0")]
+    public void MatchesFramework(string projectFramework, string targetFramework, bool expected, string projectPlatformVersion = null)
     {
-        TargetFrameworkHelper.IsSameFramework(a, b).Should().Be(expected);
-        TargetFrameworkHelper.IsSameFramework(b, a).Should().Be(expected);
+        var version = projectPlatformVersion is null ? null : TargetFrameworkHelper.GetTargetFrameworkPlatformVersion($"net8.0-windows{projectPlatformVersion}");
+        TargetFrameworkHelper.MatchesFramework(projectFramework, targetFramework, version).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("net8.0", null)]
+    [InlineData("net8.0-windows", null)]
+    [InlineData("net8.0-windows10.0.19041", "10.0.19041.0")]
+    [InlineData("net8.0-windows10.0.19041.0", "10.0.19041.0")]
+    [InlineData("net8.0-android34", "34.0.0.0")]
+    public void GetTargetFrameworkPlatformVersion(string targetFramework, string expected)
+    {
+        TargetFrameworkHelper.GetTargetFrameworkPlatformVersion(targetFramework).Should().Be(expected is null ? null : Version.Parse(expected));
     }
 
     [Theory]
@@ -95,47 +129,107 @@ public class TargetFrameworkHelperTest
     [InlineData("NetStandard2.0", "Lib(netstandard2.0)")]
     [InlineData("net8.0-windows", "Lib(net8.0-windows10.0.17763.0)")]
     [InlineData("net8.0-windows10.0.19041.0", "Lib(net8.0-windows10.0.19041.0)")]
-    [InlineData("net8.0-windows10.0.22621.0", "Lib(net8.0-windows10.0.17763.0)")]
-    public void SelectProjectOfAMultiTargetedProject(string targetFramework, string expected)
+    [InlineData("net8.0-windows10.0.19041", "Lib(net8.0-windows10.0.19041.0)")]
+    public async Task SelectProjectOfAMultiTargetedProject(string targetFramework, string expected)
     {
         using var workspace = new AdhocWorkspace();
         var projects = new[] { "Lib(net8.0)", "Lib(netstandard2.0)", "Lib(net8.0-windows10.0.17763.0)", "Lib(net8.0-windows10.0.19041.0)" }
             .Select(name => workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, name, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj")))
             .ToList();
 
-        var (selected, matched) = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
 
         selected.Name.Should().Be(expected);
         matched.Should().BeTrue();
     }
 
     [Theory]
-    [InlineData("net9.0")]
-    [InlineData("net8.0-android")]
-    public void SelectProjectFallsBackToTheProjectGiven(string targetFramework)
+    [InlineData("net8.0-windows7.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", false)]
+    public async Task SelectProjectReadsThePlatformVersionANameLeavesOutFromTheSymbols(string targetFramework, bool expectMatch)
     {
         using var workspace = new AdhocWorkspace();
-        var projects = new[] { "Lib(net8.0)", "Lib(net8.0-windows)" }
+        var projects = new[] { ("Lib(net8.0)", "NET;NET8_0"), ("Lib(net8.0-windows)", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER") }
+            .Select(p => workspace.AddProject(ProjectInfo.Create(
+                ProjectId.CreateNewId(), VersionStamp.Default, p.Item1, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
+                parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: p.Item2.Split(';')))))
+            .ToList();
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
+
+        matched.Should().Be(expectMatch);
+        selected.Should().BeSameAs(expectMatch ? projects[1] : projects[0]);
+    }
+
+    [Theory]
+    [InlineData("net9.0")]
+    [InlineData("net8.0-android")]
+    // a platform version the project does not target is not one it does
+    [InlineData("net8.0-windows10.0.22621.0")]
+    [InlineData("net")]
+    public async Task SelectProjectFallsBackToTheProjectGiven(string targetFramework)
+    {
+        using var workspace = new AdhocWorkspace();
+        var projects = new[] { "Lib(net8.0)", "Lib(net8.0-windows10.0.17763.0)", "Lib(net8.0-windows10.0.19041.0)" }
             .Select(name => workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, name, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj")))
             .ToList();
 
-        var (selected, matched) = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
 
         selected.Should().BeSameAs(projects[0]);
         matched.Should().BeFalse();
     }
 
     [Fact]
-    public void SelectProjectOfAProjectWithoutFrameworkSymbolsIsNotAMatch()
+    public async Task SelectProjectOfAProjectWithoutFrameworkSymbolsIsNotAMatch()
     {
         using var workspace = new AdhocWorkspace();
         var project = workspace.AddProject(ProjectInfo.Create(
             ProjectId.CreateNewId(), VersionStamp.Default, "Legacy", "Legacy", LanguageNames.CSharp, filePath: "/src/Legacy/Legacy.csproj",
             parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: ["TRACE"])));
 
-        var (selected, matched) = TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, "net8.0");
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, "net8.0");
 
         selected.Should().BeSameAs(project);
         matched.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("", "net8.0", true)]
+    [InlineData("", "net9.0", false)]
+    [InlineData("", "net8.0-windows", false)]
+    [InlineData("", "net", false)]
+    [InlineData("Windows10.0.19041.0", "net8.0-windows", true)]
+    [InlineData("Windows10.0.19041.0", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("Windows10.0.19041.0", "net8.0", false)]
+    public async Task SelectProjectOfAProjectWithoutFrameworkSymbolsReadsItsTargetFrameworkAttribute(string platform, string targetFramework, bool expectMatch)
+    {
+        // what the SDK generates for a project that sets `DisableImplicitFrameworkDefines`
+        var source = """[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v8.0")]"""
+            + (platform.Length > 0 ? $"""[assembly: System.Runtime.Versioning.TargetPlatform("{platform}")]""" : "");
+
+        using var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject(ProjectInfo.Create(
+            ProjectId.CreateNewId(), VersionStamp.Default, "Lib", "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
+            compilationOptions: new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: ["TRACE"]),
+            metadataReferences: [MetadataReference.CreateFromFile(typeof(System.Runtime.Versioning.TargetFrameworkAttribute).Assembly.Location)]));
+        project = workspace.AddDocument(project.Id, "AssemblyInfo.cs", Microsoft.CodeAnalysis.Text.SourceText.From(source)).Project;
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(project.Solution, project, targetFramework);
+
+        matched.Should().Be(expectMatch);
+    }
+
+    [Theory]
+    [InlineData(".NETCoreApp,Version=v8.0", "net8.0")]
+    [InlineData(".NETCoreApp,Version=v3.1", "netcoreapp3.1")]
+    [InlineData(".NETStandard,Version=v2.0", "netstandard2.0")]
+    [InlineData(".NETFramework,Version=v4.6.2", "net462")]
+    [InlineData(".NETFramework,Version=v4.8", "net48")]
+    [InlineData("Silverlight,Version=v5.0", null)]
+    public void ParseFrameworkName(string frameworkName, string expected)
+    {
+        TargetFrameworkHelper.ParseFrameworkName(frameworkName).Should().Be(expected);
     }
 }
