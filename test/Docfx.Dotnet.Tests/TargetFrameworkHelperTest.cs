@@ -52,6 +52,16 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.19041", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.17763.0", false)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER", "net8.0-windows10.0.22621.0", false)]
+    // a Windows SDK version ending in `.1` (CsWinRT 3.0) has the symbols of the one ending in `.0`, and `CSWINRT3_0`
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.1", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.0", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.1", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.0", true)]
+    // a platform whose frameworks have no version has no `_OR_GREATER` symbol
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;BROWSER", "net8.0-browser", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;BROWSER", "net8.0", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;NET10_0_OR_GREATER;WASI", "net10.0-wasi", true)]
     // symbols are case-sensitive: a project's own `Windows` is not the SDK's platform symbol
     [InlineData("NET;NETCOREAPP;NET8_0;Windows", "net8.0", true)]
     // nor is its own `WINDOWS`: the SDK's comes with the platform's versions, and for .NET 5 and later only
