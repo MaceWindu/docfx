@@ -46,7 +46,7 @@ Name         | Type    | Description
 `_disableAffix`         | bool    | Whether to show the right rail.
 `_disableNextArticle`   | bool    | Whether to show the previous and next article link.
 `_disableTocFilter`     | bool    | Whether to show the table of content filter box.
-`_disableApiAppliesTo`  | bool    | Whether to show which target frameworks an API applies to.
+`_disableApiAppliesTo`  | bool    | Whether to hide which target frameworks an API applies to. What differs in other frameworks is still shown.
 `_disableApiAppliesToFrameworks` | bool | Whether to show the frameworks of each axis value an API applies to.
 `_frameworkNames`       | object  | The names to show for target frameworks, by framework.
 `_enableApiAppliesToPicker` | bool | Whether to let readers pick a target framework or axis value, and show API pages for it.
@@ -74,7 +74,7 @@ Name         | Type    | Description
 `_disableBreadcrumb`    | bool    | Whether to show the breadcrumb.
 `_disableToc`           | bool    | Whether to show the TOC.
 `_disableAffix`         | bool    | Whether to show the right rail.
-`_disableApiAppliesTo`  | bool    | Whether to show which target frameworks an API applies to.
+`_disableApiAppliesTo`  | bool    | Whether to hide which target frameworks an API applies to. What differs in other frameworks is still shown.
 `_disableApiAppliesToFrameworks` | bool | Whether to show the frameworks of each axis value an API applies to.
 `_frameworkNames`       | object  | The names to show for target frameworks, by framework.
 `_googleAnalyticsTagId` | string  | Enables Google Analytics web traffic analysis.

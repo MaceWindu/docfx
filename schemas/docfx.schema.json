@@ -727,7 +727,7 @@
             ]
           },
           "defaultFramework": {
-            "description": "The framework of `targetFrameworks` that provides the content of an API that exists in several, instead of the first one listed. A project that does not target it uses the nearest framework it targets that can stand in for it, else its first one.",
+            "description": "The framework of `targetFrameworks` that provides the content of an API that exists in several, instead of the first one listed. A project that does not target it uses the nearest framework it targets that can stand in for it; frameworks that cannot follow in the order they first appear across the projects.",
             "type": "string"
           },
           "axes": {

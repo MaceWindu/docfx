@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text;
 using System.Text.Json;
 using Docfx.Common;
 using Docfx.Pdf;
@@ -57,11 +58,14 @@ public class PdfFrameworkTest
     public void ThePagesOfAPdfOfOneFrameworkAreToldWhichOne()
     {
         Assert.Null(PdfBuilder.GetAppliesToScript(Parse(null, null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null,"axisValues":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9","axisValues":null};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
+        Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null,"axisValues":null,"otherAxisPages":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
+        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9","axisValues":null,"otherAxisPages":null};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
 
-        // pages carry value ids without their axis, so they are told the values of the axis picked from
-        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"d1","axisValues":["d1","d2"]};""", PdfBuilder.GetAppliesToScript(TwoAxes("d1")));
+        // pages carry value ids without their axis, so they are told the values of the axis picked from, and which
+        // pages are of another axis, which the value says nothing about, as their own values may have the same ids
+        Assert.Equal(
+            """window.docfxAppliesTo = {"framework":null,"value":"d1","axisValues":["d1","d2"],"otherAxisPages":["/api/ef/Everywhere.html","/api/ef/FromEF8.html"]};""",
+            PdfBuilder.GetAppliesToScript(TwoAxes("d1"), "api/toc.json"));
     }
 
     // The API of two metadata items, each with an axis of its own, which `docfx metadata` writes to their entries.
@@ -134,6 +138,53 @@ public class PdfFrameworkTest
     }
 
     [Fact]
+    public void AFrameworkAndValueThatNeverMeetWarn()
+    {
+        using var listener = new TestListenerScope();
+
+        // .NET Standard 2.0 and EF Core 8 each exist, but EF Core 8 builds for .NET 8 only
+        PdfBuilder.LeaveOutUnavailable(Parse("netstandard2.0", "ef8"));
+
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.Contains("none of it exists in both", warning.Message);
+    }
+
+    [Fact]
+    public void AFrameworkAndValueThatNeverMeetWarnForTheAxisOfTheValue()
+    {
+        using var listener = new TestListenerScope();
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc
+            .Replace("\"pdf\": true,", "\"pdf\": true, \"pdfFramework\": \"netstandard2.0\",")
+            .Replace("{value}", "ef8"));
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        // the drivers, built for .NET 8 only, have no EF Core 8 to leave out
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.Contains("axis 'EF Core'", warning.Message);
+    }
+
+    [Fact]
+    public void OnlyATableOfContentsOfAPdfIsReadWhole()
+    {
+        using var listener = new TestListenerScope();
+        // `appliesTo` and `axis` written by hand for something else
+        var handWritten = """{ "items": [ { "name": "A", "href": "a.html", "appliesTo": "net8.0", "axis": "x" } ] }"""u8.ToArray();
+
+        Assert.Null(PdfBuilder.ReadPdfOutline(handWritten, "toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": false, "appliesTo": 1 }"""u8.ToArray(), "toc.json"));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+
+        Assert.Equal("Lib", PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(Json(null, null)), "toc.json")?.items?[1].name);
+
+        // in the table of contents of a PDF, it says which one cannot be read, and does not stop the others
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'"));
+        // the error count is global, and later tests check it
+        Logger.ResetCount();
+    }
+
+    [Fact]
     public void AHeadingWhoseItemsAreAllLeftOutGoesToo()
     {
         var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
@@ -153,13 +204,12 @@ public class PdfFrameworkTest
         Assert.Equal("Kept, Everywhere, Empty from the start", string.Join(", ", Names(outline.items)));
     }
 
-    private static PdfBuilder.Outline Parse(string framework, string value)
-    {
-        var json = Toc
-            .Replace("\"{framework}\"", framework is null ? "null" : $"\"{framework}\"")
-            .Replace("\"{value}\"", value is null ? "null" : $"\"{value}\"");
-        return JsonSerializer.Deserialize<PdfBuilder.Outline>(json);
-    }
+    private static PdfBuilder.Outline Parse(string framework, string value) =>
+        JsonSerializer.Deserialize<PdfBuilder.Outline>(Json(framework, value));
+
+    private static string Json(string framework, string value) => Toc
+        .Replace("\"{framework}\"", framework is null ? "null" : $"\"{framework}\"")
+        .Replace("\"{value}\"", value is null ? "null" : $"\"{value}\"");
 
     private static IEnumerable<string> Names(IEnumerable<PdfBuilder.Outline> items) =>
         items?.SelectMany(i => Names(i.items).Prepend(i.name)) ?? [];

@@ -142,17 +142,19 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains(string.Format(expected, Net8), await Page(site, "Lib.OnlyNet8.html"));
     }
 
-    [Fact]
+    [Theory]
     [Trait("Related", "docfx")]
-    public async Task OnlyMembersThatDifferFromTheirTypeAreMarked()
+    [InlineData("\"default\"", "<span class=\"applies-to\">{0}</span>")]
+    [InlineData("\"default\", \"modern\"", Badge)]
+    public async Task OnlyMembersThatDifferFromTheirTypeAreMarked(string template, string badge)
     {
-        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var site = await Build(template, targetFrameworks: "\"*\"");
         var page = await Page(site, "Lib.Shared.html");
 
         Assert.Contains("data-uid=\"Lib.Shared.Everywhere\" data-applies-to=\"net8.0 netstandard2.0\"", page);
         Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
-        Assert.Contains(string.Format(Badge, Net8), page);
-        Assert.DoesNotContain(string.Format(Badge, Both), page);
+        Assert.Contains(string.Format(badge, Net8), page);
+        Assert.DoesNotContain(string.Format(badge, Both), page);
     }
 
     [Theory]
@@ -180,6 +182,18 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Matches("Switches</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
         Assert.Matches("Child</a>\\s*</div>", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ClassesDerivedAndMembersInheritedInSomeFrameworksCarryThem()
+    {
+        // so that a PDF of one framework, and the picker, can leave out those that do not exist in it
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a class=\"xref\" href=\"Lib.Switches.html\">", await Page(site, "Lib.Base.html"));
+        Assert.Matches("<div>\\s*<a class=\"xref\" href=\"Lib.Child.html\">", await Page(site, "Lib.Base.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a class=\"xref\" href=\"Lib.Base.html#Lib_Base_OnlyNet8Base\"", await Page(site, "Lib.Child.html"));
     }
 
     [Theory]
@@ -252,6 +266,20 @@ public class TargetFrameworksBuildTest : TestBase
         var child = raw["children"].Single(c => (string)c["uid"] == "Lib.OnlyNet8");
 
         Assert.Equal(["net8.0"], child["appliesTo"][0]["frameworks"].Values<string>());
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheSystemKeysListTheKeysAMergedPageAdds()
+    {
+        var site = await Build("\"default\"", targetFrameworks: "\"*\"", extraBuild: "\"exportRawModel\": true,");
+
+        foreach (var (page, key) in new[] { ("Lib.Child.raw.json", "inheritedMembersAppliesTo"), ("Lib.Base.raw.json", "derivedClassesAppliesTo") })
+        {
+            var raw = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, page), TestContext.Current.CancellationToken));
+            Assert.NotNull(raw[key]);
+            Assert.Contains(key, raw["_systemKeys"].Values<string>());
+        }
     }
 
     [Theory]
@@ -366,17 +394,18 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
-    public async Task DisableApiAppliesToRemovesItFromThePage(string template)
+    public async Task DisableApiAppliesToHidesOnlyTheLabels(string template)
     {
         var site = await Build(template, targetFrameworks: "\"*\"", extraBuild: "\"globalMetadata\": { \"_disableApiAppliesTo\": true },");
         var page = await Page(site, "Lib.Shared.html");
 
         Assert.DoesNotContain("Applies to", page);
-        Assert.DoesNotContain("data-applies-to", page);
         Assert.DoesNotContain("class=\"applies-to", page);
 
+        // what a framework picker and a framework PDF read stays, and so does what differs
+        Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
         var differs = await Page(site, "Lib.Differs.html");
-        Assert.DoesNotContain("api-variant", differs);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", differs);
     }
 
     [Theory]
