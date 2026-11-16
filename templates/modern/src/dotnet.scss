@@ -138,12 +138,10 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
       height: 0px;
   }
 
-  // a member that does not exist in the framework or axis value the reader picked
-  .applies-to-unavailable:not(h3) {
-    opacity: .5;
-  }
-
-  h3.applies-to-unavailable {
+  // A member that does not exist in the framework or axis value the reader picked: the muted text colour of the
+  // theme, which keeps the contrast of body text in light and dark, where an opacity would not. Links and code keep
+  // their own colours.
+  .applies-to-unavailable {
     color: var(--bs-secondary-color);
   }
 

@@ -1000,6 +1000,8 @@
     "platform",
     "appliesTo",
     "variants",
+    "inheritedMembersAppliesTo",
+    "derivedClassesAppliesTo",
     "attributes",
     "additionalNotes"
   ],

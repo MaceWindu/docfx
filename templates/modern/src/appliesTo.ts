@@ -156,6 +156,33 @@ export function chooseGroup(groups: Unit[][], selection: Selection): number {
   return best
 }
 
+/**
+ * The groups to show for a selection, the one shown in place of the API's own content first, none when the API does
+ * not exist in the selection. With a framework and a value picked, or a framework for an API without an axis, that is
+ * the group `chooseGroup` picks. With one of them picked, it is the group that stands in best for each value of the
+ * other, so that what differs between the frameworks of one axis value, or the axis values of one framework, stays.
+ */
+export function chooseGroups(groups: Unit[][], selection: Selection): number[] {
+  const main = chooseGroup(groups, selection)
+  if (main < 0) {
+    return []
+  }
+  const best = new Map<string, { index: number, rank: number }>()
+  groups.forEach((units, index) => {
+    for (const unit of units.filter(u => matches(u, selection))) {
+      const key = selection.framework ? (selection.value ? '' : unit.value ?? '') : unit.framework.toLowerCase()
+      const r = selection.framework ? rank(selection.framework, unit.framework) : 0
+      if (!best.has(key) || r < best.get(key).rank) {
+        best.set(key, { index, rank: r })
+      }
+    }
+  })
+  const shown = new Set(Array.from(best.values()).map(b => b.index))
+  // the API's own content has no entry under "In other frameworks" to show it in
+  const first = shown.has(0) ? 0 : main
+  return [first, ...Array.from(shown).filter(i => i !== first).sort((a, b) => a - b)]
+}
+
 /** Frameworks in the order a picker lists them: .NET, then .NET Standard, then .NET Framework, newest first. */
 export function sortFrameworks(frameworks: string[]): string[] {
   const order = (f: string): [number, number[]] => {
@@ -173,7 +200,7 @@ export function sortFrameworks(frameworks: string[]): string[] {
  * The axis of a part of the docs, as `docfx metadata` writes it to the root of its table of contents and to each of
  * its entries, which a table of contents that includes it keeps.
  */
-export type Axis = { name: string, values: { id: string, label: string }[], default?: string }
+export type Axis = { name: string, values: { id: string, label: string }[] }
 
 /** An entry of the table of contents, with what the picker reads from it. */
 export type TocEntry = { name?: string, href?: string, appliesTo?: AppliesToGroup[], axis?: Axis, items?: TocEntry[] }
@@ -228,6 +255,12 @@ export function getSelection(axis?: Axis, frameworks?: string[]): Selection {
   const query = new URLSearchParams(window.location.search)
   const read = (key: string, valid: (value: string) => string | undefined) =>
     [query.get(key), localStorage?.getItem(storageKey(key))].map(value => value ? valid(value) : undefined).find(value => value)
+  // A kept framework the table of contents does not list is forgotten: the page applies it before the table of
+  // contents is loaded, and would show it, then all frameworks, on every page.
+  const kept = localStorage?.getItem(storageKey('framework'))
+  if (kept && frameworks?.length && !validFramework(kept, frameworks)) {
+    localStorage.removeItem(storageKey('framework'))
+  }
   return {
     framework: read('framework', f => validFramework(f, frameworks)),
     value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v) ? v : undefined) : undefined
@@ -289,12 +322,13 @@ function summarize(toc: Toc): TocSummary {
 
 /**
  * What a reader can pick on a page: the frameworks of its table of contents, and the axis of the part of the docs
- * the page is in, given by the entries from the root down to the page; on a page of none, the axis when there is
- * one only.
+ * the page is in, given by the entries from the root down to the page; on another page, such as an article, the axis when
+ * there is one only. An API page of a part without an axis has none, even when another part has one.
  */
 export function getChoices(toc: Toc, path: TocEntry[] = []): Choices {
   const { frameworks, axes } = summarize(toc)
-  const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis || (axes.length === 1 ? axes[0] : undefined)
+  const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis ||
+    (axes.length === 1 && !path.some(entry => entry.appliesTo) ? axes[0] : undefined)
   return { frameworks, axis, key: axis ? axisKey(axis) : undefined }
 }
 
@@ -398,11 +432,43 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
     onApplied()
   }
   apply()
-  // what the selection shows moves the element a link points to, which the page scrolled to before
-  if (window.location.hash) {
-    shownTarget(decodeURIComponent(window.location.hash.substring(1)))?.scrollIntoView()
-  }
+  // What the selection shows moves the element a link points to, which the page scrolled to before; and a link on
+  // the page to content hidden for the selection, such as a value of an enum in a variant shown in place of the API's
+  // own content, points to nothing the browser can scroll to.
+  scrollToShownTarget()
+  window.addEventListener('hashchange', () => scrollToShownTarget(true))
+  window.addEventListener('click', (e: Event) => {
+    // a link to the fragment already in the address changes nothing, so the browser does not say so
+    const link = (e.target as Element)?.closest?.('a[href*="#"]') as HTMLAnchorElement
+    if (link && link.hash === window.location.hash && link.pathname === window.location.pathname) {
+      setTimeout(() => scrollToShownTarget(true))
+    }
+  })
   onSelectionChange(apply)
+}
+
+/**
+ * Scrolls to the element shown for the fragment of the address, if it has one; with `onlyHidden`, only when the
+ * element it names is hidden, which the browser cannot scroll to.
+ */
+export function scrollToShownTarget(onlyHidden = false) {
+  if (!window.location.hash) {
+    return
+  }
+  const id = hashId(window.location.hash)
+  if (!onlyHidden || document.getElementById(id)?.closest('[hidden]')) {
+    shownTarget(id)?.scrollIntoView()
+  }
+}
+
+/** The id a fragment such as `#Lib_Run%2A` points to; the fragment as it is when it is not valid percent-encoding. */
+export function hashId(hash: string): string {
+  const id = hash.replace(/^#/, '')
+  try {
+    return decodeURIComponent(id)
+  } catch {
+    return id
+  }
 }
 
 /**
@@ -477,39 +543,35 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
 }
 
 /**
- * Shows the page for the selection: the content of each API for the framework that stands in best, without the
- * other frameworks' differences; members that do not exist in the selection dimmed; a banner when the API itself
- * does not exist in it. In print, for a PDF of one framework, such members are left out instead.
+ * Shows the page for the selection: the content of each API for the framework that stands in best, and of what
+ * differs elsewhere only what differs within the selection; members that do not exist in the selection dimmed; a
+ * banner when the API itself does not exist in it. In print, for a PDF of one framework, such members are left out
+ * instead.
  */
 export function applySelection(selection: Selection, axis?: Axis, print = false) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
 
-  // the variants listed under "In other frameworks" whose content is shown in place of the API's own
-  const shownInPlace = new Set<Element>()
+  // the variants under "In other frameworks" that follow the content of an API, and those of them still shown
+  const listed = new Set<Element>()
+  const kept = new Set<Element>()
   document.querySelectorAll('.api-contents').forEach(container => {
     const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content')) as HTMLElement[]
-    const chosen = any ? chooseGroup(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : 0
-    blocks.forEach((block, i) => { block.hidden = i !== Math.max(chosen, 0) })
+    const shown = any ? chooseGroups(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : blocks.map((_, i) => i)
+    const inPlace = shown.length > 0 ? shown[0] : 0
+    blocks.forEach((block, i) => { block.hidden = i !== inPlace })
     // the copy of each variant follows the API's own content, in the order "In other frameworks" lists them
-    if (chosen > 0) {
-      const shown = variantsAfter(container)[chosen - 1]
-      if (shown) shownInPlace.add(shown)
-    }
+    const variants = variantsAfter(container)
+    variants.forEach(v => listed.add(v))
+    shown.filter(i => i > 0 && i !== inPlace).forEach(i => variants[i - 1] && kept.add(variants[i - 1]))
   })
-
-  // A framework picked shows its content in place of what differs elsewhere. A value picked alone keeps what differs
-  // in the other frameworks of that value, and says nothing about an API without that axis, or with another.
-  const value: Selection = { value: selection.value, axisValues: selection.axisValues }
-  document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => {
-    e.hidden = !!selection.framework || (!!selection.value && (shownInPlace.has(e) || !isAvailable(parseUnits(e.dataset.appliesTo), value)))
-  })
+  document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => { e.hidden = listed.has(e) ? !kept.has(e) : any })
   document.querySelectorAll<HTMLElement>('.api-variants-heading').forEach(heading => {
     const variants: HTMLElement[] = []
     for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
       variants.push(e as HTMLElement)
     }
-    heading.hidden = variants.length > 0 && variants.every(v => v.hidden)
+    heading.hidden = variants.length > 0 ? variants.every(v => v.hidden) : any
   })
 
   document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
@@ -546,6 +608,21 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       } else {
         entry.classList.add('applies-to-unavailable')
       }
+    }
+  })
+
+  // the classes derived, and the members inherited, in only some frameworks of a type, as a base type differs
+  document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
+    const entries = Array.from(list.querySelectorAll<HTMLElement>('dd div'))
+    entries.filter(entry => entry.dataset.appliesTo && !isAvailable(parseUnits(entry.dataset.appliesTo), selection)).forEach(entry => {
+      if (print) {
+        entry.hidden = true
+      } else {
+        entry.classList.add('applies-to-unavailable')
+      }
+    })
+    if (print && entries.length > 0 && entries.every(entry => entry.hidden)) {
+      list.hidden = true
     }
   })
 
@@ -611,10 +688,11 @@ export function memberElements(heading: Element): Element[] {
 declare global {
   interface Window {
     /**
-     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, and the ids of
-     * the axis that value is one of, when the table of contents names it.
+     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, the ids of the
+     * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
+     * not have the value, whose own values may have the same ids.
      */
-    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[] }
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[] }
   }
 }
 
@@ -622,7 +700,13 @@ declare global {
 export function applyPrintSelection() {
   const selection = window.docfxAppliesTo
   if (selection) {
-    applySelection({ framework: selection.framework || undefined, value: selection.value || undefined, axisValues: selection.axisValues || undefined }, undefined, true)
+    // the value of another axis says nothing about this page
+    const otherAxis = !!selection.otherAxisPages?.includes(window.location.pathname)
+    applySelection({
+      framework: selection.framework || undefined,
+      value: otherAxis ? undefined : selection.value || undefined,
+      axisValues: otherAxis ? undefined : selection.axisValues || undefined
+    }, undefined, true)
   }
 }
 

@@ -263,8 +263,12 @@ internal static partial class TargetFrameworkVariants
         switch (left)
         {
             case JsonObject leftObject when right is JsonObject rightObject:
-                return leftObject.Select(p => p.Key).Union(rightObject.Select(p => p.Key)).All(key =>
-                    AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content", baseLists, strict));
+                return leftObject.Select(p => p.Key).Union(rightObject.Select(p => p.Key))
+                    // No page shows the attributes of a parameter or return value, which differ wherever one
+                    // framework has an attribute such as `NotNullWhen` and another lacks or hides it: the variant
+                    // would repeat a declaration and parameters that are the same.
+                    .Where(key => !(key == "attributes" && name is "parameters" or "typeParameters" or "return"))
+                    .All(key => AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content", baseLists, strict));
 
             case JsonArray leftArray when right is JsonArray rightArray:
                 return leftArray.Count == rightArray.Count

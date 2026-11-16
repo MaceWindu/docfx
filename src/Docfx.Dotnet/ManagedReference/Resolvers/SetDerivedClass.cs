@@ -10,6 +10,9 @@ internal class SetDerivedClass : IResolverPipeline
 {
     private readonly Dictionary<string, List<string>> _derivedClassMapping = [];
 
+    // base class -> derived class -> the frameworks it derives from that base in
+    private readonly Dictionary<string, Dictionary<string, List<string>>> _derivedClassFrameworks = [];
+
     public void Run(MetadataModel yaml, ResolverContext context)
     {
         if (yaml.Members is { Count: > 0 })
@@ -27,26 +30,39 @@ internal class SetDerivedClass : IResolverPipeline
             var superClasses = new HashSet<string>();
             foreach (var inheritance in (item.Variants ?? []).Select(v => v.Content?.Inheritance).Prepend(item.Inheritance))
             {
-                if (inheritance is not { Count: > 0 })
-                {
-                    continue;
-                }
-
-                var superClass = inheritance[inheritance.Count - 1];
-
-                if (reference.TryGetValue(superClass, out ReferenceItem referenceItem))
-                {
-                    superClass = referenceItem.Definition ?? superClass;
-                }
-
-                // ignore System.Object's derived class
-                if (superClass != "System.Object" && superClasses.Add(superClass))
+                if (GetSuperClass(inheritance, reference) is { } superClass && superClasses.Add(superClass))
                 {
                     ref var derivedClasses = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassMapping, superClass, out var exists);
                     if (exists)
                         derivedClasses.Add(item.Name);
                     else
                         derivedClasses = [item.Name];
+                }
+            }
+
+            // A class whose base type differs between frameworks derives from each base in only some of them,
+            // which the page of the base marks.
+            if (item.AppliesTo is { Count: > 0 } frameworks)
+            {
+                foreach (var framework in frameworks)
+                {
+                    var inheritance = item.Variants?.FirstOrDefault(v => v.Frameworks.Contains(framework) && v.Content?.Inheritance is { Count: > 0 })?.Content.Inheritance ?? item.Inheritance;
+                    if (GetSuperClass(inheritance, reference) is not { } superClass)
+                    {
+                        continue;
+                    }
+
+                    ref var derivedIn = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassFrameworks, superClass, out var exists);
+                    if (!exists)
+                    {
+                        derivedIn = [];
+                    }
+
+                    ref var units = ref CollectionsMarshal.GetValueRefOrAddDefault(derivedIn, item.Name, out var known);
+                    if (known)
+                        units.Add(framework);
+                    else
+                        units = [framework];
                 }
             }
 
@@ -85,9 +101,31 @@ internal class SetDerivedClass : IResolverPipeline
                     {
                         derivedClasses.Sort();
                         item.DerivedClasses = derivedClasses;
+                        if (_derivedClassFrameworks.TryGetValue(item.Name, out var derivedIn))
+                        {
+                            item.DerivedClassesAppliesTo = derivedIn;
+                        }
                     }
                     continue;
             }
         }
+    }
+
+    // The base class a type derives from directly, by its definition; null for System.Object.
+    private static string GetSuperClass(List<string> inheritance, Dictionary<string, ReferenceItem> reference)
+    {
+        if (inheritance is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var superClass = inheritance[inheritance.Count - 1];
+        if (reference.TryGetValue(superClass, out ReferenceItem referenceItem))
+        {
+            superClass = referenceItem.Definition ?? superClass;
+        }
+
+        // ignore System.Object's derived class
+        return superClass == "System.Object" ? null : superClass;
     }
 }

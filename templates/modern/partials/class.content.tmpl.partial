@@ -76,7 +76,7 @@
   <dd>
 {{/derivedClasses.0}}
 {{#derivedClasses}}
-    <div>{{{specName.0.value}}}</div>
+    <div{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/derivedClasses}}
 {{#derivedClasses.0}}
   </dd>
@@ -90,7 +90,7 @@
   <dd>
 {{/inheritedMembers.0}}
 {{#inheritedMembers}}
-  <div>
+  <div{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
   {{#definition}}
     <xref uid="{{definition}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>
   {{/definition}}
