@@ -4,7 +4,7 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
-import { Selection, Toc, TocEntry, entrySelection, fetchToc, getChoices, getSelection, isEntryShown, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
+import { Selection, Toc, TocEntry, entryDisplay, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
 
 export type TocNode = TocEntry & {
   expanded?: boolean
@@ -124,13 +124,15 @@ export async function renderToc(): Promise<TocNode[]> {
         return null
       }
 
-      // APIs that do not exist in what the reader picked are left out, except the page being read and its parents
+      // APIs that do not exist in what the reader picked are left out, and groups of them only, except the page being
+      // read and its parents
       const own = picker ? entrySelection(node, selection, frameworks()) : selection
-      if (!activeNodes.includes(node) && !isEntryShown(node, own)) {
+      const display = picker ? entryDisplay(node, selection, frameworks(), n => activeNodes.includes(n)) : (items?.length > 0 ? 'group' : 'leaf')
+      if (display === 'none') {
         return null
       }
 
-      const isLeaf = !items || items.length <= 0
+      const isLeaf = display === 'leaf'
 
       const children = isLeaf ? null : renderTocNodes(items, own)
       if (tocFilter !== '' && !children && !name.toLowerCase().includes(tocFilter.toLowerCase())) {

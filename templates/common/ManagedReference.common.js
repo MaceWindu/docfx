@@ -230,6 +230,8 @@ function handleInheritedMembers(model, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
     // set on every member, so that mustache does not look up the values of the type
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    // for the picker, which dims what is not inherited in the selection
+    member.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   handleImplements(model, options);
@@ -238,6 +240,7 @@ function handleInheritedMembers(model, options) {
   (model.derivedClasses || []).forEach(function (derived, index) {
     var appliesTo = derivedIn[index] || [];
     derived.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    derived.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     derived.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   // The types that implement an interface are listed on its page where they can differ between frameworks
@@ -245,6 +248,10 @@ function handleInheritedMembers(model, options) {
   if (model.type && model.type.toLowerCase() === 'interface' && model.derivedClasses && model.derivedClasses.length > 0) {
     model.showImplementingTypes = true;
   }
+  // An extension method has the frameworks it is declared in, which its reference carries.
+  (model.extensionMethods || []).forEach(function (method) {
+    method.appliesToData = getAppliesToFrameworks(method).join(' ');
+  });
 }
 
 // An interface, or for a member an interface member, implemented in only some frameworks of the type or member.
@@ -298,7 +305,8 @@ function getVariantView(vm, variant, kind, index) {
   if (variant.syntax) {
     var own = vm.syntax || {};
     var syntax = {
-      content: variant.syntax.content || own.content,
+      // a variant leaves out a declaration that is the same, which the copy then takes from the API
+      content: variant.syntax.content.length > 0 ? variant.syntax.content : own.content,
       parameters: variant.syntax.parameters.length > 0 ? variant.syntax.parameters : (own.parameters || []),
       typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
     };

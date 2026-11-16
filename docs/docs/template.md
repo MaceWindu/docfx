@@ -46,7 +46,7 @@ Name         | Type    | Description
 `_disableAffix`         | bool    | Whether to show the right rail.
 `_disableNextArticle`   | bool    | Whether to show the previous and next article link.
 `_disableTocFilter`     | bool    | Whether to show the table of content filter box.
-`_disableApiAppliesTo`  | bool    | Whether to hide which target frameworks an API applies to. What differs in other frameworks is still shown.
+`_disableApiAppliesTo`  | bool    | Whether to hide which target frameworks an API applies to. What differs in other frameworks is still shown, and the picker still works.
 `_disableApiAppliesToFrameworks` | bool | Whether to hide the frameworks of each axis value an API applies to, and show the values only.
 `_frameworkNames`       | object  | The names to show for target frameworks, by framework.
 `_enableApiAppliesToPicker` | bool | Whether to let readers pick a target framework or axis value, and show API pages for it.

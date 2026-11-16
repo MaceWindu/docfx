@@ -139,10 +139,14 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
   }
 
   // A member that does not exist in the framework or axis value the reader picked: the muted text colour of the
-  // theme, which keeps the contrast of body text in light and dark, where an opacity would not. Links and code keep
-  // their own colours.
+  // theme, which keeps the contrast of body text in light and dark, where an opacity would not. Its links take it
+  // too: the entries of a namespace's types, inherited members and extension methods are links only.
   .applies-to-unavailable {
     color: var(--bs-secondary-color);
+
+    a {
+      color: inherit;
+    }
   }
 
   .applies-to-banner {
