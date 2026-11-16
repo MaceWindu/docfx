@@ -384,9 +384,10 @@ public class TargetFrameworkTest : TestBase
 
         await Exec(new() { Src = new(new FileMappingItem(solution, project)) { Expanded = true }, TargetFramework = "net9.0" });
 
-        // as a warning, as `src` lists it
+        // as a warning, as `src` lists it, and the solution, which holds no other project, does not warn too
         var reports = listener.Items.Where(x => x.Message.Contains("Lib.csproj' does not target")).ToList();
         Assert.Equal(LogLevel.Warning, Assert.Single(reports).LogLevel);
+        AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
     }
 
     [Theory]
@@ -405,7 +406,92 @@ public class TargetFrameworkTest : TestBase
             Properties = new() { [property] = "net8.0" },
         });
 
-        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Code == WarningCodes.Metadata.ConflictingTargetFramework);
+        AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWithoutProjectInputIsInformation()
+    {
+        var directory = Path.Combine(_projectFolder, "Source");
+        Directory.CreateDirectory(directory);
+        var source = Path.Combine(directory, "Widget.cs");
+        File.WriteAllText(source, "namespace Source { public class Widget { } }");
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        // nor does a `TargetFramework` property conflict with it, as no project is loaded
+        await Exec(new()
+        {
+            Src = Src(source),
+            TargetFramework = "net8.0",
+            Properties = new() { ["TargetFramework"] = "net8.0" },
+        });
+
+        AssertWarnings(listener);
+        Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("applies to project and solution input only"));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Source.Widget.yml")));
+    }
+
+    [Theory]
+    [InlineData("net8.0", false)]
+    [InlineData("netstandard2.0", true)]
+    public async Task TargetFrameworkOnASingleTargetVisualBasicProject(string targetFramework, bool expectWarning)
+    {
+        // A Visual Basic project yields no API outside Windows, as in MetadataCommandTest.TestMetadataCommandFromVBProject.
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        // Visual Basic defines `NET8_0=-1`, which Roslyn reads as the symbol `NET8_0` as well.
+        var project = CreateProject(
+            "VbLib",
+            "<TargetFramework>net8.0</TargetFramework><RootNamespace></RootNamespace>",
+            """
+            Namespace VbLib
+                Public Class Widget
+                End Class
+            End Namespace
+            """,
+            language: "vb");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        if (expectWarning)
+        {
+            AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "VbLib.Widget.yml")));
+    }
+
+    [Theory]
+    // the version comes from the `WINDOWS8_0_OR_GREATER` symbol; windows8.0 needs no Windows SDK package
+    [InlineData("net8.0-windows8.0", false)]
+    [InlineData("net8.0-windows8", false)]
+    [InlineData("net8.0-windows", false)]
+    [InlineData("net8.0-windows7.0", true)]
+    public async Task TargetFrameworkWithAPlatformVersionOfASingleTargetProject(string targetFramework, bool expectWarning)
+    {
+        var project = CreatePlatformProject("<TargetFramework>net8.0-windows8.0</TargetFramework>");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        if (expectWarning)
+        {
+            var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+            Assert.Contains($"does not target '{targetFramework}'", warning.Message);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
     }
 
     private Task Exec(MetadataJsonItemConfig config)
@@ -512,12 +598,12 @@ public class TargetFrameworkTest : TestBase
         return solution;
     }
 
-    private string CreateProject(string name, string targetFrameworks, string source, string items = "")
+    private string CreateProject(string name, string targetFrameworks, string source, string items = "", string language = "cs")
     {
         var directory = Path.Combine(_projectFolder, name);
         Directory.CreateDirectory(directory);
 
-        var project = Path.Combine(directory, $"{name}.csproj");
+        var project = Path.Combine(directory, $"{name}.{language}proj");
         File.WriteAllText(project, $"""
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -527,7 +613,7 @@ public class TargetFrameworkTest : TestBase
               {items}
             </Project>
             """);
-        File.WriteAllText(Path.Combine(directory, $"{name}.cs"), source);
+        File.WriteAllText(Path.Combine(directory, $"{name}.{language}"), source);
         return project;
     }
 }

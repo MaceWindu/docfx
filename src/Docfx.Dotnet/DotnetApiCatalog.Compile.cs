@@ -51,7 +51,8 @@ partial class DotnetApiCatalog
         var solutionProjectCount = 0;
         var solutionProjectMatches = 0;
 
-        // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too.
+        // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too;
+        // nor does it count toward the solution's warning then, which would report the same cause twice.
         var listedProjects = files.TryGetValue(FileType.Project, out var listed)
             ? listed.Select(f => f.NormalizedPath).ToHashSet(FilePathComparer.OSPlatformSensitiveComparer)
             : [];
@@ -203,51 +204,61 @@ partial class DotnetApiCatalog
                 project = await workspace.OpenProjectAsync(path, msbuildLogger);
             }
 
-            // Selected after loading rather than passed to MSBuild as a global property: a global
-            // `TargetFramework` would also retarget every project this one references.
-            if (config.TargetFramework is { } targetFramework)
-            {
-                var report = !(fromSolution && listedProjects.Contains(path)) && reportedProjects.Add(path);
-                (project, var matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, project, targetFramework, fromSolution, report);
-                if (fromSolution)
-                {
-                    solutionProjectCount++;
-                    solutionProjectMatches += matched ? 1 : 0;
-                }
-            }
-
-            if (isNewlyLoaded)
-            {
-                foreach (var unresolvedAnalyzer in project.AnalyzerReferences.OfType<UnresolvedAnalyzerReference>())
-                {
-                    Logger.LogWarning($"There is .NET Analyzer that can't be resolved. "
-                                    + $"If this analyzer is .NET Source Generator project. "
-                                    + $"Try build with `dotnet build -c Release` command before running docfx. Path: {unresolvedAnalyzer.FullPath}",
-                                    code: WarningCodes.Metadata.FailedToResolveAnalyzer);
-                }
-
-                foreach (var analyzer in project.AnalyzerReferences.OfType<AnalyzerFileReference>())
-                {
-                    analyzer.AnalyzerLoadFailed += (sender, e) =>
-                    {
-                        var analyzerName = analyzer.Display;
-                        var errorCode = e.ErrorCode;
-                        var referencedCompilerVersion = e.ReferencedCompilerVersion;
-
-                        Logger.LogWarning($"Failed to load .NET Analyzer. AnalyzerName: {analyzerName}, ErrorCode: {errorCode}, ReferencedCompilerVersion: {referencedCompilerVersion}",
-                                          code: WarningCodes.Metadata.FailedToLoadAnalyzer);
-                    };
-
-                }
-            }
-
+            // Every framework of a file is loaded in its language, so the check holds for the one selected too,
+            // and a project that is never documented is not reported or counted for `targetFramework`.
             if (!project.SupportsCompilation)
             {
                 Logger.LogInfo($"Skip unsupported project {project.FilePath}.");
                 return null;
             }
 
+            // Selected after loading rather than passed to MSBuild as a global property: a global
+            // `TargetFramework` would also retarget every project this one references.
+            if (config.TargetFramework is { } targetFramework)
+            {
+                // A project `src` lists is reported, and counted, by itself: one cause gives one warning.
+                var listedToo = fromSolution && listedProjects.Contains(path);
+                var report = !listedToo && reportedProjects.Add(path);
+                (project, var matched) = await TargetFrameworkHelper.SelectProject(
+                    workspace.CurrentSolution, project, targetFramework, fromSolution, report, isNewlyLoaded ? ReportAnalyzers : null);
+                if (fromSolution && !listedToo)
+                {
+                    solutionProjectCount++;
+                    solutionProjectMatches += matched ? 1 : 0;
+                }
+            }
+            else if (isNewlyLoaded)
+            {
+                ReportAnalyzers(project);
+            }
+
             return await project.GetCompilationAsync();
+        }
+
+        // Before the project is compiled: source generators run in the compilation, and a load failure is
+        // reported only to the handlers attached by then.
+        static void ReportAnalyzers(Project project)
+        {
+            foreach (var unresolvedAnalyzer in project.AnalyzerReferences.OfType<UnresolvedAnalyzerReference>())
+            {
+                Logger.LogWarning($"There is .NET Analyzer that can't be resolved. "
+                                + $"If this analyzer is .NET Source Generator project. "
+                                + $"Try build with `dotnet build -c Release` command before running docfx. Path: {unresolvedAnalyzer.FullPath}",
+                                code: WarningCodes.Metadata.FailedToResolveAnalyzer);
+            }
+
+            foreach (var analyzer in project.AnalyzerReferences.OfType<AnalyzerFileReference>())
+            {
+                analyzer.AnalyzerLoadFailed += (sender, e) =>
+                {
+                    var analyzerName = analyzer.Display;
+                    var errorCode = e.ErrorCode;
+                    var referencedCompilerVersion = e.ReferencedCompilerVersion;
+
+                    Logger.LogWarning($"Failed to load .NET Analyzer. AnalyzerName: {analyzerName}, ErrorCode: {errorCode}, ReferencedCompilerVersion: {referencedCompilerVersion}",
+                                      code: WarningCodes.Metadata.FailedToLoadAnalyzer);
+                };
+            }
         }
     }
 
