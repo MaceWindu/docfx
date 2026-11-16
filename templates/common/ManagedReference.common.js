@@ -149,6 +149,8 @@ function handleAppliesTo(vm, parent, options) {
     variant.seealso = variant.seealso || [];
     variant.overridden = variant.overridden || "";
     if (variant.syntax) {
+      // a declaration that is the same is left out when only a description of its parts differs
+      variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
       // the value of a field, property or event is labelled as in the API's own section, not as a return value

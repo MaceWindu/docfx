@@ -56,9 +56,10 @@ internal sealed class TargetFrameworkAxis
         var values = new List<(string, string, GlobMatcher[])>();
         foreach (var value in axis.Values)
         {
-            if (string.IsNullOrWhiteSpace(value.Id) || value.Id.Contains(Separator) || value.Files is not { Count: > 0 })
+            // Pages list units separated by spaces, e.g. `data-applies-to="ef9:net8.0 ef9:netstandard2.0"`.
+            if (string.IsNullOrWhiteSpace(value.Id) || value.Id.Contains(Separator) || value.Id.Any(char.IsWhiteSpace) || value.Files is not { Count: > 0 })
             {
-                return Invalid($"Every value of axis '{axis.Name}' needs an 'id' without '{Separator}' and at least one pattern in 'files'.");
+                return Invalid($"Every value of axis '{axis.Name}' needs an 'id' without '{Separator}' or whitespace and at least one pattern in 'files'.");
             }
 
             if (values.Any(v => v.Item1 == value.Id))

@@ -113,8 +113,9 @@ public static partial class DotnetApiCatalog
                 return;
             }
 
+            // As the frameworks are ordered: `net8.0-windows` is documented by the project loaded as `net8.0-windows10.0.19041.0`.
             if (frameworks is not null && config.DefaultFramework is { } defaultFramework &&
-                !frameworks.Values.Any(unit => string.Equals(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework, StringComparison.OrdinalIgnoreCase)))
+                !frameworks.Values.Any(unit => TargetFrameworkHelper.IsSameFramework(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework)))
             {
                 Logger.LogWarning(
                     $"No project is documented for the default framework '{defaultFramework}', so the nearest framework each project targets provides the content.",

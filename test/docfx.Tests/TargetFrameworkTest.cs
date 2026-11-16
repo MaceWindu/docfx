@@ -809,6 +809,20 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task ADefaultFrameworkWithoutAPlatformVersionIsTheProjectLoadedWithOne()
+    {
+        // windows8.0 needs no Windows SDK package
+        var project = CreatePlatformProject("<TargetFrameworks>net8.0;net8.0-windows8.0</TargetFrameworks>");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["*"], DefaultFramework = "net8.0-windows" });
+
+        AssertWarnings(listener);
+        Assert.Equal(["net8.0-windows8.0", "net8.0"], AppliesTo("Platform.yml"));
+    }
+
+    [Fact]
     public async Task ADefaultFrameworkOneProjectDoesNotTargetFallsBackToTheNearestOneItDoes()
     {
         var (v1, v2) = CreateTwoVersionsOfOneAssembly(v1Frameworks: "net462;netstandard2.0");

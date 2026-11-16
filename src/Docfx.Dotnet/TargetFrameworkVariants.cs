@@ -80,7 +80,9 @@ internal static partial class TargetFrameworkVariants
     // from the reference assemblies of a framework, and some ship without documentation.
     private static readonly HashSet<string> Documentation = [.. DocumentationText, "exceptions", "seealso"];
 
-    [GeneratedRegex(@"^[ \t]*(\[[^\]\r\n]*\]|<[^>\r\n]*>)[ \t]*(\r?\n|$)", RegexOptions.Multiline)]
+    // A line of a declaration that starts with `[` and ends with `]` (`<` and `>` in Visual Basic) is an attribute,
+    // whatever its arguments hold, such as `[Obsolete("Use T[] instead")]` or `<Obsolete("a > b")>`.
+    [GeneratedRegex(@"^[ \t]*(\[[^\r\n]*\]|<[^\r\n]*>)[ \t]*(\r?\n|$)", RegexOptions.Multiline)]
     private static partial Regex AttributeLineRegex();
 
     [GeneratedRegex(@"\s+")]
@@ -178,7 +180,7 @@ internal static partial class TargetFrameworkVariants
 
         if (content.Syntax is { } syntax && primary.Syntax is { } own)
         {
-            content.Syntax = SyntaxThatDiffers(own, syntax, ignore);
+            content.Syntax = SyntaxThatDiffers(own, syntax, ignore, baseLists);
         }
 
         primary.Variants ??= [];
@@ -193,14 +195,15 @@ internal static partial class TargetFrameworkVariants
     }
 
     /// <summary>
-    /// The declaration, with the parameters, type parameters and return value only where they differ: a field
-    /// whose constant differs would otherwise repeat a return type that is the same everywhere.
+    /// The declaration, parameters, type parameters and return value only where they differ: a field whose
+    /// constant differs would otherwise repeat a return type that is the same everywhere, and a parameter
+    /// described differently a declaration that is the same.
     /// </summary>
-    private static SyntaxDetail SyntaxThatDiffers(SyntaxDetail own, SyntaxDetail other, VariantIgnore ignore)
+    private static SyntaxDetail SyntaxThatDiffers(SyntaxDetail own, SyntaxDetail other, VariantIgnore ignore, bool baseLists)
     {
         return new()
         {
-            Content = other.Content,
+            Content = AreEquivalent(own.Content, other.Content, "content", ignore, baseLists) ? null : other.Content,
             Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore, baseLists: false) ? null : other.Parameters,
             TypeParameters = AreEquivalent(own.TypeParameters, other.TypeParameters, "typeParameters", ignore, baseLists: false) ? null : other.TypeParameters,
             Return = AreEquivalent(own.Return, other.Return, "return", ignore, baseLists: false) ? null : other.Return,
@@ -242,9 +245,12 @@ internal static partial class TargetFrameworkVariants
         return ReferenceEquals(left, right) || AreEquivalent(ToNode(left), ToNode(right), name, ignore, inDeclaration: false, baseLists, strict);
     }
 
+    // An attribute argument can be `double.NaN` or an infinity, which strict number handling cannot write.
+    private static readonly JsonSerializerOptions NodeOptions = new() { NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
+
     private static JsonNode ToNode(object value)
     {
-        return value is null ? null : JsonSerializer.SerializeToNode(value, value.GetType());
+        return value is null ? null : JsonSerializer.SerializeToNode(value, value.GetType(), NodeOptions);
     }
 
     private static bool AreEquivalent(JsonNode left, JsonNode right, string name, VariantIgnore ignore, bool inDeclaration, bool baseLists, bool strict)

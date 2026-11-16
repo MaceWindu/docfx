@@ -545,7 +545,7 @@ An axis besides the target framework along which the projects of this metadata i
 }
 ```
 
-One axis is supported. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value: as without an axis, a project that does not target it is documented at its default framework, with a `TargetFrameworkNotFound` warning. A project that matches no value is reported as an `InvalidAxis` error and not documented; for the projects of a solution, which commonly holds tools and tests that are not built against the dependency, that is logged as information.
+One axis is supported. The `id` of a value has no `:` or whitespace, as pages name a value and framework together as `ef9:net8.0`, separated by spaces. Without [`targetFrameworks`](#targetframeworks), every framework of each project is documented, or with [`targetFramework`](#targetframework), that one framework for each value: as without an axis, a project that does not target it is documented at its default framework, with a `TargetFrameworkNotFound` warning. A project that matches no value is reported as an `InvalidAxis` error and not documented; for the projects of a solution, which commonly holds tools and tests that are not built against the dependency, that is logged as information.
 
 Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8), EF Core 9 (.NET 8)`; [`_disableApiAppliesToFrameworks`](#_disableapiappliestoframeworks) leaves the frameworks out.
 
