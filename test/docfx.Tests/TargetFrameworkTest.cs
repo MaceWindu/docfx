@@ -390,6 +390,23 @@ public class TargetFrameworkTest : TestBase
         AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
     }
 
+    [Fact]
+    public async Task TargetFrameworkCountsAMatchingProjectListedAndInAListedSolution()
+    {
+        var project = CreateMultiTargetedProject();
+        var solution = CreateSolution(
+            project,
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = new(new FileMappingItem(solution, project)) { Expanded = true }, TargetFramework = "net8.0" });
+
+        // Lib targets net8.0, so the solution does, though `src` lists Lib too
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
     [Theory]
     [InlineData("targetframework")]
     [InlineData("TargetFrameworks")]

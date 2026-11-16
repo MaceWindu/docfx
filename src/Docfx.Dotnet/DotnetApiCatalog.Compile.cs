@@ -52,7 +52,7 @@ partial class DotnetApiCatalog
         var solutionProjectMatches = 0;
 
         // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too;
-        // nor does it count toward the solution's warning then, which would report the same cause twice.
+        // nor does it count against the solution then, which would report the same cause twice.
         var listedProjects = files.TryGetValue(FileType.Project, out var listed)
             ? listed.Select(f => f.NormalizedPath).ToHashSet(FilePathComparer.OSPlatformSensitiveComparer)
             : [];
@@ -216,12 +216,13 @@ partial class DotnetApiCatalog
             // `TargetFramework` would also retarget every project this one references.
             if (config.TargetFramework is { } targetFramework)
             {
-                // A project `src` lists is reported, and counted, by itself: one cause gives one warning.
+                // A project `src` lists is reported by itself: one cause gives one warning. So it counts toward the
+                // solution only when it matches, which still makes the solution one that targets the framework.
                 var listedToo = fromSolution && listedProjects.Contains(path);
                 var report = !listedToo && reportedProjects.Add(path);
                 (project, var matched) = await TargetFrameworkHelper.SelectProject(
                     workspace.CurrentSolution, project, targetFramework, fromSolution, report, isNewlyLoaded ? ReportAnalyzers : null);
-                if (fromSolution && !listedToo)
+                if (fromSolution && (!listedToo || matched))
                 {
                     solutionProjectCount++;
                     solutionProjectMatches += matched ? 1 : 0;

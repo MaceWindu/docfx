@@ -25,6 +25,10 @@ internal static partial class TargetFrameworkHelper
     // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows.
     private static readonly string[] s_platformSymbols = ["ANDROID", "BROWSER", "IOS", "MACCATALYST", "MACOS", "TIZEN", "TVOS", "WASI", "WINDOWS"];
 
+    // The platforms whose frameworks have no version, `net8.0-browser`: the SDK defines no `_OR_GREATER` symbol for
+    // them, so their symbol alone names the platform.
+    private static readonly string[] s_versionlessPlatformSymbols = ["BROWSER", "WASI"];
+
     // The symbols the .NET SDK defines for every framework of a family; a project without any of them
     // (a non-SDK project, or `DisableImplicitFrameworkDefines`) does not say which framework it targets.
     private static readonly string[] s_frameworkFamilySymbols = ["NET", "NETCOREAPP", "NETFRAMEWORK", "NETSTANDARD"];
@@ -169,7 +173,8 @@ internal static partial class TargetFrameworkHelper
     /// <summary>
     /// Gets the platform, and its version, of a project from its preprocessor symbols. The SDK defines one such
     /// as <c>WINDOWS</c> for .NET 5 and later only, together with a <c>WINDOWS7_0_OR_GREATER</c> for every version
-    /// up to the one targeted, the highest of which is that version: a project's own <c>WINDOWS</c> alone is not it.
+    /// up to the one targeted, the highest of which is that version: a project's own <c>WINDOWS</c> alone is not it,
+    /// except for a platform whose frameworks have no version, such as <c>BROWSER</c>.
     /// </summary>
     private static (string? Platform, Version? Version) GetPlatformFromSymbols(HashSet<string> symbols, string frameworkSymbol)
     {
@@ -189,7 +194,16 @@ internal static partial class TargetFrameworkHelper
                 .Max();
             if (version is not null)
             {
-                return (platform, version);
+                // A Windows SDK version ending in `.1` selects CsWinRT 3.0: the SDK gives its symbols the version
+                // ending in `.0`, and defines `CSWINRT3_0` for it.
+                return platform == "WINDOWS" && version.Revision == 0 && symbols.Contains("CSWINRT3_0")
+                    ? (platform, new(version.Major, version.Minor, version.Build, 1))
+                    : (platform, version);
+            }
+
+            if (s_versionlessPlatformSymbols.Contains(platform))
+            {
+                return (platform, null);
             }
         }
 
