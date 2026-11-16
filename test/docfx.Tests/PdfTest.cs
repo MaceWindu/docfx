@@ -1,7 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Docfx.Pdf;
+using System.Collections.Concurrent;
+using Docfx.Common;
 using Docfx.Tests.Common;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Actions;
@@ -180,14 +181,15 @@ public class PdfTest : TestBase
     }
 
     [Fact]
-    public async Task HeadingsTocLeavesOutTheHeadingsOfATabThatIsNotSelected()
+    public async Task APdfOfOneFrameworkLeavesOutWhatItLacksAndWarnsAboutPagesThatDoNotApplyIt()
     {
         var directory = GetRandomFolder();
         var configPath = CreateFile("docfx.json",
             """
             {
                 "build": {
-                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "content": [{ "files": [ "toc.yml" ] }],
+                    "resource": [{ "files": [ "*.html", "public/*.css" ] }],
                     "template": ["default"],
                     "dest": "_site"
                 }
@@ -196,46 +198,63 @@ public class PdfTest : TestBase
         CreateFile("toc.yml",
             """
             pdf: true
-            pdfTocPage: true
-            pdfTocSource: headings
+            pdfFramework: net462
             items:
-            - name: Setup
-              href: setup.md
+            - name: Everywhere
+              href: everywhere.html
+              appliesTo: [ { frameworks: [ net8.0, net462 ] } ]
+            - name: OnlyNet8
+              href: only-net8.html
+              appliesTo: [ { frameworks: [ net8.0 ] } ]
+            - name: Unlisted
+              href: unlisted.html
             """, directory);
-        CreateFile("setup.md",
-            """
-            # Setup
-
-            ## Before the tabs
-
-            # [Windows](#tab/windows)
-
-            ## On Windows
-
-            Windows text.
-
-            # [Linux](#tab/linux)
-
-            ## On Linux
-
-            Linux text.
-
-            ---
-
-            ## After the tabs
-            """, directory);
+        CreateFile("public/main.css", "", directory);
+        CreateFile("public/docfx.min.css", "", directory);
+        // a page of a template that does not apply the selection
+        CreateFile("everywhere.html", Html("Everywhere body", ""), directory);
+        CreateFile("only-net8.html", Html("Only net8 body", ""), directory);
+        // one that does, as the modern template marks it, for an API the selection does not have
+        CreateFile("unlisted.html", Html("Unlisted body",
+            "<script>window.docfxAppliesTo.applied = true; document.body.setAttribute('data-applies-to-unavailable', '')</script>"), directory);
 
         await Docset.Build(configPath);
+        // Docset.Pdf disposes every listener when it ends, which a TestListenerScope cannot outlive
+        var collector = new WarningCollector();
+        Logger.RegisterListener(collector);
         await Docset.Pdf(configPath);
 
         using var pdf = PdfDocument.Open(Path.Combine(directory, "_site", "toc.pdf"));
-        var toc = pdf.GetPage(1).Text;
-        Assert.Contains("Before the tabs", toc);
-        Assert.Contains("On Windows", toc);
-        Assert.Contains("After the tabs", toc);
-        // the tab that is not selected is hidden, and not printed either
-        Assert.DoesNotContain("On Linux", toc);
-        Assert.All(pdf.GetPages(), page => Assert.DoesNotContain("On Linux", page.Text));
+        var text = string.Concat(pdf.GetPages().Select(page => page.Text));
+        Assert.Contains("Everywhere body", text);
+        Assert.Contains("Unlisted body", text);
+        Assert.DoesNotContain("Only net8 body", text);
+
+        var warnings = collector.Messages;
+        Assert.Single(warnings, message => message.Contains("'/everywhere.html'") && message.Contains("only the 'modern' template"));
+        Assert.Single(warnings, message => message.Contains("'/unlisted.html'") && message.Contains("does not exist in its 'pdfFramework'"));
+
+        static string Html(string body, string script) =>
+            $$"""<!DOCTYPE html><html><head><link rel="stylesheet" href="public/main.css"></head><body>{{body}}{{script}}</body></html>""";
+    }
+
+    private sealed class WarningCollector : ILoggerListener
+    {
+        private readonly ConcurrentQueue<string> _messages = new();
+
+        public List<string> Messages => [.. _messages];
+
+        public void WriteLine(ILogItem item)
+        {
+            if (item.LogLevel == LogLevel.Warning)
+            {
+                _messages.Enqueue(item.Message);
+            }
+        }
+
+        public void Flush() { }
+
+        public void Dispose() { }
     }
 
     private static void AssertPageDestination(PdfDocument pdf, ExplicitDestination destination, int pageNumber)

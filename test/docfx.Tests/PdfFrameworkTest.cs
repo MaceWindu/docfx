@@ -177,8 +177,14 @@ public class PdfFrameworkTest
 
         Assert.Equal("Lib", PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(Json(null, null)), "toc.json")?.items?[1].name);
 
-        // in the table of contents of a PDF, it says which one cannot be read, and does not stop the others
-        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json"));
+        // nor in that of a PDF that selects nothing, which does not read them
+        var unselected = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": " ", "items": [ { "name": "A", "appliesTo": "net8.0", "axis": "x", "items": [ { "name": "B", "axis": 1 } ] } ] }"""u8.ToArray(), "toc.json");
+        Assert.Equal("A, B", string.Join(", ", Names(unselected?.items)));
+        Assert.Null(unselected.items[0].appliesTo);
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+
+        // in the table of contents of a PDF of one framework, it says which one cannot be read, and does not stop the others
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": "net8.0", "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json"));
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'"));
         // the error count is global, and later tests check it
         Logger.ResetCount();

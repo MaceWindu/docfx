@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Docfx.Build;
 using Docfx.Common;
 using Docfx.Plugins;
@@ -104,28 +105,62 @@ static class PdfBuilder
 
     /// <summary>
     /// The outline of a table of contents, or <see langword="null"/> when it has no <c>pdf: true</c>. Only those are
-    /// read whole: <c>appliesTo</c> and <c>axis</c> have a shape of their own, and a table of contents written by
-    /// hand that uses either name for something else must not stop the PDFs of the others.
+    /// read whole, and their <c>appliesTo</c> and <c>axis</c>, which have a shape of their own, only for a PDF with
+    /// <c>pdfFramework</c> or <c>pdfAxisValue</c>: a table of contents written by hand that uses either name for
+    /// something else must not stop the PDFs of the others, nor its own PDF when it does not select anything.
     /// </summary>
     internal static Outline? ReadPdfOutline(byte[] json, string path)
     {
+        bool selects;
         using (var document = JsonDocument.Parse(json))
         {
-            if (document.RootElement.ValueKind is not JsonValueKind.Object ||
-                !document.RootElement.TryGetProperty("pdf", out var pdf) || pdf.ValueKind is JsonValueKind.False or JsonValueKind.Null)
+            var root = document.RootElement;
+            if (root.ValueKind is not JsonValueKind.Object ||
+                !root.TryGetProperty("pdf", out var pdf) || pdf.ValueKind is JsonValueKind.False or JsonValueKind.Null)
             {
                 return null;
             }
+
+            selects = new[] { "pdfFramework", "pdfAxisValue" }.Any(name =>
+                root.TryGetProperty(name, out var option) && (option.ValueKind is not JsonValueKind.String || Selected(option.GetString()) is not null));
         }
 
         try
         {
-            return JsonSerializer.Deserialize<Outline>(json);
+            if (selects)
+            {
+                return JsonSerializer.Deserialize<Outline>(json);
+            }
+
+            var node = JsonNode.Parse(json)!;
+            WithoutAppliesTo(node);
+            return node.Deserialize<Outline>();
         }
         catch (JsonException ex)
         {
             Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {ex.Message}");
             return null;
+        }
+
+        static void WithoutAppliesTo(JsonNode? node)
+        {
+            switch (node)
+            {
+                case JsonObject item:
+                    item.Remove("appliesTo");
+                    item.Remove("axis");
+                    foreach (var (_, value) in item)
+                    {
+                        WithoutAppliesTo(value);
+                    }
+                    break;
+                case JsonArray items:
+                    foreach (var value in items)
+                    {
+                        WithoutAppliesTo(value);
+                    }
+                    break;
+            }
         }
     }
 
@@ -254,6 +289,15 @@ static class PdfBuilder
             });
     }
 
+    /// <summary>
+    /// What a page of a PDF with <c>pdfFramework</c> or <c>pdfAxisValue</c> did with the selection, once loaded:
+    /// <c>unapplied</c> when its template did not apply it, which only the <c>modern</c> template does and marks on
+    /// <c>window.docfxAppliesTo</c>; <c>unavailable</c> when its API does not exist in the selection; else empty.
+    /// </summary>
+    internal const string PrintSelectionStateScript =
+        "() => !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
+        " : document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : ''";
+
     // The path of the page a link of the table of contents at `tocPath` goes to, as the page's `location.pathname`
     // has it; none for a link to another site.
     private static string? SitePath(string tocPath, string href)
@@ -363,6 +407,7 @@ static class PdfBuilder
         var pagePool = new ConcurrentBag<IPage>();
         var openPages = 0;
         var checkedPages = new ConcurrentDictionary<(Outline, string), bool>();
+        var unappliedOutlines = new ConcurrentDictionary<Outline, bool>();
 
         // A PDF for one framework or axis value gets pages of its own: the script that selects them runs on every
         // page of a context, and the pages of the shared context are reused across PDFs.
@@ -558,14 +603,25 @@ static class PdfBuilder
                 }
 
                 // The page of an API the PDF's framework or axis value does not have, which the table of contents did
-                // not leave out as its entry says nothing of the API, such as an entry with a `uid` or a hand-written one.
+                // not leave out as its entry says nothing of the API, such as an entry with a `uid` or a hand-written one;
+                // and a page whose template does not apply the selection, which only the table of contents follows then.
                 var pagePath = url.AbsolutePath;
-                if (own.Context is not null && !IsTocPage(url) && checkedPages.TryAdd((outline, pagePath), true)
-                    && await page.EvaluateAsync<bool>("() => !!document.body && document.body.hasAttribute('data-applies-to-unavailable')"))
+                if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage)
+                    && checkedPages.TryAdd((outline, pagePath), true))
                 {
-                    Logger.LogWarning(
-                        $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
-                        "but is printed: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
+                    var state = await page.EvaluateAsync<string>(PrintSelectionStateScript);
+                    if (state is "unavailable")
+                    {
+                        Logger.LogWarning(
+                            $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
+                            "but is printed, without its members: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
+                    }
+                    else if (state is "unapplied" && unappliedOutlines.TryAdd(outline, true))
+                    {
+                        Logger.LogWarning(
+                            $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +
+                            "the table of contents leaves out what the selection lacks, but such pages are printed as the site shows them.");
+                    }
                 }
 
                 // Extract headings from the page if needed

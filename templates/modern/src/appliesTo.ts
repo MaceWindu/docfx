@@ -765,15 +765,17 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
   })
 
   // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
-  // namespace page, where the headings of such groups are `h3`s without frameworks of their own.
-  if (print) {
+  // namespace page, where the headings of such groups are `h3`s without frameworks of their own. Only on API pages,
+  // and by the members that have frameworks: a hidden tab of an article has terms of its own.
+  if (print && document.querySelector('article h1[data-applies-to]')) {
+    const member = 'h3[data-applies-to], dt[data-applies-to], dl.jumplist[data-applies-to]'
     document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
       const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
       const following: HTMLElement[] = []
       for (let e = section.nextElementSibling; e && !ends.test(e.tagName); e = e.nextElementSibling) {
         following.push(e as HTMLElement)
       }
-      const members = following.flatMap(e => e.matches('h3, dt, dl.jumplist') ? [e] : Array.from(e.querySelectorAll<HTMLElement>('dt')))
+      const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))
       if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
         section.hidden = true
         following.forEach(e => { e.hidden = true })
@@ -967,9 +969,10 @@ declare global {
     /**
      * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, the ids of the
      * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
-     * not have the value, whose own values may have the same ids.
+     * not have the value, whose own values may have the same ids. `applied` is set once the page shows it, which
+     * `docfx pdf` reads to warn about the pages of a template that does not.
      */
-    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[] }
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[], applied?: boolean }
   }
 }
 
@@ -984,6 +987,7 @@ export function applyPrintSelection() {
       value: otherAxis ? undefined : selection.value || undefined,
       axisValues: otherAxis ? undefined : selection.axisValues || undefined
     }, undefined, true)
+    selection.applied = true
   }
 }
 
