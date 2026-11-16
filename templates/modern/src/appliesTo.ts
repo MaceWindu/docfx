@@ -991,9 +991,7 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       return
     }
     if (print) {
-      for (const e of memberElements(heading)) {
-        (e as HTMLElement).hidden = true
-      }
+      memberElements(heading).forEach(leaveOut)
       return
     }
     heading.appendChild(unavailableBadge(labelOf(heading), false))
@@ -1008,7 +1006,7 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
   document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
     if (!isAvailable(parseUnits(entry.dataset.appliesTo), selectionOf(entry))) {
       if (print) {
-        entry.hidden = true
+        leaveOut(entry)
       } else {
         entry.classList.add('applies-to-unavailable')
         entry.querySelector('dt')?.appendChild(unavailableBadge(labelOf(entry), true))
@@ -1029,14 +1027,14 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       return entry.dataset.appliesTo && !isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), own, extensionMethods ? null : own.part)
     }).forEach(entry => {
       if (print) {
-        entry.hidden = true
+        leaveOut(entry)
       } else {
         entry.classList.add('applies-to-unavailable')
         entry.appendChild(unavailableBadge(labelOf(entry), true))
       }
     })
     if (print && entries.length > 0 && entries.every(entry => entry.hidden)) {
-      list.hidden = true
+      leaveOut(list)
     }
   })
 
@@ -1053,8 +1051,8 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       }
       const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))
       if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
-        section.hidden = true
-        following.forEach(e => { e.hidden = true })
+        leaveOut(section)
+        following.forEach(leaveOut)
       }
     })
   }
@@ -1137,6 +1135,15 @@ function shownLine(units: Unit[], selection: Selection, axis: Axis | undefined, 
 export function isHiddenBySelection(element: Element): boolean {
   // a copy an entry shows whole repeats the API's own headings, which the outline has once
   return !!element.closest('.api-content[hidden], .api-variant[hidden], .api-variants-heading[hidden], .api-variant .api-content')
+}
+
+/**
+ * In print, leaves out of the page what does not exist in the selection, marked for `docfx pdf`, which makes the
+ * links to it text, as to a page the PDF leaves out.
+ */
+function leaveOut(element: Element) {
+  (element as HTMLElement).hidden = true
+  element.setAttribute('data-applies-to-left-out', '')
 }
 
 /** The badge of something that does not exist in the selection; smaller in a list than in a heading. */
@@ -1337,6 +1344,9 @@ declare global {
 export function applyPrintSelection() {
   const selection = window.docfxAppliesTo
   if (selection) {
+    // A copy shown in place of the API's own content has the ids of its headings to itself, as on the site, so that
+    // the outline of a PDF with `pdfTocSource: headings` goes to the heading printed.
+    distinguishCopies()
     // the value of another axis says nothing about this page
     const otherAxis = !!selection.otherAxisPages?.includes(window.location.pathname)
     applySelection({
