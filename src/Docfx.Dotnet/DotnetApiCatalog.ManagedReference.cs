@@ -39,10 +39,7 @@ partial class DotnetApiCatalog
 
         int FrameworkRank(string framework)
         {
-            // `net8.0-windows` lists the project loaded as `net8.0-windows10.0.19041.0`, and `net8.0-windows7.0`
-            // the one loaded as `net8.0-windows`.
-            var index = frameworkOrder.FindIndex(f => string.Equals(f, framework, StringComparison.OrdinalIgnoreCase)
-                || TargetFrameworkHelper.MatchesFramework(framework, f) || TargetFrameworkHelper.MatchesFramework(f, framework));
+            var index = frameworkOrder.FindIndex(f => TargetFrameworkHelper.IsSameFramework(f, framework));
             return index < 0 ? int.MaxValue : index;
         }
 
@@ -309,19 +306,19 @@ partial class DotnetApiCatalog
                 }
             }
 
-            // A value of an enum only this framework has goes after the one it follows here, so that the
-            // declaring order is that of the source. Other children are appended: the order of overloads is
-            // that of the frameworks, primary first.
-            var isEnum = existingNode.Type is MemberType.Enum;
+            // A member only this framework has goes after the one it follows here, so that the order is that
+            // of the source: an overload only .NET 8 has is listed with its siblings, and an enum keeps its
+            // declaring order. The types of a namespace are appended, as without `targetFrameworks`.
+            var inSourceOrder = existingNode.Type is not MemberType.Namespace;
             var insertAt = 0;
             foreach (var item in node.Items ?? [])
             {
                 if (MergeNode(item))
                 {
                     existingNode.Items ??= [];
-                    existingNode.Items.Insert(isEnum ? insertAt++ : existingNode.Items.Count, item);
+                    existingNode.Items.Insert(inSourceOrder ? insertAt++ : existingNode.Items.Count, item);
                 }
-                else if (isEnum && existingNode.Items?.FindIndex(i => i.Name == item.Name) is int index and >= 0)
+                else if (inSourceOrder && existingNode.Items?.FindIndex(i => i.Name == item.Name) is int index and >= 0)
                 {
                     insertAt = index + 1;
                 }

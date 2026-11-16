@@ -724,7 +724,8 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "description": "The id of the value, e.g. `ef9`."
+                        "pattern": "^[^:\\s]+$",
+                        "description": "The id of the value, e.g. `ef9`, without `:` or whitespace."
                       },
                       "label": {
                         "type": "string",

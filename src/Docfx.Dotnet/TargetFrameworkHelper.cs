@@ -75,7 +75,7 @@ internal static partial class TargetFrameworkHelper
         return frameworks
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select((framework, index) => (framework, index, parsed: ParseMoniker(framework)))
-            .OrderBy(f => string.Equals(f.framework, target, StringComparison.OrdinalIgnoreCase) ? 0
+            .OrderBy(f => IsSameFramework(f.framework, target) ? 0
                 : parsedTarget is not { } t || f.parsed is not { } p || !CanReference(t, p) ? 3
                 : p.Family == t.Family ? 1
                 : 2)
@@ -83,6 +83,16 @@ internal static partial class TargetFrameworkHelper
             .ThenBy(f => f.index)
             .Select(f => f.framework)
             .ToList();
+    }
+
+    /// <summary>
+    /// Whether two framework names name the same framework, either way round with the platform version one
+    /// leaves out: <c>net8.0-windows</c> is the project loaded as <c>net8.0-windows10.0.19041.0</c>, and
+    /// <c>net8.0-windows7.0</c> the one loaded as <c>net8.0-windows</c>.
+    /// </summary>
+    internal static bool IsSameFramework(string left, string right)
+    {
+        return string.Equals(left, right, StringComparison.OrdinalIgnoreCase) || MatchesFramework(left, right) || MatchesFramework(right, left);
     }
 
     private static (FrameworkFamily Family, Version Version, string? Platform)? ParseMoniker(string moniker)

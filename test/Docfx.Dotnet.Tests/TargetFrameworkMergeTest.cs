@@ -370,6 +370,69 @@ public class TargetFrameworkMergeTest
         (result["N.T"].Variants is not null).Should().Be(expectVariant);
     }
 
+    [Theory]
+    [InlineData("[System.Obsolete(\"Use T[] instead\")]")]
+    [InlineData("[System.Obsolete(\"a > b ] c\")]")]
+    [InlineData("[A(new[] { 1 })]")]
+    public void AttributesWithBracketsInTheirArgumentsCanBeIgnored(string attribute)
+    {
+        var result = MergeIgnoring(
+            VariantIgnore.Attributes,
+            ($"namespace N {{ public class A : System.Attribute {{ public A(int[] a) {{ }} }} {attribute} public class T {{ }} }}", First),
+            ("namespace N { public class A : System.Attribute { public A(int[] a) { } } public class T { } }", Second));
+
+        result["N.T"].Syntax.Content.Values.Should().Contain(c => c.StartsWith('['));
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AttributeArgumentsThatAreNotFiniteNumbersAreCompared()
+    {
+        string Code(string max, string parameter) => $$"""
+            namespace N
+            {
+                public class A : System.Attribute { public A(double d) { } }
+                public class T
+                {
+                    [A({{max}})] public double Max { get; set; }
+                    public void M([A({{parameter}})] double d) { }
+                }
+            }
+            """;
+
+        var same = Merge((Code("double.PositiveInfinity", "double.NaN"), First), (Code("double.PositiveInfinity", "double.NaN"), Second));
+        same["N.T.Max"].Variants.Should().BeNull();
+        same["N.T.M(System.Double)"].Variants.Should().BeNull();
+
+        var different = Merge((Code("double.PositiveInfinity", "double.NaN"), First), (Code("double.NegativeInfinity", "1d"), Second));
+        different["N.T.Max"].Variants.Should().ContainSingle();
+        // the attributes of a parameter are never a difference
+        different["N.T.M(System.Double)"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AMemberOnlyAnotherFrameworkHasKeepsItsPlaceInTheSource()
+    {
+        var result = Merge(
+            ("namespace N { public class T { public void Read(int b) { } public void Write() { } } }", First),
+            ("namespace N { public class T { public void Read(int b) { } public void Read(long b) { } public void Write() { } public void Flush() { } } }", Second));
+
+        result["N.T"].Items.Select(i => i.Name).Should().Equal("N.T.Read(System.Int32)", "N.T.Read(System.Int64)", "N.T.Write", "N.T.Flush");
+    }
+
+    [Fact]
+    public void ADeclarationThatIsTheSameIsLeftOutOfAVariant()
+    {
+        var result = Merge(
+            ("namespace N { public class T { /// <param name=\"x\">milliseconds</param><returns>one</returns>\npublic int M(int x) => x; } }", First),
+            ("namespace N { public class T { /// <param name=\"x\">seconds</param><returns>one</returns>\npublic int M(int x) => x; } }", Second));
+
+        var syntax = result["N.T.M(System.Int32)"].Variants.Should().ContainSingle().Subject.Content.Syntax;
+        syntax.Content.Should().BeNull();
+        syntax.Parameters.Should().ContainSingle().Which.Description.Should().Contain("seconds");
+        syntax.Return.Should().BeNull();
+    }
+
     [Fact]
     public void AttributesOfParametersAndReturnValuesAreNotADifference()
     {

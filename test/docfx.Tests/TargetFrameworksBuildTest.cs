@@ -76,6 +76,13 @@ public class TargetFrameworksBuildTest : TestBase
                     public void Check() { }
 
             #if NET8_0
+                    /// <param name="time">In milliseconds.</param>
+            #else
+                    /// <param name="time">In seconds.</param>
+            #endif
+                    public void Wait(int time) { }
+
+            #if NET8_0
                     public const int Limit = 8;
                     public int Size { get; set; }
             #else
@@ -326,6 +333,13 @@ public class TargetFrameworksBuildTest : TestBase
 
         var variant = Regex.Match(page, "<div class=\"api-variant\"[\\s\\S]*?Described for older[\\s\\S]*?</div>\\s*</div>").Value;
         Assert.DoesNotContain("Described for net8.", variant);
+
+        // Wait differs in the description of its parameter only, so its declaration is not repeated.
+        var shared = await Page(site, "Lib.Shared.html");
+        var wait = Regex.Match(shared, "<div class=\"api-variant\" data-applies-to=\"netstandard2.0\">(?:(?!<div class=\"api-variant\")[\\s\\S])*?In seconds\\.").Value;
+        Assert.NotEmpty(wait);
+        Assert.DoesNotContain("public void Wait(int time)", wait);
+        Assert.Equal(1, Regex.Count(shared, "In milliseconds\\."));
     }
 
     [Theory]
@@ -379,7 +393,34 @@ public class TargetFrameworksBuildTest : TestBase
     [InlineData(true, "<strong>Version 1</strong>, <strong>Version 2</strong>", "<strong>Version 1</strong>")]
     public async Task AnAxisIsShownWithTheLabelsOfItsValues(bool hideFrameworks, string appliesTo, string variantLabel)
     {
-        foreach (var version in new[] { "V1", "V2" })
+        var site = await BuildWithAxis(v1Members: "", v2Members: "", hideFrameworks);
+
+        var page = await Page(site, "Lib.Widget.html");
+        Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
+        Assert.Contains("Summary of V2.", page);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
+        Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AnOverloadPageListsTheValuesOfTheAxisInItsOrder()
+    {
+        // The default value v2 goes first, and its first overload exists in v2 only.
+        var site = await BuildWithAxis(
+            v1Members: "public void Do(string s) { }",
+            v2Members: "public void Do(int i) { } public void Do(string s) { }",
+            memberLayout: "separatePages");
+
+        const string Expected = "<dt>Applies to</dt><dd><strong>Version 1</strong> (.NET 8), <strong>Version 2</strong> (.NET 8)</dd>";
+        Assert.Contains(Expected, await Page(site, "Lib.Widget.html"));
+        Assert.Contains(Expected, await Page(site, "Lib.Widget.Do.html"));
+    }
+
+    /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>
+    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage")
+    {
+        foreach (var (version, members) in new[] { ("V1", v1Members), ("V2", v2Members) })
         {
             var folder = Path.Combine(_projectFolder, version);
             Directory.CreateDirectory(folder);
@@ -396,7 +437,7 @@ public class TargetFrameworksBuildTest : TestBase
                 namespace Lib
                 {
                     /// <summary>Summary of {{version}}.</summary>
-                    public class Widget { }
+                    public class Widget { {{members}} }
                 }
                 """, TestContext.Current.CancellationToken);
         }
@@ -417,6 +458,7 @@ public class TargetFrameworksBuildTest : TestBase
                       "default": "v2"
                     }
                   ],
+                  "memberLayout": "{{memberLayout}}",
                   "dest": "api"
                 }
               ],
@@ -432,11 +474,7 @@ public class TargetFrameworksBuildTest : TestBase
         await DotnetApiCatalog.GenerateManagedReferenceYamlFiles(configPath);
         await Docset.Build(configPath);
 
-        var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
-        Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
-        Assert.Contains("Summary of V2.", page);
-        Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
-        Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
+        return Path.Combine(_projectFolder, "_site", "api");
     }
 
     private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));

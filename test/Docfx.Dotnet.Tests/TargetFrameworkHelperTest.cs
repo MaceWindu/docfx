@@ -175,10 +175,37 @@ public class TargetFrameworkHelperTest
     [InlineData("netcoreapp2.1", "netstandard2.1 netstandard2.0", "netstandard2.0 netstandard2.1")]
     [InlineData("net8.0", "net8.0-windows netstandard2.0", "netstandard2.0 net8.0-windows")]
     [InlineData("net8.0-windows", "net8.0 net8.0-windows", "net8.0-windows net8.0")]
+    [InlineData("net8.0-windows", "net8.0 net8.0-windows10.0.19041.0", "net8.0-windows10.0.19041.0 net8.0")]
+    [InlineData("net8.0-windows7.0", "net8.0 net8.0-windows", "net8.0-windows net8.0")]
     [InlineData("NET8.0", "net9.0 net8.0", "net8.0 net9.0")]
     [InlineData("unknown", "net8.0 netstandard2.0", "net8.0 netstandard2.0")]
     public void OrderByNearest(string target, string frameworks, string expected)
     {
         TargetFrameworkHelper.OrderByNearest(target, frameworks.Split(' ')).Should().Equal(expected.Split(' '));
+    }
+
+    [Theory]
+    [InlineData("ef 9")]
+    [InlineData("ef\t9")]
+    [InlineData("ef:9")]
+    public void AnAxisValueIdWithASpaceOrColonIsInvalid(string id)
+    {
+        using var listener = new Docfx.Tests.Common.TestListenerScope();
+
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = id, Files = ["**"] }] }], ["."]);
+
+        axis.Should().BeNull();
+        listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error).Should().ContainSingle(x => x.Code == Docfx.Common.ErrorCodes.Metadata.InvalidAxis);
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows", true)]
+    [InlineData("NET8.0", "net8.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows10.0.22621.0", false)]
+    [InlineData("net8.0", "net8.0-windows", false)]
+    public void IsSameFramework(string left, string right, bool expected)
+    {
+        TargetFrameworkHelper.IsSameFramework(left, right).Should().Be(expected);
     }
 }

@@ -7,9 +7,11 @@
   <h6 class="api-variant-label">{{>partials/appliesTo}}</h6>
   {{#summary}}<div class="markdown summary">{{{summary}}}</div>{{/summary}}
   {{#syntax}}
+  {{#syntax.content.0}}
   <div class="codewrapper">
     <pre><code class="lang-csharp hljs">{{syntax.content.0.value}}</code></pre>
   </div>
+  {{/syntax.content.0}}
   {{#syntax.parameters.0}}
   <h6>{{__global.parameters}}</h6>
   <dl class="parameters">
