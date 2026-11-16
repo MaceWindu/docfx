@@ -30,6 +30,10 @@ export class FakeElement {
     return this.getAttribute('id') || ''
   }
 
+  set id(value: string) {
+    this.setAttribute('id', value)
+  }
+
   get className(): string {
     return this.getAttribute('class') || ''
   }
@@ -104,6 +108,16 @@ export class FakeElement {
     child.parentElement = this
     this.childNodes.push(child)
     return child
+  }
+
+  append(...nodes: (FakeElement | string)[]) {
+    for (const node of nodes) {
+      if (typeof node === 'string') {
+        this.childNodes.push(node)
+      } else {
+        this.appendChild(node)
+      }
+    }
   }
 
   after(node: FakeElement) {
@@ -238,7 +252,7 @@ export function parseHtml(markup: string): FakeElement {
 /** The browser of a test: `document` of the markup at `url`, empty local storage, and history. */
 export function installDom(markup: string, url = 'https://example.org/docs/api/Lib.Shared.html') {
   const root = parseHtml(markup)
-  const listeners = new Map<string, (() => void)[]>()
+  const listeners = new Map<string, ((event: unknown) => void)[]>()
   const items = new Map<string, string>()
   const location = { url: new URL(url) }
 
@@ -251,8 +265,9 @@ export function installDom(markup: string, url = 'https://example.org/docs/api/L
   }
   const window = {
     get location() { return location.url },
-    addEventListener: (type: string, listener: () => void) => listeners.set(type, [...(listeners.get(type) || []), listener]),
-    dispatchEvent: (event: Event) => { (listeners.get(event.type) || []).forEach(l => l()); return true }
+    addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, [...(listeners.get(type) || []), listener]),
+    // an event the browser sends, such as `pageshow`, with the fields the page reads
+    dispatchEvent: (event: { type: string }) => { (listeners.get(event.type) || []).forEach(l => l(event)); return true }
   }
   const localStorage = {
     getItem: (key: string) => items.has(key) ? items.get(key) : null,

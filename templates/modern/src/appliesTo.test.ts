@@ -4,8 +4,9 @@
 import test from 'node:test'
 import assert from 'node:assert'
 import {
-  Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, chooseGroups, findPath, frameworkLabel, getChoices, getSelection, hashId,
-  isAvailable, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, shownEntries, shownTarget, sortFrameworks, unitsOf, validFramework
+  Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, findPath, frameworkLabel,
+  getChoices, getSelection, hashId, initAppliesTo, isAvailable, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
+  shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
 import { installDom } from './fakeDom'
 
@@ -138,6 +139,10 @@ test('axis keys', () => {
   assert.strictEqual(axisKey({ name: ' Driver! ', values: [] }), 'driver')
   // the frameworks have the key 'framework'
   assert.strictEqual(axisKey({ name: 'Framework', values: [] }), 'framework-axis')
+  // the letters of any script, and a key for a name without any
+  assert.strictEqual(axisKey({ name: 'Версия EF', values: [] }), 'версия-ef')
+  assert.strictEqual(axisKey({ name: '数据库驱动', values: [] }), '数据库驱动')
+  assert.strictEqual(axisKey({ name: '?!', values: [] }), 'axis')
 })
 
 test('valid frameworks', () => {
@@ -286,6 +291,40 @@ test('the table of contents shows what exists in the selection', () => {
   assert.deepStrictEqual(names({}, entry => entry.name === 'OnlyD1' || entry.name === 'Drivers'), ['Everywhere', 'OnlyD1', 'OnlyD2', 'Guide'])
 })
 
+test('a group of entries the selection all leaves out goes too', () => {
+  const { storage } = installDom(site, 'https://example.org/docs/api/A.html')
+  const providers: TocEntry = {
+    name: 'Providers',
+    items: [{ name: 'Sql', href: 'Sql.html', appliesTo: [{ frameworks: ['net8.0'] }] }, { name: 'Ole', href: 'Ole.html', appliesTo: [{ frameworks: ['net462'] }] }]
+  }
+  // a namespace with a page of its own, whose types are on .NET 8 only
+  const ns: TocEntry = { name: 'Lib.Modern', href: 'Lib.Modern.html', items: [{ name: 'Span', href: 'Span.html', appliesTo: [{ frameworks: ['net8.0'] }] }] }
+  // the groups of the members of a type with a page each, which have no frameworks of their own
+  const type: TocEntry = {
+    name: 'Shared',
+    href: 'Shared.html',
+    appliesTo: [{ frameworks: ['net8.0', 'net462'] }],
+    items: [{ name: 'Methods', items: [{ name: 'Do', href: 'Do.html', appliesTo: [{ frameworks: ['net8.0'] }] }] }]
+  }
+  const display = (entry: TocEntry, selection: Selection, keep: (entry: TocEntry) => boolean = () => false) =>
+    entryDisplay(entry, selection, frameworks, keep)
+
+  assert.strictEqual(display(providers, {}), 'group')
+  assert.strictEqual(display(providers, { framework: 'net462' }), 'group')
+  assert.strictEqual(display(providers, { framework: 'net45' }), 'none')
+  assert.strictEqual(display(ns, { framework: 'net462' }), 'leaf')
+  assert.strictEqual(display(type, { framework: 'net462' }), 'leaf')
+  assert.strictEqual(display(type.items[0], { framework: 'net462' }), 'none')
+  assert.strictEqual(display(type, { framework: 'net8.0' }), 'group')
+  // the page being read stays where it is
+  assert.strictEqual(display(type, { framework: 'net462' }, entry => entry.name === 'Do' || entry.name === 'Methods'), 'group')
+  // a part with the value picked for its axis: Driver 2 has no .NET Framework build
+  const drivers = mergedToc().items[1]
+  assert.strictEqual(display(drivers, { framework: 'net462' }), 'group')
+  storage.set('docfx.axis./docs/.driver', 'd2')
+  assert.strictEqual(display(drivers, { framework: 'net462' }), 'none')
+})
+
 const page = `${site}
   <article>
     <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1>
@@ -424,4 +463,156 @@ test('a link on the page to content hidden for the selection scrolls to the cont
   installDom(page, 'https://example.org/docs/api/Lib.Shared.html#Lib_Shared_Do')
   scrollToShownTarget(true)
   assert.ok(!scrolled('Lib_Shared_Do'))
+})
+
+test('the lists of a page dim what does not exist in the selection', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib" data-applies-to="net8.0 netstandard2.0">Lib</h1>
+    <h3 id="classes">Classes</h3>
+    <dl class="jumplist" id="Shared" data-applies-to="net8.0 netstandard2.0"><dt>Shared</dt><dd></dd></dl>
+    <dl class="jumplist" id="OnlyNet8" data-applies-to="net8.0"><dt>OnlyNet8</dt><dd></dd></dl>
+    <dl class="typelist derived"><dt>Derived</dt><dd><div id="Child">Child</div><div id="Switches" data-applies-to="net8.0">Switches</div></dd></dl>
+    <dl class="typelist inheritedMembers"><dt>Inherited Members</dt><dd><div id="Run" data-applies-to="net8.0">Base.Run()</div></dd></dl>
+    <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd><div id="Twice" data-applies-to="net8.0">Ext.Twice()</div></dd></dl>
+  </article>`)
+  const dimmed = () => document.querySelectorAll('.applies-to-unavailable').map(e => e.id)
+
+  applySelection({ framework: 'netstandard2.0' })
+  assert.deepStrictEqual(dimmed(), ['OnlyNet8', 'Switches', 'Run', 'Twice'])
+  applySelection({ framework: 'net10.0' })
+  assert.deepStrictEqual(dimmed(), [])
+  applySelection({})
+  assert.deepStrictEqual(dimmed(), [])
+})
+
+test('Applies to names what the selection shows', () => {
+  const markup = (appliesTo: string, line: string) => `${site}
+  <article>
+    <h1 id="Lib_Reader" data-applies-to="${appliesTo}">Reader</h1>
+    <div class="facts"><dl class="applies-to-line"><dt>Applies to</dt><dd>${line}</dd></dl></div>
+  </article>`
+  const shown = (document: { querySelectorAll: (s: string) => { hidden: boolean, textContent: string }[] }) =>
+    document.querySelectorAll('.applies-to-line dd').filter(dd => !dd.hidden).map(dd => dd.textContent)
+
+  const { document } = installDom(markup('net8.0 netstandard2.0 net462', '.NET 8, .NET Standard 2.0, .NET Framework 4.6.2'))
+  applySelection({ framework: 'net462' })
+  assert.deepStrictEqual(shown(document), ['.NET Framework 4.6.2'])
+  // .NET 10 has the .NET 8 build
+  applySelection({ framework: 'net10.0' })
+  assert.deepStrictEqual(shown(document), ['.NET 8'])
+  applySelection({})
+  assert.deepStrictEqual(shown(document), ['.NET 8, .NET Standard 2.0, .NET Framework 4.6.2'])
+  // a framework the API does not exist in has a banner, and the line as it is
+  applySelection({ framework: 'netcoreapp1.0' })
+  assert.deepStrictEqual(shown(document), ['.NET 8, .NET Standard 2.0, .NET Framework 4.6.2'])
+
+  const withAxis = installDom(markup('ef3:netstandard2.0 ef3:net462 ef9:net8.0', '<strong>EF Core 3.1</strong> (.NET Standard 2.0, .NET Framework 4.6.2), <strong>EF Core 9</strong> (.NET 8)')).document
+  applySelection({ value: 'ef3' }, ef)
+  assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Standard 2.0, .NET Framework 4.6.2)'])
+  // a framework: the build of each value that stands in best
+  applySelection({ framework: 'net10.0' }, ef)
+  assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Standard 2.0), EF Core 9 (.NET 8)'])
+  applySelection({ value: 'ef3', framework: 'net472' }, ef)
+  assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Framework 4.6.2)'])
+
+  // without the frameworks of each value, as `_disableApiAppliesToFrameworks` has it
+  const valuesOnly = installDom(markup('ef3:net462 ef9:net8.0', '<strong>EF Core 3.1</strong>, <strong>EF Core 9</strong>')).document
+  applySelection({ framework: 'net8.0' }, ef)
+  assert.deepStrictEqual(shown(valuesOnly), ['EF Core 9'])
+})
+
+test('the copies of an API have ids of their own', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h4 id="parameters-1">Parameters</h4><h2 id="example">Example</h2><h4 id="parameters-2">Parameters</h4></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h4>Parameters</h4><h2 id="example">Example</h2><h4>Parameters</h4><h4>Returns</h4></div>
+      <div class="api-content" data-applies-to="net462" data-search-ignore hidden><h2 id="example">Example</h2><h4 id="Lib_Run_variant2_x">X</h4></div>
+    </div>
+  </article>`)
+  distinguishCopies()
+  const ids = (selector: string) => document.querySelectorAll(selector).map(e => e.id)
+
+  // a heading of the summary or remarks the copy repeats, and a heading named like the same of the API's own content
+  assert.deepStrictEqual(ids('[data-applies-to="netstandard2.0"] h2, [data-applies-to="netstandard2.0"] h4'), ['parameters-1_variant1', 'example_variant1', 'parameters-2_variant1', ''])
+  assert.deepStrictEqual(ids('[data-applies-to="net462"] h2, [data-applies-to="net462"] h4'), ['example_variant2', 'Lib_Run_variant2_x'])
+  assert.deepStrictEqual(ids('[data-applies-to="net8.0"] h2, [data-applies-to="net8.0"] h4'), ['parameters-1', 'example', 'parameters-2'])
+
+  // which a link to the API's own content finds in the copy shown
+  applySelection({ framework: 'netstandard2.0' })
+  assert.strictEqual(shownTarget('parameters-2').id, 'parameters-2_variant1')
+  assert.strictEqual(shownTarget('example').id, 'example_variant1')
+})
+
+test('a dropdown keeps what the reader picked', () => {
+  const { storage, window } = installDom(site, 'https://example.org/docs/api/A.html?framework=net8.0&x=1')
+  let changes = 0
+  window.addEventListener('docfx:appliestochange', () => changes++)
+
+  select('framework', 'netstandard2.0')
+  assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'netstandard2.0')
+  // the query string would override it on this page
+  assert.strictEqual(globalThis.window.location.search, '?x=1')
+  assert.strictEqual(changes, 1)
+
+  select('ef-core', 'ef3')
+  assert.strictEqual(storage.get('docfx.axis./docs/.ef-core'), 'ef3')
+  // "All"
+  select('framework', undefined)
+  assert.ok(!storage.has('docfx.axis./docs/.framework'))
+  assert.strictEqual(changes, 3)
+})
+
+const pickerSite = `${site}
+  <meta name="docfx:appliestopicker" content="true">
+  <meta name="docfx:tocrel" content="toc.html">`
+
+function fetchTocs(tocs: Record<string, Toc>) {
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: async(url: URL) => ({ json: async() => tocs[url.pathname] })
+  })
+}
+
+test('the page shows what was picked on load, and again when it changes elsewhere', async() => {
+  fetchTocs({ '/docs/api/toc.json': { items: [{ name: 'Shared', href: 'Lib.Shared.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }] } })
+  const { document, storage, window } = installDom(pickerSite + page)
+  const shown = (id: string) => !document.getElementById(id).closest('[hidden]')
+  storage.set('docfx.axis./docs/.framework', 'netstandard2.0')
+  let applied = 0
+
+  await initAppliesTo(() => applied++)
+  assert.ok(shown('Lib_Shared_Size_variant1_remarks'))
+  assert.ok(!shown('Lib_Shared_Size_remarks'))
+  // before the table of contents is loaded, and after
+  assert.strictEqual(applied, 2)
+
+  // picked in another tab
+  storage.set('docfx.axis./docs/.framework', 'net8.0')
+  window.dispatchEvent({ type: 'storage', key: 'docfx.axis./docs/.framework' } as unknown as Event)
+  assert.ok(shown('Lib_Shared_Size_remarks'))
+  window.dispatchEvent({ type: 'storage', key: 'tocFilter' } as unknown as Event)
+  assert.strictEqual(applied, 3)
+
+  // back to a page the browser kept, after picking another framework on the next page
+  storage.set('docfx.axis./docs/.framework', 'netstandard2.0')
+  window.dispatchEvent({ type: 'pageshow', persisted: false } as unknown as Event)
+  assert.ok(shown('Lib_Shared_Size_remarks'))
+  window.dispatchEvent({ type: 'pageshow', persisted: true } as unknown as Event)
+  assert.ok(shown('Lib_Shared_Size_variant1_remarks'))
+})
+
+test('a page whose table of contents lists no frameworks shows them all', async() => {
+  fetchTocs({ '/docs/other/toc.json': { items: [{ name: 'Guide', href: 'guide.html' }] } })
+  const { document, storage } = installDom(pickerSite + page, 'https://example.org/docs/other/guide.html')
+  storage.set('docfx.axis./docs/.framework', 'netstandard2.0')
+  let applied = 0
+
+  await initAppliesTo(() => applied++)
+  // applied before the table of contents is loaded, then undone
+  assert.strictEqual(applied, 2)
+  assert.ok(!document.getElementById('Lib_Shared_Size_remarks').closest('[hidden]'))
+  assert.ok(document.querySelectorAll('.api-variant').every(e => !e.hidden))
 })

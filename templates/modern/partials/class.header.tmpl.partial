@@ -7,7 +7,7 @@
 
 <div class="facts text-secondary">
   <dl><dt>{{__global.namespace}}</dt><dd>{{{namespace.specName.0.value}}}</dd></dl>
-  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{#assembliesText}}{{.}}{{/assembliesText}}{{^assembliesText}}{{assemblies.0}}.dll{{/assembliesText}}</dd></dl>{{/assemblies.0}}{{#showAppliesTo}}<dl><dt>{{__global.appliesTo}}</dt><dd>{{>partials/appliesTo}}</dd></dl>{{/showAppliesTo}}
+  {{#assemblies.0}}<dl><dt>{{__global.assembly}}</dt><dd>{{#assembliesText}}{{.}}{{/assembliesText}}{{^assembliesText}}{{assemblies.0}}.dll{{/assembliesText}}</dd></dl>{{/assemblies.0}}{{#showAppliesTo}}<dl class="applies-to-line"><dt>{{__global.appliesTo}}</dt><dd>{{>partials/appliesTo}}</dd></dl>{{/showAppliesTo}}
 </div>
 
 {{#variantViews.0}}

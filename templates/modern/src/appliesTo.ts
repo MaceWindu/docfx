@@ -214,12 +214,13 @@ export function isPickerEnabled(): boolean {
 }
 
 /**
- * The key of an axis in storage and in the query string: its name in lower case, e.g. `ef-core`; never
- * `framework`, which is the key of the frameworks.
+ * The key of an axis in storage and in the query string: its name in lower case, its letters and digits in any
+ * script, e.g. `ef-core` or `версия`; `axis` for a name without any; never `framework`, which is the key of the
+ * frameworks.
  */
 export function axisKey(axis: Axis): string {
-  const key = axis.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  return key === 'framework' ? 'framework-axis' : key
+  const key = axis.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
+  return key === 'framework' ? 'framework-axis' : key || 'axis'
 }
 
 /**
@@ -275,7 +276,8 @@ export function keepLinkSelection(choices: Choices) {
   }
 }
 
-function select(key: string, value: string | undefined) {
+/** Keeps what the reader picked in a dropdown, `undefined` for "All", and shows the page for it. */
+export function select(key: string, value: string | undefined) {
   if (value) {
     localStorage?.setItem(storageKey(key), value)
   } else {
@@ -372,6 +374,24 @@ export function shownEntries(items: TocEntry[], selection: Selection, frameworks
   })
 }
 
+/**
+ * How the table of contents shows an entry for the selection of its parent: not at all, without entries below it, or
+ * with them. A group whose entries the selection all leaves out goes too, or without them when it has a page.
+ */
+export function entryDisplay(entry: TocEntry, selection: Selection, frameworks: string[], keep: (entry: TocEntry) => boolean): 'none' | 'leaf' | 'group' {
+  const own = entrySelection(entry, selection, frameworks)
+  if (!keep(entry) && !isEntryShown(entry, own)) {
+    return 'none'
+  }
+  if (!entry.items?.length) {
+    return 'leaf'
+  }
+  if ((own.framework || own.value) && !entry.items.some(child => child.name && entryDisplay(child, own, frameworks, keep) !== 'none')) {
+    return entry.href ? 'leaf' : 'none'
+  }
+  return 'group'
+}
+
 const tocs = new Map<string, Promise<unknown>>()
 
 // `_frameworkNames`, which the table of contents carries for the pages that are not API pages
@@ -441,6 +461,19 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
     }
   })
   onSelectionChange(apply)
+  // A page the browser kept for its back button, or open in another tab, shows what was picked when it was last
+  // shown; the reader may have picked something else since, on another page.
+  const changed = () => window.dispatchEvent(new Event(changeEvent))
+  window.addEventListener('pageshow', (e: PageTransitionEvent) => {
+    if (e.persisted) {
+      changed()
+    }
+  })
+  window.addEventListener('storage', (e: StorageEvent) => {
+    if (!e.key || e.key.startsWith('docfx.axis.')) {
+      changed()
+    }
+  })
 }
 
 /**
@@ -540,8 +573,9 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
 
 /**
  * Shows the page for the selection: the content of each API for the framework that stands in best, and of what
- * differs elsewhere only what differs within the selection; members that do not exist in the selection dimmed; a
- * banner when the API itself does not exist in it.
+ * differs elsewhere only what differs within the selection; members, types, and inherited members and extension
+ * methods, that do not exist in the selection dimmed; "Applies to" for what is shown; a banner when the API itself
+ * does not exist in it.
  */
 export function applySelection(selection: Selection, axis?: Axis) {
   const any = !!(selection.framework || selection.value)
@@ -569,8 +603,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
     heading.hidden = variants.length > 0 ? variants.every(v => v.hidden) : any
   })
 
-  document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner').forEach(e => e.remove())
+  document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner, .applies-to-selection').forEach(e => e.remove())
   document.querySelectorAll('.applies-to-unavailable').forEach(e => e.classList.remove('applies-to-unavailable'))
+  const line = document.querySelector<HTMLElement>('article .applies-to-line dd')
+  if (line) {
+    line.hidden = false
+  }
   if (!any) {
     return
   }
@@ -589,13 +627,75 @@ export function applySelection(selection: Selection, axis?: Axis) {
     }
   })
 
+  // the types a namespace page lists, and the members of a type with a page each
+  document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
+    if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+      entry.classList.add('applies-to-unavailable')
+    }
+  })
+
+  // the classes derived, and the members inherited, in only some frameworks of a type, as a base type differs, and
+  // extension methods declared in only some
+  document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
+    list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
+      if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+        entry.classList.add('applies-to-unavailable')
+      }
+    })
+  })
+
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
-  if (title && !isAvailable(parseUnits(title.dataset.appliesTo), selection)) {
+  const units = title ? parseUnits(title.dataset.appliesTo) : []
+  if (title && !isAvailable(units, selection)) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
     title.parentElement.querySelector('.facts')?.after(banner)
+  } else if (title && line) {
+    // with `_disableApiAppliesToFrameworks`, the line names the axis values only
+    const withFrameworks = !line.querySelector('strong') || line.textContent.includes('(')
+    line.hidden = true
+    line.after(shownLine(units, selection, axis, withFrameworks))
   }
+}
+
+/**
+ * "Applies to" for a selection: what the content shown is documented for, the framework that stands in best for
+ * each axis value, or with a value only, the frameworks of that value; e.g. `**EF Core 9** (.NET 8)`.
+ */
+function shownLine(units: Unit[], selection: Selection, axis: Axis | undefined, withFrameworks: boolean): HTMLElement {
+  const groups = new Map<string, Unit[]>()
+  for (const unit of units.filter(u => matches(u, selection))) {
+    const key = unit.value ?? ''
+    const group = groups.get(key) || []
+    if (!selection.framework) {
+      group.push(unit)
+    } else if (group.length === 0 || rank(selection.framework, unit.framework) < rank(selection.framework, group[0].framework)) {
+      group.splice(0, 1, unit)
+    }
+    groups.set(key, group)
+  }
+
+  const names = frameworkNames()
+  const dd = document.createElement('dd')
+  dd.className = 'applies-to-selection'
+  Array.from(groups.entries()).forEach(([value, group], i) => {
+    const frameworks = group.map(u => frameworkLabel(u.framework, names)).join(', ')
+    if (i > 0) {
+      dd.append(', ')
+    }
+    if (value) {
+      const strong = document.createElement('strong')
+      strong.textContent = axis?.values.find(v => v.id === value)?.label || value
+      dd.append(strong)
+      if (withFrameworks) {
+        dd.append(` (${frameworks})`)
+      }
+    } else {
+      dd.append(frameworks)
+    }
+  })
+  return dd
 }
 
 /** The elements of "In other frameworks" after the content of an API, one for each variant. */
@@ -624,6 +724,41 @@ export function memberElements(heading: Element): Element[] {
     elements.push(e)
   }
   return elements
+}
+
+/**
+ * Gives what the hidden copy of an API repeats of the API's own content ids of its own, with the suffix of the copy,
+ * such as `_variant1`, which `shownTarget` maps: the headings of its summary and remarks, which have the ids of the
+ * API's own, and its headings without an id, such as "Parameters", as the same heading of the API's own content is
+ * named. Run after the headings of the page are named, and before those of the copies, which would otherwise take the
+ * numbers that the headings after them have without copies.
+ */
+export function distinguishCopies() {
+  document.querySelectorAll('.api-contents').forEach(container => {
+    const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content'))
+    blocks.slice(1).forEach((copy, i) => {
+      const suffix = `_variant${i + 1}`
+      copy.querySelectorAll('[id]').forEach(e => {
+        if (document.getElementById(e.id) !== e) {
+          e.id += suffix
+        }
+      })
+      const seen = new Map<string, number>()
+      copy.querySelectorAll('h2, h3, h4').forEach(heading => {
+        if (heading.id) {
+          return
+        }
+        const text = heading.textContent.trim()
+        const key = `${heading.tagName} ${text}`
+        const n = seen.get(key) || 0
+        seen.set(key, n + 1)
+        const own = Array.from(blocks[0].querySelectorAll(heading.tagName)).filter(h => h.textContent.trim() === text)[n]
+        if (own?.id) {
+          heading.id = own.id + suffix
+        }
+      })
+    })
+  })
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */

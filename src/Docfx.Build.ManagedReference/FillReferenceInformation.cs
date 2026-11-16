@@ -43,11 +43,16 @@ public class FillReferenceInformation : BaseDocumentBuildStep
             return;
         }
         var uids = new HashSet<string>(GetUidsToFill(model));
+        var extensionMethods = new HashSet<string>(model.Items.SelectMany(i => i.ExtensionMethods ?? Enumerable.Empty<string>()));
         foreach (var r in model.References)
         {
             if (!uids.Contains(r.Uid))
             {
                 continue;
+            }
+            if (extensionMethods.Contains(r.Uid))
+            {
+                FillAppliesToOfDefinition(r, host);
             }
             var m = host.LookupByUid(r.Uid).Find(x => x.Type == DocumentType.Article);
             if (m == null)
@@ -65,6 +70,26 @@ public class FillReferenceInformation : BaseDocumentBuildStep
                 continue;
             }
             FillContent(r, item);
+        }
+    }
+
+    /// <summary>
+    /// An extension method is listed by a uid of its own for the type it extends, which no item has: it takes the
+    /// frameworks it applies to from the method it stands for, so that the picker can dim it.
+    /// </summary>
+    private void FillAppliesToOfDefinition(ReferenceViewModel r, IHostService host)
+    {
+        if (r.Definition is not { } definition || definition == r.Uid)
+        {
+            return;
+        }
+
+        var appliesTo = host.LookupByUid(definition).Find(x => x.Type == DocumentType.Article) is { } m
+            ? ((PageViewModel)m.Content).Items.Find(x => x.Uid == definition)?.AppliesTo
+            : _items.TryGetValue(definition, out var i) ? i.AppliesTo : null;
+        if (appliesTo != null)
+        {
+            r.Additional[Constants.PropertyName.AppliesTo] = appliesTo;
         }
     }
 

@@ -166,6 +166,18 @@ public class TargetFrameworksBuildTest : TestBase
                 }
             }
             """);
+        File.WriteAllText(Path.Combine(folder, "Ext.cs"), """
+            namespace Lib
+            {
+                public static class Ext
+                {
+                    public static void Once(this Shared shared) { }
+            #if NET8_0
+                    public static void Twice(this Shared shared) { }
+            #endif
+                }
+            }
+            """);
     }
 
     [Theory]
@@ -519,6 +531,14 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.NotEmpty(wait);
         Assert.DoesNotContain("public void Wait(int time)", wait);
         Assert.Equal(1, Regex.Count(shared, "In milliseconds\\."));
+
+        if (template.Contains("modern"))
+        {
+            // the hidden copy the picker shows takes the declaration from the API
+            var copy = Regex.Match(await RawPage(site, "Lib.Shared.html"), "<div class=\"api-content\" data-applies-to=\"[^\"]*netstandard2.0[^\"]*\" data-search-ignore hidden>(?:(?!<div class=\"api-content\")[\\s\\S])*?In seconds\\.").Value;
+            Assert.NotEmpty(copy);
+            Assert.Contains("public void Wait(int time)", copy);
+        }
     }
 
     [Theory]
@@ -617,6 +637,42 @@ public class TargetFrameworksBuildTest : TestBase
         // pages other than API pages label frameworks as API pages do, from the table of contents
         var toc = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, "toc.json"), TestContext.Current.CancellationToken));
         Assert.Equal(picker ? "Modern" : null, (string)toc["frameworkNames"]?["net8.0"]);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task DisableApiAppliesToKeepsThePicker()
+    {
+        var options = "\"globalMetadata\": { \"_disableApiAppliesTo\": true, \"_enableApiAppliesToPicker\": true },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        Assert.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">", page);
+        Assert.DoesNotContain("Applies to", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("samePage")]
+    [InlineData("separatePages")]
+    public async Task EachListOfAPageCarriesTheFrameworksOfItsEntries(string memberLayout)
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: memberLayout);
+
+        // the types of a namespace, which the picker dims
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a [^>]*>OnlyNet8</a>", await RawPage(site, "Lib.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>Switches</a>", await RawPage(site, "Lib.Base.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Base\\.OnlyNet8Base\\(\\)</a>", await RawPage(site, "Lib.Child.html"));
+
+        var shared = await RawPage(site, "Lib.Shared.html");
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Ext\\.Twice\\(Shared\\)</a>", shared);
+        Assert.Matches("<div data-applies-to=\"net8.0 netstandard2.0\">\\s*<a [^>]*>Ext\\.Once\\(Shared\\)</a>", shared);
+        // and the line that names what the picker shows
+        Assert.Contains("<dl class=\"applies-to-line\"><dt>Applies to</dt>", shared);
+        if (memberLayout == "separatePages")
+        {
+            Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a [^>]*>OnlyNet8Member</a>", shared);
+        }
     }
 
     [Fact]
