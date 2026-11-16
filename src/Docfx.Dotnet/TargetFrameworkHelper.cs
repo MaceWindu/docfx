@@ -48,14 +48,47 @@ internal static partial class TargetFrameworkHelper
     /// as a warning for a project the entry lists, and as information for one that comes from a solution,
     /// which commonly holds analyzers, tools and test projects that target other frameworks.
     /// </summary>
+    /// <param name="beforeCompile">Called with the project to document before it is first compiled here.</param>
     /// <returns>The project to document, and whether it is known to target <paramref name="targetFramework"/>.</returns>
-    public static async Task<(Project project, bool matched)> SelectProject(Solution solution, Project project, string targetFramework, bool fromSolution = false, bool report = true)
+    public static async Task<(Project project, bool matched)> SelectProject(
+        Solution solution, Project project, string targetFramework, bool fromSolution = false, bool report = true, Action<Project>? beforeCompile = null)
     {
         var candidates = solution.Projects
             .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
             .ToList();
 
         if (candidates.Count > 1)
+        {
+            var (selected, matched) = SelectByName();
+            beforeCompile?.Invoke(selected);
+            return (selected, matched);
+        }
+
+        beforeCompile?.Invoke(project);
+
+        var targets = TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework);
+        // A project without the symbols, such as one that sets `DisableImplicitFrameworkDefines`, still has
+        // the attribute the SDK generates. The compilation is the one documented, so it is not built twice.
+        // `TargetsFramework` says null only for a framework that names one exact version.
+        if (targets is null && await project.GetCompilationAsync() is { } compilation &&
+            GetTargetFrameworkFromAttribute(compilation.Assembly) is { } attributeFramework)
+        {
+            targets = MatchesFramework(attributeFramework, targetFramework);
+        }
+
+        switch (targets)
+        {
+            case true:
+                return (project, true);
+            case false:
+                Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting the target framework it has instead.");
+                return (project, false);
+            default:
+                Report($"Project '{project.FilePath}' says neither in its preprocessor symbols nor in a TargetFrameworkAttribute which framework it targets, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
+                return (project, false);
+        }
+
+        (Project, bool) SelectByName()
         {
             // An exact name wins over one that only writes the platform version differently, or that a
             // framework without a platform version selects among several versions of one platform.
@@ -72,27 +105,6 @@ internal static partial class TargetFrameworkHelper
             var available = string.Join(", ", candidates.Select(GetTargetFrameworkFromName).Where(tfm => tfm is not null).Select(tfm => $"'{tfm}'"));
             Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{GetTargetFrameworkFromName(project)}' instead. It targets {available}.");
             return (project, false);
-        }
-
-        var targets = TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework);
-        // A project without the symbols, such as one that sets `DisableImplicitFrameworkDefines`, still has
-        // the attribute the SDK generates. The compilation is the one documented, so it is not built twice.
-        if (targets is null && await project.GetCompilationAsync() is { } compilation &&
-            GetTargetFrameworkFromAttribute(compilation.Assembly) is { } attributeFramework)
-        {
-            targets = TargetFrameworkSymbolRegex().IsMatch(GetTargetFrameworkSymbol(targetFramework)) && MatchesFramework(attributeFramework, targetFramework);
-        }
-
-        switch (targets)
-        {
-            case true:
-                return (project, true);
-            case false:
-                Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting the target framework it has instead.");
-                return (project, false);
-            default:
-                Report($"Project '{project.FilePath}' says neither in its preprocessor symbols nor in a TargetFrameworkAttribute which framework it targets, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
-                return (project, false);
         }
 
         void Report(string message)
