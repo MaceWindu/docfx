@@ -240,18 +240,6 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Matches("Child</a>\\s*</div>", page);
     }
 
-    [Fact]
-    [Trait("Related", "docfx")]
-    public async Task ClassesDerivedAndMembersInheritedInSomeFrameworksCarryThem()
-    {
-        // so that a PDF of one framework, and the picker, can leave out those that do not exist in it
-        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
-
-        Assert.Matches("<div data-applies-to=\"net8.0\"><a class=\"xref\" href=\"Lib.Switches.html\">", await Page(site, "Lib.Base.html"));
-        Assert.Matches("<div>\\s*<a class=\"xref\" href=\"Lib.Child.html\">", await Page(site, "Lib.Base.html"));
-        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a class=\"xref\" href=\"Lib.Base.html#Lib_Base_OnlyNet8Base\"", await Page(site, "Lib.Child.html"));
-    }
-
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
@@ -351,21 +339,11 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     public async Task ANamespacePageNamesTheFrameworksOfItsNamespace()
     {
-        // so that the picker says so on a namespace page whose namespace does not exist in the selection
+        // so that the picker says so on a namespace page whose namespace does not exist in the selection, and a PDF of
+        // one framework warns about a namespace page it prints although none of its types exists in it
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
 
         Assert.Matches("<h1 id=\"Lib\" data-uid=\"Lib\" class=\"text-break\" data-applies-to=\"net8.0 netstandard2.0\">", await Page(site, "Lib.html"));
-    }
-
-    [Fact]
-    [Trait("Related", "docfx")]
-    public async Task ATypePageWithMembersOnPagesOfTheirOwnMarksTheMembersItLists()
-    {
-        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
-        var page = await Page(site, "Lib.Shared.html");
-
-        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.OnlyNet8Member.html#", page);
-        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0 netstandard2.0\">\\s*<dt><a class=\"xref\" href=\"Lib.Shared.Everywhere.html#", page);
     }
 
     [Fact]

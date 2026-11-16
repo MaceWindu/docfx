@@ -1491,14 +1491,35 @@ test('in print, the value of another axis says nothing about a page whose axis h
   </article></body>`
   const print = (otherAxisPages?: string[]) => {
     const { document, window } = installDom(markup, 'https://example.org/docs/api/Driver.html')
-    Object.assign(window, { docfxAppliesTo: { value: 'ef9', axisValues: ['ef8', 'ef9'], otherAxisPages } })
+    const docfxAppliesTo: Window['docfxAppliesTo'] = { value: 'ef9', axisValues: ['ef8', 'ef9'], otherAxisPages }
+    Object.assign(window, { docfxAppliesTo })
     applyPrintSelection()
+    // which `docfx pdf` reads, to warn about a template that does not
+    assert.ok(docfxAppliesTo.applied)
     return !!document.getElementById('Driver_Ef8').closest('[hidden]')
   }
 
   assert.ok(!print(['/docs/api/Driver.html']))
   // on a page `docfx pdf` does not know the axis of, the values of the axes that have the value count
   assert.ok(print(undefined))
+})
+
+test('in print, a section keeps what a hidden tab has', () => {
+  // the second tab of a tab group is hidden until picked, and has terms of its own
+  const tabs = `<h2 id="install">Install</h2>
+    <div class="tabGroup"><section id="tab1"><p>dotnet add package</p></section><section id="tab2" hidden="hidden"><dl><dt>Term</dt><dd>x</dd></dl></section></div>`
+  const shown = (document: { getElementById: (id: string) => { closest: (s: string) => unknown } }) =>
+    ['install', 'tab1'].every(id => !document.getElementById(id).closest('[hidden]'))
+
+  // an article in an API PDF
+  const article = installDom(`${site}<body><article><h1 id="Guide">Guide</h1>${tabs}</article></body>`).document
+  applySelection({ framework: 'net462' }, undefined, true)
+  assert.ok(shown(article))
+
+  // the remarks of an API page
+  const api = installDom(`${site}<body><article><h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>${tabs}</article></body>`).document
+  applySelection({ framework: 'net462' }, undefined, true)
+  assert.ok(shown(api))
 })
 
 test('a class derived, or a member inherited, in other frameworks only is dimmed on the page', () => {
