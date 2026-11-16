@@ -111,35 +111,68 @@ static class PdfBuilder
     /// </summary>
     internal static Outline? ReadPdfOutline(byte[] json, string path)
     {
-        bool selects;
-        using (var document = JsonDocument.Parse(json))
+        if (JsonNode.Parse(json) is not JsonObject root ||
+            !root.TryGetPropertyValue("pdf", out var pdf) || pdf is null || pdf.GetValueKind() is JsonValueKind.False)
         {
-            var root = document.RootElement;
-            if (root.ValueKind is not JsonValueKind.Object ||
-                !root.TryGetProperty("pdf", out var pdf) || pdf.ValueKind is JsonValueKind.False or JsonValueKind.Null)
-            {
-                return null;
-            }
+            return null;
+        }
 
-            selects = new[] { "pdfFramework", "pdfAxisValue" }.Any(name =>
-                root.TryGetProperty(name, out var option) && (option.ValueKind is not JsonValueKind.String || Selected(option.GetString()) is not null));
+        // A number, as YAML writes `pdfAxisValue: 8`, is the value it spells; an empty option, or one that is not
+        // text, selects nothing, rather than stop the PDF.
+        var ignored = new HashSet<string>();
+        ReadOptions(root);
+        foreach (var name in ignored)
+        {
+            Logger.LogWarning($"'{name}' of table of contents '{path}' is not text, and is ignored.");
         }
 
         try
         {
-            if (selects)
+            var selects = new[] { "pdfFramework", "pdfAxisValue" }.Any(name => Selected((string?)root[name]) is not null);
+            if (!selects)
             {
-                return JsonSerializer.Deserialize<Outline>(json);
+                WithoutAppliesTo(root);
             }
-
-            var node = JsonNode.Parse(json)!;
-            WithoutAppliesTo(node);
-            return node.Deserialize<Outline>();
+            return root.Deserialize<Outline>();
         }
         catch (JsonException ex)
         {
             Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {ex.Message}");
             return null;
+        }
+
+        void ReadOptions(JsonNode? node)
+        {
+            switch (node)
+            {
+                case JsonObject item:
+                    foreach (var name in new[] { "pdfFramework", "pdfAxisValue" })
+                    {
+                        switch (item[name]?.GetValueKind())
+                        {
+                            case JsonValueKind.Number:
+                                item[name] = item[name]!.ToJsonString();
+                                break;
+                            case JsonValueKind.String or null:
+                                break;
+                            default:
+                                item.Remove(name);
+                                ignored.Add(name);
+                                break;
+                        }
+                    }
+                    foreach (var (_, value) in item)
+                    {
+                        ReadOptions(value);
+                    }
+                    break;
+                case JsonArray items:
+                    foreach (var value in items)
+                    {
+                        ReadOptions(value);
+                    }
+                    break;
+            }
         }
 
         static void WithoutAppliesTo(JsonNode? node)
@@ -187,6 +220,15 @@ static class PdfBuilder
         {
             Logger.LogWarning($"'pdfAxisValue' of '{outline.pdfFileName ?? outline.name}' is '{value}', which is not a value of an axis of its API.");
             warned = true;
+        }
+
+        // Pages carry the ids of axis values, not their axis, so a value of several axes is picked in each.
+        List<string> axesOfValue = value is null ? [] : axes.Where(axis => HasValue(axis, value)).Select(axis => axis.name ?? "").Distinct().ToList();
+        if (axesOfValue.Count > 1)
+        {
+            Logger.LogWarning(
+                $"'pdfAxisValue' '{value}' of '{outline.pdfFileName ?? outline.name}' is a value of the axes {string.Join(", ", axesOfValue.Select(name => $"'{name}'"))}, " +
+                "and leaves out what each of them lacks of it. Give the values of different axes different ids to print one only.");
         }
         if (groups.Count > 0 && framework is not null && !groups.Any(group => (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))))
         {
@@ -298,6 +340,10 @@ static class PdfBuilder
         "() => !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
         " : document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : ''";
 
+    /// <summary>The ids of what a page of a PDF of one framework or axis value leaves out, as the <c>modern</c> template marks it.</summary>
+    internal const string LeftOutIdsScript =
+        "() => Array.from(document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]'), e => e.id)";
+
     // The path of the page a link of the table of contents at `tocPath` goes to, as the page's `location.pathname`
     // has it; none for a link to another site.
     private static string? SitePath(string tocPath, string href)
@@ -352,6 +398,9 @@ static class PdfBuilder
     public static async Task CreatePdf(string outputFolder, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        // The pages docfx built, by their path in the site: a page the build copies as it is, such as a hand-written
+        // HTML file, has no template to apply a selection.
+        var builtPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pdfTocList = GetPdfTocs().ToList();
         var pdfTocs = pdfTocList.ToDictionary(p => p.url, p => p.toc);
         if (pdfTocs.Count == 0)
@@ -494,6 +543,11 @@ static class PdfBuilder
 
             foreach (var file in manifest.Files)
             {
+                if (file.Type != "Resource" && file.Output.TryGetValue(".html", out var htmlOutput))
+                {
+                    builtPages.Add("/" + htmlOutput.RelativePath.Replace('\\', '/'));
+                }
+
                 if (file.Type != "Toc" || !file.Output.TryGetValue(".json", out var jsonOutput))
                     continue;
 
@@ -551,22 +605,20 @@ static class PdfBuilder
             return await pageContext.NewPageAsync();
         }
 
-        async Task<(byte[]? bytes, List<HeadingInfo> headings)> PrintPdf(Outline outline, Uri url, int headingDepth)
+        async Task<(byte[]? bytes, List<HeadingInfo> headings, string[] leftOut)> PrintPdf(Outline outline, Uri url, int headingDepth)
         {
             await pageLimiter.WaitAsync(cancellationToken);
             var (pageContext, pool) = outlineContexts.TryGetValue(outline, out var own) ? own : (context, pagePool);
             var page = await RentPage(pageContext, pool);
             var headings = new List<HeadingInfo>();
-            var timedOut = false;
-            // whether a page that timed out loading still answers what it is asked
-            var responsive = true;
+            string[] leftOut = [];
 
             try
             {
                 Uri beforeUri = new(page.Url);
                 var response = await page.GotoAsync(url.ToString(), new() { WaitUntil = WaitUntilState.DOMContentLoaded });
                 if (response?.Status is 404)
-                    return (null, headings);
+                    return (null, headings, leftOut);
 
                 bool isSameUrlNavigation = response == null && beforeUri == url;
                 bool isHashFragmentNavigation = response == null
@@ -591,8 +643,17 @@ static class PdfBuilder
                 {
                     try
                     {
-                        await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                        // The page of a PDF of one framework or axis value gives the copies of its content ids of
+                        // their own as it applies the selection, so their headings are linked once it is ready.
+                        if (own.Context is null)
+                        {
+                            await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                        }
                         await page.WaitForFunctionAsync("!window.docfx || window.docfx.ready");
+                        if (own.Context is not null)
+                        {
+                            await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                        }
                         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
                     }
                     catch (TimeoutException)
@@ -604,7 +665,8 @@ static class PdfBuilder
 
                 // The page of an API the PDF's framework or axis value does not have, which the table of contents did
                 // not leave out as its entry says nothing of the API, such as an entry with a `uid` or a hand-written one;
-                // and a page whose template does not apply the selection, which only the table of contents follows then.
+                // and a page docfx built with a template that does not apply the selection, which only the table of
+                // contents follows then.
                 var pagePath = url.AbsolutePath;
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage)
                     && checkedPages.TryAdd((outline, pagePath), true))
@@ -616,12 +678,19 @@ static class PdfBuilder
                             $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
                             "but is printed, without its members: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
                     }
-                    else if (state is "unapplied" && unappliedOutlines.TryAdd(outline, true))
+                    else if (state is "unapplied" && builtPages.Contains(Uri.UnescapeDataString(pagePath)) && unappliedOutlines.TryAdd(outline, true))
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +
                             "the table of contents leaves out what the selection lacks, but such pages are printed as the site shows them.");
                     }
+                }
+
+                // What the page leaves out for the selection, such as a member, which a link to stays text, as a link
+                // to a page the PDF leaves out does.
+                if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage))
+                {
+                    leftOut = await page.EvaluateAsync<string[]>(LeftOutIdsScript);
                 }
 
                 // Extract headings from the page if needed
@@ -636,12 +705,7 @@ static class PdfBuilder
                     PrintBackground = outline.pdfPrintBackground,
                 }));
 
-                if (!responsive)
-                {
-                    Logger.LogWarning($"Page does not respond after it timed out loading, and is left out of the PDF: {url}");
-                    return (null, new List<HeadingInfo>());
-                }
-                return (bytes, headings);
+                return (bytes, headings, leftOut);
             }
             finally
             {
@@ -796,7 +860,7 @@ static class PdfBuilder
     }
 
     static async Task CreatePdf(
-        Func<Outline, Uri, int, Task<(byte[]? bytes, List<HeadingInfo> headings)>> printPdf, Func<Outline, int, int, Page, Task<byte[]>> printHeaderFooter, ProgressTask task,
+        Func<Outline, Uri, int, Task<(byte[]? bytes, List<HeadingInfo> headings, string[] leftOut)>> printPdf, Func<Outline, int, int, Page, Task<byte[]>> printHeaderFooter, ProgressTask task,
         Uri outlineUrl, Outline outline, string outputFolder, string pdfOutputPath, Action<Dictionary<Outline, int>> updatePageNumbers, Action<List<HeadingInfo>> updateHeadings, CancellationToken cancellationToken)
     {
         var pages = GetPages(outline).ToArray();
@@ -805,6 +869,8 @@ static class PdfBuilder
 
         var pageBytes = new Dictionary<Outline, byte[]>();
         var pageHeadings = new Dictionary<Outline, List<HeadingInfo>>();
+        // the ids of what each page leaves out, by its URL
+        var leftOutIds = new HashSet<(Uri Page, string Id)>();
 
         // Make progress at 99% before merge PDF
         task.MaxValue = pages.Length + (pages.Length / 99.0);
@@ -831,6 +897,11 @@ static class PdfBuilder
             {
                 lock (pageHeadings)
                     pageHeadings[node] = result.headings;
+            }
+            lock (leftOutIds)
+            {
+                foreach (var id in result.leftOut)
+                    leftOutIds.Add((CleanUrl(url), id));
             }
             task.Increment(1);
         });
@@ -1055,6 +1126,12 @@ static class PdfBuilder
                         {
                             return new GoToAction(new(pageNumbers[node] - 1 + dest.PageNumber, dest.Type, dest.Coordinates));
                         }
+                    }
+
+                    // what the page leaves out for the selection of the PDF has no place to go to
+                    if (leftOutIds.Contains((CleanUrl(uri), Uri.UnescapeDataString(name))))
+                    {
+                        return new UriAction("");
                     }
                 }
 

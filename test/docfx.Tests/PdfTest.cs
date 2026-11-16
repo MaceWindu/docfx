@@ -188,7 +188,7 @@ public class PdfTest : TestBase
             """
             {
                 "build": {
-                    "content": [{ "files": [ "toc.yml" ] }],
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
                     "resource": [{ "files": [ "*.html", "public/*.css" ] }],
                     "template": ["default"],
                     "dest": "_site"
@@ -201,22 +201,26 @@ public class PdfTest : TestBase
             pdfFramework: net462
             items:
             - name: Everywhere
-              href: everywhere.html
+              href: everywhere.md
               appliesTo: [ { frameworks: [ net8.0, net462 ] } ]
             - name: OnlyNet8
-              href: only-net8.html
+              href: only-net8.md
               appliesTo: [ { frameworks: [ net8.0 ] } ]
             - name: Unlisted
               href: unlisted.html
+            - name: Static
+              href: static.html
             """, directory);
         CreateFile("public/main.css", "", directory);
         CreateFile("public/docfx.min.css", "", directory);
-        // a page of a template that does not apply the selection
-        CreateFile("everywhere.html", Html("Everywhere body", ""), directory);
-        CreateFile("only-net8.html", Html("Only net8 body", ""), directory);
-        // one that does, as the modern template marks it, for an API the selection does not have
+        // pages of a template that does not apply the selection
+        CreateFile("everywhere.md", "# Everywhere\n\nEverywhere body", directory);
+        CreateFile("only-net8.md", "# OnlyNet8\n\nOnly net8 body", directory);
+        // a page that does, as the modern template marks it, for an API the selection does not have
         CreateFile("unlisted.html", Html("Unlisted body",
             "<script>window.docfxAppliesTo.applied = true; document.body.setAttribute('data-applies-to-unavailable', '')</script>"), directory);
+        // and one copied as it is, which has no template
+        CreateFile("static.html", Html("Static body", ""), directory);
 
         await Docset.Build(configPath);
         // Docset.Pdf disposes every listener when it ends, which a TestListenerScope cannot outlive
@@ -228,14 +232,92 @@ public class PdfTest : TestBase
         var text = string.Concat(pdf.GetPages().Select(page => page.Text));
         Assert.Contains("Everywhere body", text);
         Assert.Contains("Unlisted body", text);
+        Assert.Contains("Static body", text);
         Assert.DoesNotContain("Only net8 body", text);
 
         var warnings = collector.Messages;
         Assert.Single(warnings, message => message.Contains("'/everywhere.html'") && message.Contains("only the 'modern' template"));
         Assert.Single(warnings, message => message.Contains("'/unlisted.html'") && message.Contains("does not exist in its 'pdfFramework'"));
+        Assert.DoesNotContain(warnings, message => message.Contains("'/static.html'"));
 
         static string Html(string body, string script) =>
             $$"""<!DOCTYPE html><html><head><link rel="stylesheet" href="public/main.css"></head><body>{{body}}{{script}}</body></html>""";
+    }
+
+    [Fact]
+    public async Task TheModernTemplatePrintsAPageForTheFrameworkOfItsPdf()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "template": ["default", "modern"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("toc.yml",
+            """
+            pdf: true
+            pdfFramework: net462
+            items:
+            - name: Members
+              href: members.md
+              appliesTo: [ { frameworks: [ net8.0, net462 ] } ]
+            - name: Links
+              href: links.md
+            """, directory);
+        // members as an API page marks them
+        CreateFile("members.md",
+            """
+            # Members
+
+            <h3 id="only-net8" data-applies-to="net8.0">OnlyNet8Member</h3>
+
+            Only net8 member body
+
+            <h3 id="everywhere" data-applies-to="net8.0 net462">EverywhereMember</h3>
+
+            Everywhere member body
+            """, directory);
+        CreateFile("links.md",
+            """
+            # Links
+
+            [Link to the member left out](members.md#only-net8)
+
+            [Link to the member kept](members.md#everywhere)
+            """, directory);
+
+        await Docset.Build(configPath);
+        var collector = new WarningCollector();
+        Logger.RegisterListener(collector);
+        await Docset.Pdf(configPath);
+
+        using var pdf = PdfDocument.Open(Path.Combine(directory, "_site", "toc.pdf"));
+        var text = string.Concat(pdf.GetPages().Select(page => page.Text));
+        Assert.Contains("Everywhere member body", text);
+        Assert.DoesNotContain("Only net8 member body", text);
+        Assert.DoesNotContain("OnlyNet8Member", text);
+        Assert.DoesNotContain(collector.Messages, message => message.Contains("'pdfFramework'"));
+
+        // a link to the member kept goes to it; one to the member left out stays as text, as a link to a page left out
+        var linksPage = pdf.GetPages().Single(page => page.Text.Contains("Link to the member kept"));
+        var membersPage = pdf.GetPages().Single(page => page.Text.Contains("Everywhere member body"));
+        PdfAction LinkOf(string words)
+        {
+            var word = linksPage.GetWords().First(w => w.Text == words);
+            var center = word.BoundingBox.Centroid;
+            return linksPage.GetAnnotations().Single(a =>
+                a.Rectangle.Left <= center.X && center.X <= a.Rectangle.Right && a.Rectangle.Bottom <= center.Y && center.Y <= a.Rectangle.Top).Action;
+        }
+
+        var kept = Assert.IsType<GoToAction>(LinkOf("kept"));
+        Assert.Equal(membersPage.Number, kept.Destination.PageNumber);
+        Assert.NotEqual(membersPage.MediaBox.Bounds.Top, kept.Destination.Coordinates.Top);
+        Assert.IsNotType<GoToAction>(LinkOf("out"));
     }
 
     private sealed class WarningCollector : ILoggerListener

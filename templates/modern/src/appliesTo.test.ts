@@ -992,6 +992,10 @@ test('in print, what does not exist in the selection is left out', () => {
   // the classes derived, and the members inherited, in other frameworks only, and a list with none left
   assert.ok(!hidden('Derived_All') && hidden('Derived_Net8'))
   assert.ok(hidden('Inherited_Net8') && hidden('inherited'))
+  // what is left out is marked for `docfx pdf`, which makes the links to it text
+  assert.deepStrictEqual(
+    document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]').map(e => e.id),
+    ['Derived_Net8', 'inherited', 'Inherited_Net8', 'events', 'Lib_Changed_', 'Lib_Changed', 'Lib_Stop', 'interfaces'])
   // nothing is marked, as nothing is left to mark
   assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner'), [])
   assert.ok(!document.body.hasAttribute('data-applies-to-unavailable'))
@@ -1021,6 +1025,23 @@ test('in print, the value of another axis says nothing about a page whose axis h
   assert.ok(!print(['/docs/api/Driver.html']))
   // on a page `docfx pdf` does not know the axis of, the values of the axes that have the value count
   assert.ok(print(undefined))
+})
+
+test('in print, the copy shown in place of the content of an API has the ids of its headings to itself', () => {
+  // the remarks of .NET Standard 2.0 have a heading of their own, which markdown names as that of the API's own
+  const { document, window } = installDom(`${site}<body><article>
+    <h1 id="Lib_Size" data-applies-to="net8.0 netstandard2.0">Size</h1><div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="example">Example</h2></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="example">Example</h2></div>
+    </div>
+  </article></body>`)
+  Object.assign(window, { docfxAppliesTo: { framework: 'netstandard2.0' } })
+  applyPrintSelection()
+
+  const printed = document.querySelectorAll('h2').filter(h => !h.closest('[hidden]'))
+  assert.deepStrictEqual(printed.map(h => h.id), ['example_variant1'])
+  assert.ok(document.getElementById('example').closest('[hidden]'))
 })
 
 test('in print, a section keeps what a hidden tab has', () => {

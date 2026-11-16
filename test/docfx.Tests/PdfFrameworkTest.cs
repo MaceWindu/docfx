@@ -111,6 +111,23 @@ public class PdfFrameworkTest
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("'pdfAxisValue'"));
     }
 
+    [Fact]
+    public void AValueOfTwoAxesLeavesOutWhatEachLacksAndWarns()
+    {
+        using var listener = new TestListenerScope();
+        // the drivers have a value `ef8` too
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc
+            .Replace("{ \"id\": \"d1\" }", "{ \"id\": \"ef8\" }")
+            .Replace("\"version\": \"d1\"", "\"version\": \"ef8\"")
+            .Replace("{value}", "ef8"));
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("EF, Everywhere, FromEF8, Drivers, OnlyD1", string.Join(", ", Names(outline.items)));
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.Contains("'EF Core', 'Driver'", warning.Message);
+    }
+
     private static PdfBuilder.Outline TwoAxes(string value) =>
         JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc.Replace("{value}", value));
 
@@ -188,6 +205,31 @@ public class PdfFrameworkTest
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'"));
         // the error count is global, and later tests check it
         Logger.ResetCount();
+    }
+
+    [Fact]
+    public void AnOptionThatIsNotTextDoesNotStopThePdf()
+    {
+        using var listener = new TestListenerScope();
+
+        // empty: selects nothing, even with `appliesTo` written by hand for something else
+        var empty = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": null, "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "toc.json");
+        Assert.Equal("A", string.Join(", ", Names(empty?.items)));
+        Assert.Null(PdfBuilder.GetAppliesToScript(empty));
+
+        // a number, as YAML writes `pdfAxisValue: 8`, is the value it spells
+        var number = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfAxisValue": 8, "items": [ { "name": "A", "appliesTo": [ { "version": "8", "frameworks": [ "net8.0" ] } ] } ] }"""u8.ToArray(), "toc.json");
+        Assert.Equal("8", number?.pdfAxisValue);
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+
+        // anything else is ignored, and says so
+        var other = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": true, "pdfAxisValue": [ "ef8" ], "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json");
+        Assert.Equal("A", string.Join(", ", Names(other?.items)));
+        Assert.Null(PdfBuilder.GetAppliesToScript(other));
+        var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).Select(w => w.Message).ToList();
+        Assert.Contains(warnings, w => w.Contains("'pdfFramework' of table of contents 'api/toc.json'"));
+        Assert.Contains(warnings, w => w.Contains("'pdfAxisValue' of table of contents 'api/toc.json'"));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
     }
 
     [Fact]
