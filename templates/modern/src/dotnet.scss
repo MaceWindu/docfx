@@ -149,6 +149,12 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
     }
   }
 
+  // Lists are links only, which the muted colour no longer tells apart from text.
+  dl.jumplist.applies-to-unavailable a,
+  dl.typelist .applies-to-unavailable a {
+    text-decoration: underline dotted;
+  }
+
   .applies-to-banner {
     font-size: 14px;
   }
