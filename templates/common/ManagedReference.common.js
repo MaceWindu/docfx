@@ -301,8 +301,8 @@ function getVariantView(vm, variant, kind, index) {
   // headings of the copy must not repeat the ids of the API's own
   var suffix = '_variant' + (index + 1);
   view.id = vm.id + suffix;
-  // nor the ids of what it lists, such as the values of an enum
-  if (vm.children) view.children = vm.children.map(function (child) { return withIdSuffix(child, suffix); });
+  // nor the ids of what it lists, the values of an enum; the copy of another type shows none of its members
+  view.children = kind === 'enum' && vm.children ? vm.children.map(function (child) { return withIdSuffix(child, suffix); }) : [];
   view.appliesToData = variant.appliesToData;
   view.variantViews = [];
   if (variant.summary) view.summary = variant.summary;

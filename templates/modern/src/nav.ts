@@ -5,7 +5,7 @@ import AnchorJs from 'anchor-js'
 import { render, html, TemplateResult } from 'lit-html'
 import { breakWordLit, meta, isExternalHref, loc, options } from './helper'
 import { themePicker } from './theme'
-import { appliesToPicker, distinguishCopies, loadChoices, onSelectionChange } from './appliesTo'
+import { appliesToPicker, distinguishCopies, isHiddenBySelection, loadChoices, onSelectionChange } from './appliesTo'
 import { TocNode } from './toc'
 
 export type NavItem = {
@@ -141,8 +141,9 @@ async function renderAnchors() {
 }
 
 function inThisArticle(): TemplateResult {
-  // the content of an API for other frameworks is hidden until picked, and has headings of its own
-  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3')).filter(h => !h.closest('[hidden]'))
+  // the content of an API for other frameworks is hidden until picked, and has headings of its own; a tab not picked
+  // is listed, as it is without the picker
+  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3')).filter(h => !isHiddenBySelection(h))
 
   if (headings.length > 0) {
     return html`

@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert'
 import {
   Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
+  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
 import { installDom } from './fakeDom'
@@ -477,20 +477,42 @@ test('the lists of a page dim what does not exist in the selection', () => {
     <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd><div id="Twice" data-applies-to="net8.0">Ext.Twice()</div></dd></dl>
   </article>`)
   const dimmed = () => document.querySelectorAll('.applies-to-unavailable').map(e => e.id)
+  // marked in words too, not by the colour only
+  const marked = () => document.querySelectorAll('.applies-to-unavailable-badge').map(b => (b.closest('dl.jumplist') || b.parentElement).id + ': ' + b.textContent)
 
   applySelection({ framework: 'netstandard2.0' })
   assert.deepStrictEqual(dimmed(), ['OnlyNet8', 'Switches', 'Run', 'Twice'])
+  assert.deepStrictEqual(marked(), ['OnlyNet8', 'Switches', 'Run', 'Twice'].map(id => `${id}: Not available in .NET Standard 2.0`))
   applySelection({ framework: 'net10.0' })
   assert.deepStrictEqual(dimmed(), [])
+  assert.deepStrictEqual(marked(), [])
+  applySelection({ framework: 'netstandard2.0' })
   applySelection({})
   assert.deepStrictEqual(dimmed(), [])
+  assert.deepStrictEqual(marked(), [])
+})
+
+test('In this article leaves out only what the selection hides', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <div class="tabGroup"><section id="tab-a"><h2 id="setup-a">Setup</h2></section><section id="tab-b" hidden="hidden"><h2 id="setup-b">Setup</h2></section></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="example">Example</h2></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="example_variant1">Example</h2></div>
+    </div>
+    <h5 class="api-variants-heading" hidden>In other frameworks</h5>
+    <div class="api-variant" data-applies-to="netstandard2.0" hidden><h3 id="in-variant">Remarks</h3></div>
+  </article>`)
+
+  // a tab not picked is listed, as it is without the picker
+  assert.deepStrictEqual(document.querySelectorAll('article h2, article h3').filter(h => !isHiddenBySelection(h as unknown as Element)).map(h => h.id), ['setup-a', 'setup-b', 'example'])
 })
 
 test('Applies to names what the selection shows', () => {
-  const markup = (appliesTo: string, line: string) => `${site}
+  const markup = (appliesTo: string, line: string, frameworksHidden = false) => `${site}
   <article>
     <h1 id="Lib_Reader" data-applies-to="${appliesTo}">Reader</h1>
-    <div class="facts"><dl class="applies-to-line"><dt>Applies to</dt><dd>${line}</dd></dl></div>
+    <div class="facts"><dl class="applies-to-line"${frameworksHidden ? ' data-frameworks-hidden' : ''}><dt>Applies to</dt><dd>${line}</dd></dl></div>
   </article>`
   const shown = (document: { querySelectorAll: (s: string) => { hidden: boolean, textContent: string }[] }) =>
     document.querySelectorAll('.applies-to-line dd').filter(dd => !dd.hidden).map(dd => dd.textContent)
@@ -515,11 +537,17 @@ test('Applies to names what the selection shows', () => {
   assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Standard 2.0), EF Core 9 (.NET 8)'])
   applySelection({ value: 'ef3', framework: 'net472' }, ef)
   assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Framework 4.6.2)'])
+  // before the table of contents names the axis: the line as the page has it, not the ids of its values
+  applySelection({ framework: 'net10.0' })
+  assert.deepStrictEqual(shown(withAxis), ['EF Core 3.1 (.NET Standard 2.0, .NET Framework 4.6.2), EF Core 9 (.NET 8)'])
 
-  // without the frameworks of each value, as `_disableApiAppliesToFrameworks` has it
-  const valuesOnly = installDom(markup('ef3:net462 ef9:net8.0', '<strong>EF Core 3.1</strong>, <strong>EF Core 9</strong>')).document
-  applySelection({ framework: 'net8.0' }, ef)
+  // without the frameworks of each value, as `_disableApiAppliesToFrameworks` has it, whatever the labels are
+  const lts: Axis = { name: 'EF Core', values: [{ id: 'ef3', label: 'EF Core 3.1 (LTS)' }, { id: 'ef9', label: 'EF Core 9' }] }
+  const valuesOnly = installDom(markup('ef3:net462 ef9:net8.0', '<strong>EF Core 3.1 (LTS)</strong>, <strong>EF Core 9</strong>', true)).document
+  applySelection({ framework: 'net8.0' }, lts)
   assert.deepStrictEqual(shown(valuesOnly), ['EF Core 9'])
+  applySelection({ framework: 'net462' }, lts)
+  assert.deepStrictEqual(shown(valuesOnly), ['EF Core 3.1 (LTS)'])
 })
 
 test('the copies of an API have ids of their own', () => {

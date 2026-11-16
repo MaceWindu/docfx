@@ -462,7 +462,8 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
   })
   onSelectionChange(apply)
   // A page the browser kept for its back button, or open in another tab, shows what was picked when it was last
-  // shown; the reader may have picked something else since, on another page.
+  // shown; the reader may have picked something else since, on another page. A choice in its address still wins, so a
+  // link shows what it names without local storage too.
   const changed = () => window.dispatchEvent(new Event(changeEvent))
   window.addEventListener('pageshow', (e: PageTransitionEvent) => {
     if (e.persisted) {
@@ -618,19 +619,19 @@ export function applySelection(selection: Selection, axis?: Axis) {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
-    const badge = document.createElement('span')
-    badge.className = 'applies-to-unavailable-badge badge text-bg-secondary fs-6 fw-normal ms-2'
-    badge.textContent = loc('appliesToUnavailable', { selection: label })
-    heading.appendChild(badge)
+    heading.appendChild(unavailableBadge(label, false))
     for (const e of memberElements(heading)) {
       e.classList.add('applies-to-unavailable')
     }
   })
 
+  // The entries of a list are marked as members are, not only dimmed, which a reader who cannot tell the colours
+  // apart, or does not see them, would miss.
   // the types a namespace page lists, and the members of a type with a page each
   document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
     if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
       entry.classList.add('applies-to-unavailable')
+      entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
     }
   })
 
@@ -640,6 +641,7 @@ export function applySelection(selection: Selection, axis?: Axis) {
     list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
       if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
         entry.classList.add('applies-to-unavailable')
+        entry.appendChild(unavailableBadge(label, true))
       }
     })
   })
@@ -651,9 +653,10 @@ export function applySelection(selection: Selection, axis?: Axis) {
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
     title.parentElement.querySelector('.facts')?.after(banner)
-  } else if (title && line) {
-    // with `_disableApiAppliesToFrameworks`, the line names the axis values only
-    const withFrameworks = !line.querySelector('strong') || line.textContent.includes('(')
+  } else if (title && line && (axis || !units.some(u => u.value))) {
+    // Without the axis, before the table of contents that names it is loaded, the line stays as the page has it
+    // rather than show the ids of its values. With `_disableApiAppliesToFrameworks`, the line names the axis values only.
+    const withFrameworks = !line.parentElement?.hasAttribute('data-frameworks-hidden')
     line.hidden = true
     line.after(shownLine(units, selection, axis, withFrameworks))
   }
@@ -696,6 +699,22 @@ function shownLine(units: Unit[], selection: Selection, axis: Axis | undefined, 
     }
   })
   return dd
+}
+
+/**
+ * Whether the selection hides an element: in the content of an API for other frameworks, or in what differs elsewhere.
+ * Content hidden otherwise, such as a tab not picked, is not the selection's.
+ */
+export function isHiddenBySelection(element: Element): boolean {
+  return !!element.closest('.api-content[hidden], .api-variant[hidden], .api-variants-heading[hidden]')
+}
+
+/** The badge of something that does not exist in the selection; smaller in a list than in a heading. */
+function unavailableBadge(label: string, inList: boolean): HTMLElement {
+  const badge = document.createElement('span')
+  badge.className = `applies-to-unavailable-badge badge text-bg-secondary fw-normal ms-2${inList ? '' : ' fs-6'}`
+  badge.textContent = loc('appliesToUnavailable', { selection: label })
+  return badge
 }
 
 /** The elements of "In other frameworks" after the content of an API, one for each variant. */

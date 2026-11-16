@@ -649,6 +649,13 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">", page);
         Assert.DoesNotContain("Applies to", page);
+
+        // and what the picker reads, without the labels: the frameworks of the API and its members, the copy of
+        // what differs, and what differs elsewhere
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+        Assert.Matches("<h3 [^>]*data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
+        Assert.Contains("<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>", page);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", await RawPage(site, "Lib.Differs.html"));
     }
 
     [Theory]
@@ -735,6 +742,8 @@ public class TargetFrameworksBuildTest : TestBase
 
         var page = await Page(site, "Lib.Widget.html");
         Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
+        // which the picker reads from the page, not from the labels
+        Assert.Equal(hideFrameworks, page.Contains("<dl class=\"applies-to-line\" data-frameworks-hidden>"));
         Assert.Contains("Summary of V2.", page);
         Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
         Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
