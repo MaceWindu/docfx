@@ -417,6 +417,77 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains(Expected, await Page(site, "Lib.Widget.Do.html"));
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AVariantShowsTheSeeAlsoLinksItDiffersIn()
+    {
+        var site = await BuildWithAxis(
+            v1Members: "\n/// <seealso cref=\"Widget\"/>\npublic void Related() { }\n",
+            v2Members: "\n/// <seealso cref=\"System.Object\"/>\npublic void Related() { }\n");
+        var page = await Page(site, "Lib.Widget.html");
+
+        var seeAlso = Regex.Match(page, "data-applies-to=\"v1:net8.0\">(?:(?!class=\"api-variant\")[\\s\\S])*?<h6>See Also</h6>\\s*<div>(.*?)</div>");
+        Assert.True(seeAlso.Success, "no See Also in the v1 variant");
+        Assert.Contains("Widget", seeAlso.Groups[1].Value);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AVariantOfAPageDoesNotDescribeAPartWithTheSummaryOfThePage()
+    {
+        // The delegate is a page of its own, and its undocumented parameter differs in type.
+        var site = await BuildWithAxis(
+            v1Members: "\n/// <summary>Handles it.</summary>\npublic delegate void Handler(int value);\n",
+            v2Members: "\n/// <summary>Handles it.</summary>\npublic delegate void Handler(long value);\n");
+        var page = await Page(site, "Lib.Widget.Handler.html");
+
+        var variant = Regex.Match(page, "<div class=\"api-variant\" data-applies-to=\"v1:net8.0\">[\\s\\S]*?</dl>").Value;
+        Assert.Contains("int value", variant);
+        Assert.DoesNotContain("Handles it.", variant);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task APageOfSeveralAssembliesWithoutFrameworksNamesTheFirstAsBefore(string template)
+    {
+        // as `docfx merge` writes it, or a hand-written file
+        var api = Path.Combine(_projectFolder, "api");
+        Directory.CreateDirectory(api);
+        await File.WriteAllTextAsync(Path.Combine(api, "Lib.Widget.yml"), """
+            ### YamlMime:ManagedReference
+            items:
+            - uid: Lib.Widget
+              id: Widget
+              name: Widget
+              fullName: Lib.Widget
+              type: Class
+              assemblies:
+              - Lib
+              - Lib.Extra
+              namespace: Lib
+              langs:
+              - csharp
+            """, TestContext.Current.CancellationToken);
+        var configPath = Path.Combine(_projectFolder, "docfx.json");
+        await File.WriteAllTextAsync(configPath, $$"""
+            {
+              "build": {
+                "content": [ { "files": [ "api/**.yml" ] } ],
+                "template": [ {{template}} ],
+                "dest": "_site"
+              }
+            }
+            """, TestContext.Current.CancellationToken);
+
+        await Docset.Build(configPath);
+
+        var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
+        Assert.Contains("Lib.dll", page);
+        Assert.DoesNotContain("Lib.Extra.dll", page);
+    }
+
     /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>
     private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage")
     {

@@ -196,6 +196,11 @@ public class TargetFrameworkMergeTest
     [InlineData("VB", "Public Class T Inherits B Implements IB, IA", "Public Class T Inherits B Implements IA, IB")]
     [InlineData("VB", "Public Interface IT Inherits IB, IA", "Public Interface IT Inherits IA, IB")]
     [InlineData("VB", "Public Class T Inherits B", "Public Class T Inherits B")]
+    // a bracket in a string or character of an attribute is not one of the declaration
+    [InlineData("CSharp", "[Obsolete(\"use a -> b\")]\npublic class T : IB, IA", "[Obsolete(\"use a -> b\")]\npublic class T : IA, IB")]
+    [InlineData("CSharp", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IB, IA", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IA, IB")]
+    [InlineData("CSharp", "[Sep(')')]\npublic class T : IB, IA", "[Sep(')')]\npublic class T : IA, IB")]
+    [InlineData("VB", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IB, IA", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IA, IB")]
     public void SortBaseList(string language, string declaration, string expected)
     {
         TargetFrameworkVariants.SortBaseList(declaration, language).Should().Be(expected);
