@@ -58,7 +58,7 @@ exports.transform = function (model) {
 
   // The copies of the type list its children, such as the values of an enum, as the page does: grouped, and each
   // with what it applies to.
-  if (showAppliesTo) setVariantViews(model);
+  if (showAppliesTo) setVariantViews(model, true);
 
   if (model.summary && !model.description) {
     model.description = model.summary.replace(/<.*?>/gi, '').replace(/(\r\n|\n|\r)/gm, ' ').trim();
@@ -158,7 +158,6 @@ function handleAppliesTo(vm, parent, options) {
   vm.showAppliesTo = false;
   vm.showAppliesToBadge = false;
 
-  var kind = vm.type ? vm.type.toLowerCase() : "";
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
@@ -267,12 +266,15 @@ function handleImplements(vm, options) {
 
 // Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed: a PDF of
 // one framework needs it whether the site has the picker or not.
-function setVariantViews(vm) {
+function setVariantViews(vm, isPage) {
   if (!vm.hasVariants || !vm.appliesToData) return;
   var kind = vm.type ? vm.type.toLowerCase() : "";
+  // The page of a field or event, with `memberLayout: separatePages`, labels its value as a return value, as it
+  // always has; a member on the page of its type has a section for it.
+  var valueKind = isPage ? "" : kind;
   var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
   vm.primaryAppliesToData = getAppliesToFrameworks(vm).filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
-  vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, index); });
+  vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, valueKind, index); });
 }
 
 // The value of a field, property or event is labelled as in the API's own section, not as a return value.
@@ -285,7 +287,7 @@ function setValue(syntax, value, kind) {
 }
 
 // The API as it is in the frameworks of a variant: its own content, with what the variant records in place.
-function getVariantView(vm, variant, kind, index) {
+function getVariantView(vm, variant, kind, valueKind, index) {
   var view = {};
   for (var key in vm) {
     if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
@@ -310,7 +312,8 @@ function getVariantView(vm, variant, kind, index) {
       parameters: variant.syntax.parameters.length > 0 ? variant.syntax.parameters : (own.parameters || []),
       typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
     };
-    setValue(syntax, variant.syntax.return || variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType || own.return, kind);
+    // before groupChildren, which names the value of a member of a type, both still hold it as a return value
+    setValue(syntax, variant.syntax.return || own.return, valueKind);
     view.syntax = syntax;
   }
   return view;

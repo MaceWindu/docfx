@@ -476,6 +476,20 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Field Value", page);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAFieldWithAPageOfItsOwnKeepsItsValue()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        var page = await RawPage(site, "Lib.Shared.Limit.html");
+
+        // the field's own content labels its value as a return value, and so does the copy the picker shows
+        Assert.Contains("Returns", WithoutHiddenContent(page));
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public const int Limit = 2(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.NotEmpty(copy);
+        Assert.Contains("Returns", copy);
+    }
+
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
