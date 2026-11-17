@@ -85,9 +85,11 @@ public class TargetFrameworksBuildTest : TestBase
             #if NET8_0
                     public const int Limit = 8;
                     public int Size { get; set; }
+                    public static readonly int Start = 0;
             #else
                     public const int Limit = 2;
                     public long Size { get; set; }
+                    public static readonly long Start = 0;
             #endif
                 }
             #if NET8_0
@@ -188,6 +190,24 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Contains("Lib.dll, Lib.Legacy.dll", await Page(site, "Lib.Shared.html"));
         Assert.DoesNotContain("Lib.Legacy.dll", await Page(site, "Lib.OnlyNet8.html"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task ListsOfAPageOfItsOwnMarkWhatDiffersFromTheirPage(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        const string Marked = "data-applies-to=\"net8\\.0\">\\s*(<dt>)?<a [^>]*>{0}</a> <span class=\"applies-to[^\"]*\">\\.NET 8</span>";
+
+        var type = await Page(site, "Lib.Shared.html");
+        Assert.Matches(string.Format(Marked, "OnlyNet8Member"), type);
+        Assert.DoesNotMatch("Everywhere</a> <span", type);
+
+        var ns = await Page(site, "Lib.html");
+        Assert.Matches(string.Format(Marked, "OnlyNet8"), ns);
+        Assert.DoesNotMatch("Shared</a> <span", ns);
     }
 
     [Fact]
@@ -320,6 +340,26 @@ public class TargetFrameworksBuildTest : TestBase
         var size = VariantOf(page, "public long Size");
         Assert.Contains("Property Value", size);
         Assert.DoesNotContain("Returns", size);
+
+        var start = VariantOf(page, "public static readonly long Start");
+        Assert.Contains("Field Value", start);
+        Assert.DoesNotContain("Returns", start);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AVariantOnAPageOfItsOwnNamesTheValueAsThePageDoes(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        var page = await Page(site, "Lib.Shared.Start.html");
+
+        // A field with a page of its own shows its value as a return value, as docfx always has, and so does
+        // what differs in other frameworks.
+        var start = VariantOf(page, "public static readonly long Start");
+        Assert.Contains("Returns", start);
+        Assert.DoesNotContain("Field Value", page);
     }
 
     [Theory]
@@ -486,6 +526,57 @@ public class TargetFrameworksBuildTest : TestBase
         var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
         Assert.Contains("Lib.dll", page);
         Assert.DoesNotContain("Lib.Extra.dll", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AFrameworkOfAPlatformIsNamedWithItsPlatform(string template)
+    {
+        var api = Path.Combine(_projectFolder, "api");
+        Directory.CreateDirectory(api);
+        await File.WriteAllTextAsync(Path.Combine(api, "Lib.Widget.yml"), """
+            ### YamlMime:ManagedReference
+            items:
+            - uid: Lib.Widget
+              id: Widget
+              name: Widget
+              fullName: Lib.Widget
+              type: Class
+              namespace: Lib
+              langs:
+              - csharp
+              appliesTo:
+              - frameworks:
+                - net8.0-windows10.0.19041.0
+                - net8.0-windows
+                - net8.0-android34.0
+                - net9.0-browser
+                - net8.0-ios
+                - net8.0-maccatalyst
+                - net10.0-futureos2.0
+                - net8.0-tizen
+            """, TestContext.Current.CancellationToken);
+        var configPath = Path.Combine(_projectFolder, "docfx.json");
+        await File.WriteAllTextAsync(configPath, $$"""
+            {
+              "build": {
+                "content": [ { "files": [ "api/**.yml" ] } ],
+                "template": [ {{template}} ],
+                "globalMetadata": { "_frameworkNames": { "net8.0-tizen": "Tizen TV" } },
+                "dest": "_site"
+              }
+            }
+            """, TestContext.Current.CancellationToken);
+
+        await Docset.Build(configPath);
+
+        var page = await Page(Path.Combine(_projectFolder, "_site", "api"), "Lib.Widget.html");
+        Assert.Contains(
+            ".NET 8 for Windows 10.0.19041.0, .NET 8 for Windows, .NET 8 for Android 34.0, .NET 9 for Browser, .NET 8 for iOS, "
+            + ".NET 8 for Mac Catalyst, .NET 10 for Futureos 2.0, Tizen TV",
+            page);
     }
 
     /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>

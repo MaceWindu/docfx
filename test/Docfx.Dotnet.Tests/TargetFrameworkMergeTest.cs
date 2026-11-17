@@ -498,6 +498,62 @@ public class TargetFrameworkMergeTest
         result["N.T"].Variants.Should().ContainSingle();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IgnoringInheritedDocumentationNeverShowsAFrameworkTheTextOfAnother(bool inheritingFrameworkFirst)
+    {
+        // `Second` and `Third` have the same declaration, which differs from `First`'s; `Second` has a summary of its own
+        const string Base = "public class B { /// <summary>base</summary>\npublic void M(int a) { } }";
+        var second = ($"namespace N {{ {Base} public class T {{ /// <summary>own</summary>\npublic void M(int b) {{ }} }} }}", Second);
+        var third = ($"namespace N {{ {Base} public class T {{ /// <inheritdoc cref=\"B.M\"/>\npublic void M(int b) {{ }} }} }}", Third);
+        var first = ($"namespace N {{ {Base} public class T {{ /// <inheritdoc cref=\"B.M\"/>\npublic void M(int a) {{ }} }} }}", First);
+
+        var result = MergeIgnoring(VariantIgnore.InheritedDocumentation, inheritingFrameworkFirst ? new[] { first, third, second } : new[] { first, second, third });
+
+        var variants = result["N.T.M(System.Int32)"].Variants;
+        variants.Should().HaveCount(2);
+        variants.Single(v => v.Frameworks.Contains(Second)).Content.Summary.Should().Contain("own");
+        var inheriting = variants.Single(v => v.Frameworks.Contains(Third));
+        inheriting.Frameworks.Should().Equal(Third);
+        (inheriting.Content.Summary ?? "").Should().NotContain("own");
+    }
+
+    [Fact]
+    public void AnInheritdocInTheRemarksLeavesTheSummaryOfItsOwn()
+    {
+        string Code(string summary) => $$"""
+            namespace N
+            {
+                public class B { /// <summary>base</summary>
+                /// <remarks>base remarks</remarks>
+                public virtual void M() { } }
+                public class T : B { /// <summary>{{summary}}</summary>
+                /// <remarks><inheritdoc/></remarks>
+                public override void M() { } }
+            }
+            """;
+
+        var result = MergeIgnoring(VariantIgnore.InheritedDocumentation, (Code("one"), First), (Code("two"), Second));
+
+        result["N.T.M"].Variants.Should().ContainSingle().Which.Content.Summary.Should().Contain("two");
+    }
+
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("<member name=\"M:N.T.M\"><inheritdoc/></member>", true)]
+    [InlineData("<member name=\"M:N.T.M\"><inheritdoc cref=\"B.M\"/><remarks>own</remarks></member>", true)]
+    [InlineData("<member name=\"M:N.T.M\"><summary> <inheritdoc/> </summary></member>", true)]
+    [InlineData("<member name=\"M:N.T.M\"><summary>own <inheritdoc/></summary></member>", false)]
+    [InlineData("<member name=\"M:N.T.M\"><summary>own</summary><remarks><inheritdoc/></remarks></member>", false)]
+    [InlineData("<member name=\"M:N.T.M\"><summary>own</summary><param name=\"a\"><inheritdoc/></param></member>", false)]
+    [InlineData("<summary><inheritdoc/></summary>", true)]
+    [InlineData("<summary>own</summary>", false)]
+    public void DocumentationIsInheritedWhenItsSummaryIsWhollyInherited(string comment, bool expected)
+    {
+        SymbolVisitorAdapter.IsDocumentationInherited(comment).Should().Be(expected);
+    }
+
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
     {
         return MergeIgnoring(VariantIgnore.None, units);

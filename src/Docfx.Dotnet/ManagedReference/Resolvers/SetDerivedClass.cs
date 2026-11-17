@@ -16,6 +16,10 @@ internal class SetDerivedClass : IResolverPipeline
 
     public void Run(MetadataModel yaml, ResolverContext context)
     {
+        // The pipeline is static and runs once for each metadata item: the frameworks an earlier run recorded for the
+        // same classes, as a build of the same project in the same process does, would hide where they differ.
+        _derivedClassFrameworks.Clear();
+
         if (yaml.Members is { Count: > 0 })
         {
             UpdateDerivedClassMapping(yaml.Members, context.References);

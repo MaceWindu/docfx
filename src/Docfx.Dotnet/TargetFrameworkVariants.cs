@@ -30,8 +30,8 @@ internal enum VariantIgnore
     Documentation = 2,
 
     /// <summary>
-    /// <see cref="Documentation"/>, for an API whose documentation is inherited through <c>inheritdoc</c>,
-    /// explicitly or as an override or implementation without a comment of its own.
+    /// <see cref="Documentation"/>, between two frameworks that both inherit the summary of an API through
+    /// <c>inheritdoc</c>, explicitly or as an override or implementation without a comment of its own.
     /// </summary>
     InheritedDocumentation = 4,
 }
@@ -94,8 +94,9 @@ internal static partial class TargetFrameworkVariants
     public static void Merge(MetadataItem primary, MetadataItem other, string framework, VariantIgnore ignore = VariantIgnore.None)
     {
         // Inherited text most often comes from the reference assemblies of a framework, which word it for each
-        // framework; either side inheriting is enough, as the other then documents the same API.
-        if (ignore.HasFlag(VariantIgnore.InheritedDocumentation) && (primary.IsDocumentationInherited || other.IsDocumentationInherited))
+        // framework. Text of its own in either framework is the API's, and is compared.
+        var sharedIgnore = ignore;
+        if (ignore.HasFlag(VariantIgnore.InheritedDocumentation) && primary.IsDocumentationInherited && other.IsDocumentationInherited)
         {
             ignore |= VariantIgnore.Documentation;
         }
@@ -183,8 +184,11 @@ internal static partial class TargetFrameworkVariants
             content.Syntax = SyntaxThatDiffers(own, syntax, ignore, baseLists);
         }
 
+        // Shared with the ignore every framework has, not the one widened for this framework, which a framework
+        // recorded with its own text would match: whatever order they are merged in, a framework is never shown
+        // another one's text.
         primary.Variants ??= [];
-        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, ignore, baseLists)) is { } existing)
+        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, sharedIgnore, baseLists)) is { } existing)
         {
             existing.Frameworks.Add(framework);
         }

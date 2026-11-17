@@ -1407,6 +1407,31 @@ public class TargetFrameworkTest : TestBase
         Assert.Equal(["Bases.Base.OnlyNet8"], child.Keys);
     }
 
+    [Fact]
+    public async Task AnApiTheDefaultValueLacksTakesItsContentFromTheFirstValueTheAxisLists()
+    {
+        string Create(string name, string code) => CreateProject(
+            name,
+            "<TargetFramework>net8.0</TargetFramework><AssemblyName>Lib</AssemblyName>",
+            $"namespace Lib {{ public class Shared {{ }} {code} }}");
+        var v1 = Create("V1", "/// <summary>v1</summary>\npublic class Older { }");
+        var v2 = Create("V2", "/// <summary>v2</summary>\npublic class Older { }");
+        var v3 = Create("V3", "");
+        var axis = Axis(defaultValue: "v3");
+        axis.Values.Add(new() { Id = "v3", Label = "Version 3", Files = ["**/V3/V3.csproj"] });
+
+        using var listener = new TestListenerScope();
+
+        // `src` loads v2 before v1
+        await Exec(new() { Src = Src(v2, v1, v3), Axes = [axis] });
+
+        AssertWarnings(listener);
+        var older = Page("Lib.Older.yml").Items[0];
+        Assert.Equal("v1", older.Summary.Trim());
+        Assert.Equal(["v1", "v2"], older.AppliesTo.Select(a => a.Version));
+        Assert.Equal("v2", Assert.Single(Assert.Single(older.Variants).AppliesTo).Version);
+    }
+
     private static MetadataAxisConfig Axis(string defaultValue) => new()
     {
         Name = "Version",

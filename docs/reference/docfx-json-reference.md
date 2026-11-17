@@ -506,7 +506,7 @@ An API is identified by its UID alone. A type that the project defines in some f
 
 ### `defaultFramework`
 
-The framework of [`targetFrameworks`](#targetframeworks) that provides the content of an API that exists in several, instead of the first one listed. It is also listed first in `appliesTo`. This is useful with `"*"`, where the order is that of the project's `TargetFrameworks`.
+The framework of [`targetFrameworks`](#targetframeworks) that provides the content of an API that exists in several, instead of the first one listed. Without an axis, it is also listed first in `appliesTo`; with one, the values are listed in the order of the axis. This is useful with `"*"`, where the order is that of the project's `TargetFrameworks`.
 
 ```json
 {
@@ -555,7 +555,7 @@ The kinds of difference between the frameworks of [`targetFrameworks`](#targetfr
 
 - `attributes`: the attributes of an API, including the attribute lines of its declaration.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.
-- `inheritdoc`: the same, for an API whose documentation is inherited: through `inheritdoc`, or as an override or interface implementation without a comment of its own. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
+- `inheritdoc`: the same, between two frameworks that both inherit the summary of an API: through an `inheritdoc` of the whole comment or one that is all its summary holds, or as an override or interface implementation without a comment of its own. An `inheritdoc` in the remarks or a parameter description leaves the summary the API's own, and a framework with text of its own is compared as usual, so it is never shown another framework's text. Text inherited from the framework, such as that of a `DbDataReader` override, is often worded differently in each framework.
 
 ```json
 {
@@ -748,7 +748,7 @@ On API pages built with [`axes`](#axes), show only the values of the axis an API
 
 ### `_frameworkNames`
 
-The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0` or `.NET 8` for `net8.0`.
+The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0`, `.NET 8` for `net8.0`, or `.NET 8 for Windows 10.0.19041.0` for `net8.0-windows10.0.19041.0`.
 
 ```json
 {

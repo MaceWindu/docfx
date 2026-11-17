@@ -18,8 +18,8 @@
   {{/children.0}}
     {{#children}}
     <tr>
-      <td id="{{id}}" data-uid="{{uid}}">
-        <xref uid="{{uid}}" altProperty="fullName" displayProperty="name"/>
+      <td id="{{id}}" data-uid="{{uid}}"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
+        <xref uid="{{uid}}" altProperty="fullName" displayProperty="name"/>{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
       </td>
       <td class="markdown level1 summary">{{{summary}}}</td>
     </tr>

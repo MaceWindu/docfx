@@ -6,8 +6,8 @@
 <h2 class="section" id="{{id}}">{{>partials/classSubtitle}}</h2>
 
 {{#children}}
-<dl class="jumplist">
-  <dt><xref uid="{{uid}}" altProperty="fullName" displayProperty="name"/></dt>
+<dl class="jumplist"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
+  <dt><xref uid="{{uid}}" altProperty="fullName" displayProperty="name"/>{{#showAppliesToBadge}} <span class="applies-to ms-2 fw-normal text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</dt>
   <dd>{{{summary}}}</dd>
 </dl>
 {{/children}}

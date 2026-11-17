@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
@@ -152,7 +152,7 @@ partial class DotnetApiCatalog
                 }
 
                 if (targetFrameworks is not null && !targetFrameworks.Contains(TargetFrameworkHelper.AllTargetFrameworks) &&
-                    solutionProjectCount > 0 && solutionProjectMatches == 0)
+                    solutionProjectCount > 0 && solutionProjectMatches == 0 && solutionProjectsReported > 0)
                 {
                     Logger.LogWarning(
                         $"No project of solution '{solution}' is known to target any of {string.Join(", ", targetFrameworks.Select(tfm => $"'{tfm}'"))}, so none of it is documented.",
@@ -330,6 +330,7 @@ partial class DotnetApiCatalog
             {
                 solutionProjectCount++;
                 solutionProjectMatches += selection.Any(s => s.Framework is not null) ? 1 : 0;
+                solutionProjectsReported += !listedProjects.Contains(path) && reportedProjects.Add(path) ? 1 : 0;
             }
 
             var compilations = new List<Compilation>();
