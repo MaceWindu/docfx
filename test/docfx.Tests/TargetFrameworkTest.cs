@@ -325,6 +325,23 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworkWarnsOnceForSolutionsThatShareTheirProjects()
+    {
+        var library = CreateMultiTargetedProject();
+        var analyzer = CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }");
+        var all = CreateNamedSolution("All", library, analyzer);
+        var core = CreateNamedSolution("Core", library);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = new(new FileMappingItem(all, core)) { Expanded = true }, TargetFramework = "net9.0" });
+
+        // one cause, one warning: the second solution holds no project the first did not report
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("All.sln", warning.Message);
+    }
+
+    [Fact]
     public async Task TargetFrameworkSelectsTheFrameworkOfEveryProjectOfASolutionThatReferencesAnother()
     {
         // Both target net8.0;netstandard2.0, and the solution lists App, which references Lib, first.

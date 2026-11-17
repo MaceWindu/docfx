@@ -53,15 +53,19 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.17763.0", false)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_17763_0_OR_GREATER", "net8.0-windows10.0.22621.0", false)]
     // a Windows SDK version ending in `.1` (CsWinRT 3.0) has the symbols of the one ending in `.0`, and `CSWINRT3_0`
-    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.1", true)]
-    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.0", false)]
-    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows", true)]
-    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.1", false)]
-    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.0", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.1", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows10.0.26100.0", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER;CSWINRT3_0", "net10.0-windows", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.1", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER", "net10.0-windows10.0.26100.0", true)]
     // a platform whose frameworks have no version has no `_OR_GREATER` symbol
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;BROWSER", "net8.0-browser", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;BROWSER", "net8.0", false)]
     [InlineData("NET;NETCOREAPP;NET10_0;NET10_0_OR_GREATER;WASI", "net10.0-wasi", true)]
+    // a platform with versions wins over a project's own symbol of a platform without them, for code it shares with it
+    [InlineData("NET;NETCOREAPP;NET8_0;BROWSER;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;BROWSER;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;BROWSER;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-browser", false)]
     // symbols are case-sensitive: a project's own `Windows` is not the SDK's platform symbol
     [InlineData("NET;NETCOREAPP;NET8_0;Windows", "net8.0", true)]
     // nor is its own `WINDOWS`: the SDK's comes with the platform's versions, and for .NET 5 and later only
@@ -156,10 +160,12 @@ public class TargetFrameworkHelperTest
     [Theory]
     [InlineData("net8.0-windows7.0", true)]
     [InlineData("net8.0-windows10.0.19041.0", false)]
-    public async Task SelectProjectReadsThePlatformVersionANameLeavesOutFromTheSymbols(string targetFramework, bool expectMatch)
+    // a project's own symbol of a platform without versions does not hide the versions of its platform
+    [InlineData("net8.0-windows7.0", true, ";BROWSER")]
+    public async Task SelectProjectReadsThePlatformVersionANameLeavesOutFromTheSymbols(string targetFramework, bool expectMatch, string ownSymbols = "")
     {
         using var workspace = new AdhocWorkspace();
-        var projects = new[] { ("Lib(net8.0)", "NET;NET8_0"), ("Lib(net8.0-windows)", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER") }
+        var projects = new[] { ("Lib(net8.0)", "NET;NET8_0"), ("Lib(net8.0-windows)", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER" + ownSymbols) }
             .Select(p => workspace.AddProject(ProjectInfo.Create(
                 ProjectId.CreateNewId(), VersionStamp.Default, p.Item1, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
                 parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: p.Item2.Split(';')))))

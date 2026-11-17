@@ -50,6 +50,8 @@ partial class DotnetApiCatalog
         // of a solution does, the option most likely has a typo, which is worth a warning.
         var solutionProjectCount = 0;
         var solutionProjectMatches = 0;
+        // A solution whose projects an earlier solution already reported has nothing new to warn about.
+        var solutionProjectsReported = 0;
 
         // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too;
         // nor does it count against the solution then, which would report the same cause twice.
@@ -96,6 +98,7 @@ partial class DotnetApiCatalog
                 Logger.LogInfo($"Loading solution {solution}");
                 solutionProjectCount = 0;
                 solutionProjectMatches = 0;
+                solutionProjectsReported = 0;
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
@@ -105,7 +108,7 @@ partial class DotnetApiCatalog
                     }
                 }
 
-                if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0)
+                if (config.TargetFramework is { } solutionTargetFramework && solutionProjectCount > 0 && solutionProjectMatches == 0 && solutionProjectsReported > 0)
                 {
                     Logger.LogWarning(
                         $"No project of solution '{solution}' is known to target '{solutionTargetFramework}', each is documented at its default target framework instead.",
@@ -204,6 +207,11 @@ partial class DotnetApiCatalog
                 project = await workspace.OpenProjectAsync(path, msbuildLogger);
             }
 
+            if (config.TargetFramework is null && isNewlyLoaded)
+            {
+                ReportAnalyzers(project);
+            }
+
             // Every framework of a file is loaded in its language, so the check holds for the one selected too,
             // and a project that is never documented is not reported or counted for `targetFramework`.
             if (!project.SupportsCompilation)
@@ -226,11 +234,8 @@ partial class DotnetApiCatalog
                 {
                     solutionProjectCount++;
                     solutionProjectMatches += matched ? 1 : 0;
+                    solutionProjectsReported += report ? 1 : 0;
                 }
-            }
-            else if (isNewlyLoaded)
-            {
-                ReportAnalyzers(project);
             }
 
             return await project.GetCompilationAsync();

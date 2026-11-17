@@ -174,7 +174,8 @@ internal static partial class TargetFrameworkHelper
     /// Gets the platform, and its version, of a project from its preprocessor symbols. The SDK defines one such
     /// as <c>WINDOWS</c> for .NET 5 and later only, together with a <c>WINDOWS7_0_OR_GREATER</c> for every version
     /// up to the one targeted, the highest of which is that version: a project's own <c>WINDOWS</c> alone is not it,
-    /// except for a platform whose frameworks have no version, such as <c>BROWSER</c>.
+    /// except for a platform whose frameworks have no version, such as <c>BROWSER</c>. A platform with version
+    /// symbols wins over such a symbol, which a project can also define itself for code it shares with that platform.
     /// </summary>
     private static (string? Platform, Version? Version) GetPlatformFromSymbols(HashSet<string> symbols, string frameworkSymbol)
     {
@@ -185,6 +186,7 @@ internal static partial class TargetFrameworkHelper
             return (null, null);
         }
 
+        string? versionless = null;
         foreach (var platform in s_platformSymbols.Where(symbols.Contains))
         {
             var version = symbols
@@ -201,13 +203,13 @@ internal static partial class TargetFrameworkHelper
                     : (platform, version);
             }
 
-            if (s_versionlessPlatformSymbols.Contains(platform))
+            if (versionless is null && s_versionlessPlatformSymbols.Contains(platform))
             {
-                return (platform, null);
+                versionless = platform;
             }
         }
 
-        return (null, null);
+        return (versionless, null);
     }
 
     /// <summary>
