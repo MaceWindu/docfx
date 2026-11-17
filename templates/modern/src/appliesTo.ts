@@ -977,16 +977,19 @@ declare global {
      * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, the ids of the
      * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
      * not have the value, whose own values may have the same ids. `applied` is set once the page shows it, which
-     * `docfx pdf` reads to warn about the pages of a template that does not.
+     * `docfx pdf` reads to warn about the pages of a template that does not; `error`, when the page could not.
      */
-    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[], applied?: boolean }
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[], applied?: boolean, error?: string }
   }
 }
 
 /** In a PDF of one framework or axis value, shows the pages for it. */
 export function applyPrintSelection() {
   const selection = window.docfxAppliesTo
-  if (selection) {
+  if (!selection) {
+    return
+  }
+  try {
     // A copy shown in place of the API's own content has the ids of its headings to itself, as on the site, so that
     // the outline of a PDF with `pdfTocSource: headings` goes to the heading printed.
     distinguishCopies()
@@ -998,6 +1001,11 @@ export function applyPrintSelection() {
       axisValues: otherAxis ? undefined : selection.axisValues || undefined
     }, undefined, true)
     selection.applied = true
+  } catch (e) {
+    // The page is printed as far as the selection was applied, and `docfx pdf` says why, rather than wait for a page
+    // that is never ready.
+    console.error(e)
+    selection.error = String((e as Error)?.message || e)
   }
 }
 

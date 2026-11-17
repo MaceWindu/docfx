@@ -59,7 +59,10 @@ static class PdfBuilder
     internal class Outline
     {
         public string name { get; init; } = "";
-        public string? href { get; init; }
+
+        // A namespace a PDF of one framework or axis value keeps only as the heading of the namespaces in it loses its
+        // page.
+        public string? href { get; set; }
         public Outline[]? items { get; set; }
 
         /// <summary>The frameworks and axis values the API of this item applies to, from `docfx metadata`.</summary>
@@ -84,6 +87,14 @@ static class PdfBuilder
 
         public string? pdfTocSource { get; init; }
         public int pdfTocHeadingDepth { get; init; } = 3;
+
+        /// <summary>The path of the table of contents in the site, which names it in warnings.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? tocPath { get; set; }
+
+        /// <summary>The PDF in a warning: its file name, or else the table of contents it is printed from.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string Label => pdfFileName ?? tocPath ?? name;
     }
 
     internal class AppliesTo
@@ -133,7 +144,12 @@ static class PdfBuilder
             {
                 WithoutAppliesTo(root);
             }
-            return root.Deserialize<Outline>();
+            var outline = root.Deserialize<Outline>();
+            if (outline is not null)
+            {
+                outline.tocPath = path;
+            }
+            return outline;
         }
         catch (JsonException ex)
         {
@@ -218,7 +234,7 @@ static class PdfBuilder
         var warned = false;
         if (value is not null && (axes.Count > 0 ? !axes.Any(axis => HasValue(axis, value)) : groups.Count > 0 && !groups.Any(group => group.version == value)))
         {
-            Logger.LogWarning($"'pdfAxisValue' of '{outline.pdfFileName ?? outline.name}' is '{value}', which is not a value of an axis of its API.");
+            Logger.LogWarning($"'pdfAxisValue' of '{outline.Label}' is '{value}', which is not a value of an axis of its API.");
             warned = true;
         }
 
@@ -227,12 +243,12 @@ static class PdfBuilder
         if (axesOfValue.Count > 1)
         {
             Logger.LogWarning(
-                $"'pdfAxisValue' '{value}' of '{outline.pdfFileName ?? outline.name}' is a value of the axes {string.Join(", ", axesOfValue.Select(name => $"'{name}'"))}, " +
+                $"'pdfAxisValue' '{value}' of '{outline.Label}' is a value of the axes {string.Join(", ", axesOfValue.Select(name => $"'{name}'"))}, " +
                 "and leaves out what each of them lacks of it. Give the values of different axes different ids to print one only.");
         }
         if (groups.Count > 0 && framework is not null && !groups.Any(group => (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))))
         {
-            Logger.LogWarning($"'pdfFramework' of '{outline.pdfFileName ?? outline.name}' is '{framework}', which none of its API applies to.");
+            Logger.LogWarning($"'pdfFramework' of '{outline.Label}' is '{framework}', which none of its API applies to.");
             warned = true;
         }
 
@@ -245,7 +261,7 @@ static class PdfBuilder
             if (!anyKept && !warned)
             {
                 var api = axisName.Length > 0 ? $"the API of axis '{axisName}'" : "its API";
-                Logger.LogWarning($"'pdfFramework' '{framework}' and 'pdfAxisValue' '{value}' of '{outline.pdfFileName ?? outline.name}' leave out all of {api} that has '{value}': none of it exists in both.");
+                Logger.LogWarning($"'pdfFramework' '{framework}' and 'pdfAxisValue' '{value}' of '{outline.Label}' leave out all of {api} that has '{value}': none of it exists in both.");
             }
         }
 
@@ -268,6 +284,17 @@ static class PdfBuilder
                 }
                 if (!available)
                 {
+                    // A namespace whose types exist in fewer frameworks than those of a namespace in it, which
+                    // `namespaceLayout: nested` puts below it, stays as the heading of those, without its page.
+                    if (HasAvailableApi(item.items, itemAxis))
+                    {
+                        item.href = null;
+                        Visit(item, itemAxis);
+                        if (item.items is { Length: > 0 })
+                        {
+                            kept.Add(item);
+                        }
+                    }
                     continue;
                 }
 
@@ -281,6 +308,14 @@ static class PdfBuilder
             }
             node.items = [.. kept];
         }
+
+        // Whether an item among `items`, or below them, is an API that exists in the selection: an item without
+        // `appliesTo`, such as an article, does not keep the item above it.
+        bool HasAvailableApi(Outline[]? items, Axis? axis) => (items ?? []).Any(item =>
+        {
+            var itemAxis = item.axis ?? axis;
+            return (item.appliesTo is { Length: > 0 } && IsAvailable(item, itemAxis)) || HasAvailableApi(item.items, itemAxis);
+        });
 
         // a table of contents from before axes were written to it names none
         bool ValueApplies(Axis? axis) => value is not null && (axis is null || HasValue(axis, value));
@@ -334,10 +369,12 @@ static class PdfBuilder
     /// <summary>
     /// What a page of a PDF with <c>pdfFramework</c> or <c>pdfAxisValue</c> did with the selection, once loaded:
     /// <c>unapplied</c> when its template did not apply it, which only the <c>modern</c> template does and marks on
-    /// <c>window.docfxAppliesTo</c>; <c>unavailable</c> when its API does not exist in the selection; else empty.
+    /// <c>window.docfxAppliesTo</c>; <c>error:</c> and the message when the template failed to apply it;
+    /// <c>unavailable</c> when its API does not exist in the selection; else empty.
     /// </summary>
     internal const string PrintSelectionStateScript =
-        "() => !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
+        "() => window.docfxAppliesTo && window.docfxAppliesTo.error ? 'error:' + window.docfxAppliesTo.error" +
+        " : !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
         " : document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : ''";
 
     /// <summary>The ids of what a page of a PDF of one framework or axis value leaves out, as the <c>modern</c> template marks it.</summary>
@@ -641,18 +678,21 @@ static class PdfBuilder
                 }
                 else
                 {
+                    // The page of a PDF of one framework or axis value gives the copies of its content ids of their
+                    // own as it applies the selection, so their headings are linked once it is ready, or has timed out.
+                    var anchored = false;
                     try
                     {
-                        // The page of a PDF of one framework or axis value gives the copies of its content ids of
-                        // their own as it applies the selection, so their headings are linked once it is ready.
                         if (own.Context is null)
                         {
                             await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                            anchored = true;
                         }
                         await page.WaitForFunctionAsync("!window.docfx || window.docfx.ready");
                         if (own.Context is not null)
                         {
                             await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                            anchored = true;
                         }
                         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
                     }
@@ -660,6 +700,10 @@ static class PdfBuilder
                     {
                         timedOut = true;
                         Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
+                        if (!anchored)
+                        {
+                            await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                        }
                     }
                 }
 
@@ -675,13 +719,18 @@ static class PdfBuilder
                     if (state is "unavailable")
                     {
                         Logger.LogWarning(
-                            $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
+                            $"'{pagePath}' in '{outline.Label}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
                             "but is printed, without its members: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
+                    }
+                    else if (state.StartsWith("error:", StringComparison.Ordinal))
+                    {
+                        Logger.LogWarning(
+                            $"'{pagePath}' in '{outline.Label}' failed to apply its 'pdfFramework' or 'pdfAxisValue', so it may show what the selection lacks: {state["error:".Length..]}");
                     }
                     else if (state is "unapplied" && builtPages.Contains(Uri.UnescapeDataString(pagePath)) && unappliedOutlines.TryAdd(outline, true))
                     {
                         Logger.LogWarning(
-                            $"'{pagePath}' in '{outline.pdfFileName ?? outline.name}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +
+                            $"'{pagePath}' in '{outline.Label}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +
                             "the table of contents leaves out what the selection lacks, but such pages are printed as the site shows them.");
                     }
                 }

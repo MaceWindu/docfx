@@ -252,6 +252,47 @@ public class PdfFrameworkTest
         Assert.Equal("Kept, Everywhere, Empty from the start", string.Join(", ", Names(outline.items)));
     }
 
+    [Fact]
+    public void ANamespaceTheSelectionLeavesOutIsTheHeadingOfTheNamespacesInItThatItKeeps()
+    {
+        // `namespaceLayout: nested`: the types of Lib are on .NET 8 only, those of Lib.Data.Ef everywhere, and Lib.Data
+        // has no types, so no frameworks, of its own
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            {
+              "pdf": true,
+              "pdfFramework": "netstandard2.0",
+              "items": [
+                { "name": "Lib", "href": "Lib.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ], "items": [
+                  { "name": "Span", "href": "Lib.Span.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ] },
+                  { "name": "Data", "items": [
+                    { "name": "Ef", "href": "Lib.Data.Ef.html", "appliesTo": [ { "frameworks": [ "net8.0", "netstandard2.0" ] } ] }
+                  ] },
+                  { "name": "Guide", "href": "guide.html" }
+                ] },
+                { "name": "Modern", "href": "Modern.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ], "items": [
+                  { "name": "Guide", "href": "modern.html" }
+                ] }
+              ]
+            }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        // without its page; an item without frameworks of its own, such as an article, does not keep it
+        Assert.Equal("Lib, Data, Ef, Guide", string.Join(", ", Names(outline.items)));
+        Assert.Null(outline.items[0].href);
+    }
+
+    [Fact]
+    public void AWarningNamesTheTableOfContentsOfAPdfWithoutAFileName()
+    {
+        using var listener = new TestListenerScope();
+
+        PdfBuilder.LeaveOutUnavailable(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(Json("net8", null)), "api/toc.json"));
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("'pdfFramework' of 'api/toc.json'"));
+    }
+
     private static PdfBuilder.Outline Parse(string framework, string value) =>
         JsonSerializer.Deserialize<PdfBuilder.Outline>(Json(framework, value));
 

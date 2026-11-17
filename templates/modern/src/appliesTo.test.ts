@@ -1027,6 +1027,23 @@ test('in print, the value of another axis says nothing about a page whose axis h
   assert.ok(print(undefined))
 })
 
+test('in print, a page that fails to apply the selection says why, and goes on', () => {
+  const { document, window } = installDom(`${site}<body><article><h1 id="A" data-applies-to="net8.0">A</h1></article></body>`)
+  const docfxAppliesTo: Window['docfxAppliesTo'] = { framework: 'net8.0' }
+  Object.assign(window, { docfxAppliesTo })
+  Object.assign(document, { querySelectorAll: () => { throw new Error('broken page') } })
+  const error = console.error
+  console.error = () => { }
+  try {
+    // which would otherwise stop the page short of ready, and `docfx pdf` wait until it times out
+    applyPrintSelection()
+  } finally {
+    console.error = error
+  }
+  assert.ok(!docfxAppliesTo.applied)
+  assert.strictEqual(docfxAppliesTo.error, 'broken page')
+})
+
 test('in print, the copy shown in place of the content of an API has the ids of its headings to itself', () => {
   // the remarks of .NET Standard 2.0 have a heading of their own, which markdown names as that of the API's own
   const { document, window } = installDom(`${site}<body><article>
