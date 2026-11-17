@@ -213,14 +213,18 @@ export function isPickerEnabled(): boolean {
   return meta('docfx:appliestopicker') === 'true'
 }
 
+// The keys of the query string the template reads itself: the frameworks, the tabs a link picks, and the search a
+// result highlights.
+const reservedKeys = ['framework', 'tabs', 'q']
+
 /**
  * The key of an axis in storage and in the query string: its name in lower case, its letters and digits in any
- * script, e.g. `ef-core` or `версия`; `axis` for a name without any; never `framework`, which is the key of the
- * frameworks.
+ * script, e.g. `ef-core` or `версия`; `axis` for a name without any; with `-axis` after a key the template reads
+ * itself, e.g. `framework-axis` or `tabs-axis`.
  */
 export function axisKey(axis: Axis): string {
   const key = axis.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
-  return key === 'framework' ? 'framework-axis' : key || 'axis'
+  return reservedKeys.includes(key) ? `${key}-axis` : key || 'axis'
 }
 
 /**
@@ -246,18 +250,14 @@ function storageKey(key: string): string {
 /**
  * What the reader picked: from the query string, for shareable links, else what they picked last. A value that is
  * not one of the axis, or a framework the table of contents does not list, is left out, so that a typo in a link, or
- * a choice kept from another part or an earlier version of the site, does not hide everything.
+ * a choice kept from another part or an earlier version of the site, does not hide everything. What was picked last
+ * is kept as it is, not forgotten: it applies again in the part of the site that lists it, and another tab, open on a
+ * part that does not, would otherwise undo the pick the reader just made.
  */
 export function getSelection(axis?: Axis, frameworks?: string[]): Selection {
   const query = new URLSearchParams(window.location.search)
   const read = (key: string, valid: (value: string) => string | undefined) =>
     [query.get(key), localStorage?.getItem(storageKey(key))].map(value => value ? valid(value) : undefined).find(value => value)
-  // A kept framework the table of contents does not list is forgotten: the page applies it before the table of
-  // contents is loaded, and would show it, then all frameworks, on every page.
-  const kept = localStorage?.getItem(storageKey('framework'))
-  if (kept && frameworks?.length && !validFramework(kept, frameworks)) {
-    localStorage.removeItem(storageKey('framework'))
-  }
   return {
     framework: read('framework', f => validFramework(f, frameworks)),
     value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v) ? v : undefined) : undefined
@@ -368,20 +368,33 @@ export function shownEntries(items: TocEntry[], selection: Selection, frameworks
   return (items || []).flatMap(entry => {
     const own = entrySelection(entry, selection, frameworks)
     if (!keep(entry) && !isEntryShown(entry, own)) {
-      return []
+      return hasShownApi(entry.items, own, frameworks) ? shownEntries(entry.items, own, frameworks, keep) : []
     }
     return [...(entry.href ? [entry] : []), ...shownEntries(entry.items, own, frameworks, keep)]
   })
 }
 
 /**
- * How the table of contents shows an entry for the selection of its parent: not at all, without entries below it, or
- * with them. A group whose entries the selection all leaves out goes too, or without them when it has a page.
+ * Whether an entry among `items`, or below them, is an API that exists in the selection. A namespace whose types
+ * exist in fewer frameworks than those of a namespace in it, which `namespaceLayout: nested` puts below it, is the
+ * heading of that namespace still.
  */
-export function entryDisplay(entry: TocEntry, selection: Selection, frameworks: string[], keep: (entry: TocEntry) => boolean): 'none' | 'leaf' | 'group' {
+function hasShownApi(items: TocEntry[], selection: Selection, frameworks: string[]): boolean {
+  return (items || []).some(entry => {
+    const own = entrySelection(entry, selection, frameworks)
+    return (entry.appliesTo && isEntryShown(entry, own)) || hasShownApi(entry.items, own, frameworks)
+  })
+}
+
+/**
+ * How the table of contents shows an entry for the selection of its parent: not at all, without entries below it,
+ * with them, or as the heading of those entries that exist in the selection when the entry itself does not, without
+ * its page. A group whose entries the selection all leaves out goes too, or without them when it has a page.
+ */
+export function entryDisplay(entry: TocEntry, selection: Selection, frameworks: string[], keep: (entry: TocEntry) => boolean): 'none' | 'leaf' | 'group' | 'heading' {
   const own = entrySelection(entry, selection, frameworks)
   if (!keep(entry) && !isEntryShown(entry, own)) {
-    return 'none'
+    return hasShownApi(entry.items, own, frameworks) ? 'heading' : 'none'
   }
   if (!entry.items?.length) {
     return 'leaf'
@@ -426,8 +439,13 @@ export async function loadChoices(): Promise<Choices> {
  */
 export async function initAppliesTo(onApplied: () => void = () => { }) {
   // The framework can be applied before the table of contents is loaded, so that the page does not show all
-  // frameworks first; the value of an axis needs the axis, which the table of contents names.
+  // frameworks first; the value of an axis needs the axis, which the table of contents names. Only a framework the
+  // page names, though: one kept from another part of the site, which this table of contents does not list, would show
+  // first, then all frameworks, on every page.
   const early = isPickerEnabled() ? getSelection() : {}
+  if (early.framework && !namesFramework(early.framework)) {
+    early.framework = undefined
+  }
   if (early.framework) {
     applySelection(early)
     onApplied()
@@ -475,6 +493,13 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
       changed()
     }
   })
+}
+
+/** Whether an API of the page is documented for `framework` itself. */
+function namesFramework(framework: string): boolean {
+  const name = framework.toLowerCase()
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-applies-to]'))
+    .some(e => parseUnits(e.dataset.appliesTo).some(u => u.framework.toLowerCase() === name))
 }
 
 /**
@@ -793,13 +818,24 @@ export function frameworkLabel(framework: string, names?: Record<string, string>
   if (match) {
     return `.NET Core ${match[1]}`
   }
-  match = /^net(\d+)\.(\d+)(-.+)?$/.exec(framework)
+  match = /^net(\d+)\.(\d+)(?:-([a-z]+)([\d.]*))?$/i.exec(framework)
   if (match) {
-    return `.NET ${match[1]}${match[2] === '0' ? '' : '.' + match[2]}${match[3] || ''}`
+    const name = `.NET ${match[1]}${match[2] === '0' ? '' : '.' + match[2]}`
+    return match[3] ? `${name} for ${platformLabel(match[3])}${match[4] ? ' ' + match[4] : ''}` : name
   }
   match = /^net(\d)(\d)(\d)?$/.exec(framework)
   if (match) {
     return `.NET Framework ${match[1]}.${match[2]}${match[3] ? '.' + match[3] : ''}`
   }
   return framework
+}
+
+const platformLabels: Record<string, string> = {
+  android: 'Android', browser: 'Browser', ios: 'iOS', maccatalyst: 'Mac Catalyst', macos: 'macOS', tizen: 'Tizen', tvos: 'tvOS', wasi: 'WASI', windows: 'Windows'
+}
+
+/** The name of a platform of a framework, as the templates write it: `windows` is Windows. */
+function platformLabel(platform: string): string {
+  const key = platform.toLowerCase()
+  return Object.prototype.hasOwnProperty.call(platformLabels, key) ? platformLabels[key] : key.charAt(0).toUpperCase() + key.slice(1)
 }

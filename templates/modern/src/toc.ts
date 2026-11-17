@@ -139,7 +139,8 @@ export async function renderToc(): Promise<TocNode[]> {
         return null
       }
 
-      const dom = href
+      // the heading of entries that exist in the selection, when the entry itself does not, has no link to its page
+      const dom = href && display !== 'heading'
         ? html`<a class='${classMap({ 'nav-link': !activeNodes.includes(node) })}' href=${href}>${breakWordLit(name)}</a>`
         : (isLeaf
             ? html`<span class='text-body-tertiary name-only'>${breakWordLit(name)}</a>`

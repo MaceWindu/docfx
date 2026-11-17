@@ -128,7 +128,10 @@ test('frameworks in picker order', () => {
 
 test('framework labels', () => {
   assert.strictEqual(frameworkLabel('net8.0'), '.NET 8')
-  assert.strictEqual(frameworkLabel('net8.0-windows'), '.NET 8-windows')
+  assert.strictEqual(frameworkLabel('net8.0-windows'), '.NET 8 for Windows')
+  assert.strictEqual(frameworkLabel('net8.0-windows10.0.19041.0'), '.NET 8 for Windows 10.0.19041.0')
+  assert.strictEqual(frameworkLabel('net9.0-maccatalyst'), '.NET 9 for Mac Catalyst')
+  assert.strictEqual(frameworkLabel('net8.0-newos1.0'), '.NET 8 for Newos 1.0')
   assert.strictEqual(frameworkLabel('netstandard2.0'), '.NET Standard 2.0')
   assert.strictEqual(frameworkLabel('net462'), '.NET Framework 4.6.2')
   assert.strictEqual(frameworkLabel('net462', { net462: '.NET Framework 4.6.2+' }), '.NET Framework 4.6.2+')
@@ -137,8 +140,10 @@ test('framework labels', () => {
 test('axis keys', () => {
   assert.strictEqual(axisKey({ name: 'EF Core', values: [] }), 'ef-core')
   assert.strictEqual(axisKey({ name: ' Driver! ', values: [] }), 'driver')
-  // the frameworks have the key 'framework'
+  // the frameworks have the key 'framework', a link to tabs 'tabs', a search result 'q'
   assert.strictEqual(axisKey({ name: 'Framework', values: [] }), 'framework-axis')
+  assert.strictEqual(axisKey({ name: 'Tabs', values: [] }), 'tabs-axis')
+  assert.strictEqual(axisKey({ name: 'Q', values: [] }), 'q-axis')
   // the letters of any script, and a key for a name without any
   assert.strictEqual(axisKey({ name: 'Версия EF', values: [] }), 'версия-ef')
   assert.strictEqual(axisKey({ name: '数据库驱动', values: [] }), '数据库驱动')
@@ -182,13 +187,13 @@ test('selection from a link, else from what was picked last', () => {
   // a page without the axis has no value
   assert.deepStrictEqual(getSelection(undefined, frameworks), { framework: 'net8.0', value: undefined })
 
-  // a framework kept from another part of the site that this table of contents does not list is left out, and
-  // forgotten, so that the next page does not apply it before its table of contents is loaded
+  // a framework kept from another part of the site that this table of contents does not list is left out, but kept,
+  // for that part of the site
   storage.set('docfx.axis./docs/.framework', 'net6.0')
   assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: 'ef9' })
-  assert.ok(!storage.has('docfx.axis./docs/.framework'))
-  // not before the table of contents is loaded, nor by one that lists no frameworks; on a page without a link's
-  // framework, which would come first
+  assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net6.0')
+  // before the table of contents is loaded, any framework docfx can compare; on a page without a link's framework,
+  // which would come first
   const later = installDom(site, 'https://example.org/docs/api/A.html')
   later.storage.set('docfx.axis./docs/.framework', 'net6.0')
   assert.deepStrictEqual(getSelection(ef).framework, 'net6.0')
@@ -323,6 +328,34 @@ test('a group of entries the selection all leaves out goes too', () => {
   assert.strictEqual(display(drivers, { framework: 'net462' }), 'group')
   storage.set('docfx.axis./docs/.driver', 'd2')
   assert.strictEqual(display(drivers, { framework: 'net462' }), 'none')
+})
+
+test('a namespace the selection leaves out is the heading of the namespaces in it that it keeps', () => {
+  installDom(site, 'https://example.org/docs/api/A.html')
+  // `namespaceLayout: nested`: the types of Lib are on .NET 8 only, those of Lib.Data and Lib.Data.Ef everywhere;
+  // Lib.Data has no types, so no frameworks, of its own
+  const lib: TocEntry = {
+    name: 'Lib',
+    href: 'Lib.html',
+    appliesTo: [{ frameworks: ['net8.0'] }],
+    items: [
+      { name: 'Span', href: 'Lib.Span.html', appliesTo: [{ frameworks: ['net8.0'] }] },
+      {
+        name: 'Data',
+        items: [{ name: 'Ef', href: 'Lib.Data.Ef.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }]
+      },
+      { name: 'Guide', href: 'guide.html' }
+    ]
+  }
+  const none = () => false
+  assert.strictEqual(entryDisplay(lib, { framework: 'net8.0' }, frameworks, none), 'group')
+  assert.strictEqual(entryDisplay(lib, { framework: 'netstandard2.0' }, frameworks, none), 'heading')
+  // without its page, nor the entries below it that do not exist in the selection
+  assert.deepStrictEqual(shownEntries([lib], { framework: 'netstandard2.0' }, frameworks, none).map(e => e.name), ['Ef', 'Guide'])
+  // an entry without frameworks of its own, such as an article, does not keep it
+  const guideOnly: TocEntry = { ...lib, items: [lib.items[0], lib.items[2]] }
+  assert.strictEqual(entryDisplay(guideOnly, { framework: 'netstandard2.0' }, frameworks, none), 'none')
+  assert.deepStrictEqual(shownEntries([guideOnly], { framework: 'netstandard2.0' }, frameworks, none), [])
 })
 
 const page = `${site}
@@ -630,6 +663,33 @@ test('the page shows what was picked on load, and again when it changes elsewher
   assert.ok(shown('Lib_Shared_Size_remarks'))
   window.dispatchEvent({ type: 'pageshow', persisted: true } as unknown as Event)
   assert.ok(shown('Lib_Shared_Size_variant1_remarks'))
+})
+
+test('a pick in another tab is kept where the table of contents does not list it', async() => {
+  fetchTocs({ '/docs/api/toc.json': { items: [{ name: 'Shared', href: 'Lib.Shared.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }] } })
+  const { document, storage, window } = installDom(pickerSite + page)
+  await initAppliesTo()
+
+  // another tab, in a part of the site that lists .NET Framework 4.6.2, picks it: this one shows all frameworks,
+  // and leaves the pick as it is, which the other tab would otherwise undo
+  storage.set('docfx.axis./docs/.framework', 'net462')
+  window.dispatchEvent({ type: 'storage', key: 'docfx.axis./docs/.framework' } as unknown as Event)
+  assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net462')
+  assert.ok(!document.getElementById('Lib_Shared_Size_remarks').closest('[hidden]'))
+  window.dispatchEvent({ type: 'pageshow', persisted: true } as unknown as Event)
+  assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net462')
+})
+
+test('a framework the page does not name is not applied before the table of contents is loaded', async() => {
+  fetchTocs({ '/docs/api/toc.json': { items: [{ name: 'Shared', href: 'Lib.Shared.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }] } })
+  const { storage } = installDom(pickerSite + page)
+  storage.set('docfx.axis./docs/.framework', 'net462')
+  let applied = 0
+
+  await initAppliesTo(() => applied++)
+  // only once the table of contents is loaded, which leaves it out, and keeps it
+  assert.strictEqual(applied, 1)
+  assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net462')
 })
 
 test('a page whose table of contents lists no frameworks shows them all', async() => {
