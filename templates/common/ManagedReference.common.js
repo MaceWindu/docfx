@@ -117,14 +117,25 @@ function getFrameworkLabel(framework, names) {
   match = /^netcoreapp(\d+\.\d+)$/.exec(framework);
   if (match) return '.NET Core ' + match[1];
 
-  // .NET 5 and later are named by their major version, as Microsoft does: `net8.0` is .NET 8.
-  match = /^net(\d+)\.(\d+)(-.+)?$/.exec(framework);
-  if (match) return '.NET ' + match[1] + (match[2] === '0' ? '' : '.' + match[2]) + (match[3] || '');
+  // .NET 5 and later are named by their major version, as Microsoft does: `net8.0` is .NET 8, and
+  // `net8.0-windows10.0.19041.0` is .NET 8 for Windows 10.0.19041.0.
+  match = /^net(\d+)\.(\d+)(?:-([a-z]+)([\d.]*))?$/i.exec(framework);
+  if (match) {
+    var name = '.NET ' + match[1] + (match[2] === '0' ? '' : '.' + match[2]);
+    return match[3] ? name + ' for ' + getPlatformLabel(match[3]) + (match[4] ? ' ' + match[4] : '') : name;
+  }
 
   match = /^net(\d)(\d)(\d)?$/.exec(framework);
   if (match) return '.NET Framework ' + match[1] + '.' + match[2] + (match[3] ? '.' + match[3] : '');
 
   return framework;
+}
+
+var platformLabels = { android: 'Android', browser: 'Browser', ios: 'iOS', maccatalyst: 'Mac Catalyst', macos: 'macOS', tizen: 'Tizen', tvos: 'tvOS', wasi: 'WASI', windows: 'Windows' };
+
+function getPlatformLabel(platform) {
+  var key = platform.toLowerCase();
+  return Object.prototype.hasOwnProperty.call(platformLabels, key) ? platformLabels[key] : key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 function handleAppliesTo(vm, parent, options) {
@@ -134,7 +145,6 @@ function handleAppliesTo(vm, parent, options) {
   vm.showAppliesTo = false;
   vm.showAppliesToBadge = false;
 
-  var kind = vm.type ? vm.type.toLowerCase() : "";
   vm.variants = vm.variants || [];
   vm.variants.forEach(function (variant) {
     variant.appliesToData = getAppliesToFrameworks(variant).join(' ');
@@ -159,12 +169,12 @@ function handleAppliesTo(vm, parent, options) {
       variant.syntax.parameters.forEach(withDescription);
       variant.syntax.typeParameters.forEach(withDescription);
       if (variant.syntax.return) withDescription(variant.syntax.return);
-      // the value of a field, property or event is labelled as in the API's own section, not as a return value
-      var value = variant.syntax.return || "";
-      variant.syntax.fieldValue = kind === "field" ? value : "";
-      variant.syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
-      variant.syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
-      variant.syntax.return = variant.syntax.fieldValue || variant.syntax.propertyValue || variant.syntax.eventType ? "" : value;
+      // the value is labelled as in the API's own section: a return value, until groupChildren names the value of
+      // a member of a type as a field, property or event value
+      variant.syntax.return = variant.syntax.return || "";
+      variant.syntax.fieldValue = "";
+      variant.syntax.propertyValue = "";
+      variant.syntax.eventType = "";
     }
   });
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
@@ -241,6 +251,16 @@ function groupChildren(model, category) {
     if ((type === "event" || type === "attachedevent") && c.syntax) {
       c.syntax.eventType = c.syntax.return;
       c.syntax.return = undefined;
+    }
+    // what differs in other frameworks names the value as the member's own section does
+    var valueKey = type === "field" ? "fieldValue" : type === "property" || type === "attachedproperty" ? "propertyValue" : type === "event" || type === "attachedevent" ? "eventType" : null;
+    if (valueKey && c.syntax) {
+      (c.variants || []).forEach(function (variant) {
+        if (variant.syntax) {
+          variant.syntax[valueKey] = variant.syntax.return;
+          variant.syntax.return = "";
+        }
+      });
     }
     grouped[type].push(c);
   })
