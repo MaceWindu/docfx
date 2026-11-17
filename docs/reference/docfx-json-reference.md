@@ -498,7 +498,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 }
 ```
 
-It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others.
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets any of the frameworks. A project whose preprocessor symbols do not say which framework it targets, such as one that sets `DisableImplicitFrameworkDefines`, is matched by its `TargetFrameworkAttribute`; one without either is not documented, with a `TargetFrameworkNotFound` warning.
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
@@ -519,7 +519,7 @@ The framework of [`targetFrameworks`](#targetframeworks) that provides the conte
 }
 ```
 
-A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements. Frameworks that cannot stand in for it follow in the order they first appear across the projects of the entry. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged.
+A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements. Frameworks that cannot stand in for it follow in the order they first appear across the projects of the entry. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged. Without `targetFrameworks` or [`axes`](#axes) there is nothing for it to choose from: it is ignored, with a `ConflictingTargetFramework` warning, and so is [`variantIgnore`](#variantignore).
 
 ### `axes`
 
@@ -567,6 +567,8 @@ The kinds of difference between the frameworks of [`targetFrameworks`](#targetfr
   ]
 }
 ```
+
+Without `targetFrameworks` or [`axes`](#axes) nothing is merged, so it is ignored, with a `ConflictingTargetFramework` warning.
 
 ### `noRestore`
 

@@ -18,8 +18,8 @@ exports.transform = function (model) {
   else delete model.variants;
   if (showAppliesTo) handleInheritedMembers(model, appliesToOptions);
   // A type that frameworks build into assemblies of different names lists each of them. Set only then, so
-  // that the model of every other page stays as it is.
-  if (model.assemblies && model.assemblies.length > 1) {
+  // that the model of every other page, such as one `docfx merge` or a hand-written file lists several for, stays as it is.
+  if (showAppliesTo && model.assemblies && model.assemblies.length > 1) {
     model.assembliesText = model.assemblies.map(function (assembly) { return assembly + '.dll'; }).join(', ');
   }
   if (model.children) {
@@ -147,12 +147,18 @@ function handleAppliesTo(vm, parent, options) {
     variant.example = variant.example || [];
     variant.exceptions = variant.exceptions || [];
     variant.seealso = variant.seealso || [];
+    common.processSeeAlso(variant);
     variant.overridden = variant.overridden || "";
+    // a part without a description must not show the description of the page, the summary of the API
+    variant.exceptions.forEach(withDescription);
     if (variant.syntax) {
       // a declaration that is the same is left out when only a description of its parts differs
       variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];
       variant.syntax.typeParameters = variant.syntax.typeParameters || [];
+      variant.syntax.parameters.forEach(withDescription);
+      variant.syntax.typeParameters.forEach(withDescription);
+      if (variant.syntax.return) withDescription(variant.syntax.return);
       // the value of a field, property or event is labelled as in the API's own section, not as a return value
       var value = variant.syntax.return || "";
       variant.syntax.fieldValue = kind === "field" ? value : "";
@@ -163,6 +169,10 @@ function handleAppliesTo(vm, parent, options) {
   });
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
   vm.hasVariants = vm.variants.length > 0;
+
+  function withDescription(part) {
+    part.description = part.description || "";
+  }
 
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {

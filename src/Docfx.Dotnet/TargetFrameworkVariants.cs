@@ -335,6 +335,12 @@ internal static partial class TargetFrameworkVariants
         {
             switch (declaration[i])
             {
+                // A string or character in an attribute argument may hold any bracket. In Visual Basic, a
+                // character is a string with a `c` after it.
+                case '"':
+                case '\'' when !isVisualBasic:
+                    i = EndOfLiteral(i);
+                    continue;
                 case '<' or '(' or '[' or '{':
                     depth++;
                     continue;
@@ -389,6 +395,32 @@ internal static partial class TargetFrameworkVariants
         items.Add(declaration[from..end].Trim());
         items.Sort(StringComparer.Ordinal);
         return string.Concat(declaration.AsSpan(0, start), string.Join(", ", items), declaration.AsSpan(end));
+
+        // The index of the quote that closes the literal opened at `open`: C# escapes with a backslash,
+        // Visual Basic doubles the quote.
+        int EndOfLiteral(int open)
+        {
+            var quote = declaration[open];
+            for (var j = open + 1; j < declaration.Length; j++)
+            {
+                if (!isVisualBasic && declaration[j] == '\\')
+                {
+                    j++;
+                }
+                else if (declaration[j] == quote)
+                {
+                    if (isVisualBasic && j + 1 < declaration.Length && declaration[j + 1] == quote)
+                    {
+                        j++;
+                        continue;
+                    }
+
+                    return j;
+                }
+            }
+
+            return declaration.Length;
+        }
     }
 
     private static bool IsEmpty(JsonNode node)

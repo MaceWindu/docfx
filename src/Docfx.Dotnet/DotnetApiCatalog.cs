@@ -84,6 +84,17 @@ public static partial class DotnetApiCatalog
 
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
+            // Both apply to what several frameworks or values of an axis merge into, which nothing else gives.
+            if ((config.TargetFrameworks is null || config.TargetFramework is not null) && config.Axis is null &&
+                (config.DefaultFramework is not null || config.VariantIgnore is not VariantIgnore.None))
+            {
+                var unused = new[] { config.DefaultFramework is null ? null : "'defaultFramework'", config.VariantIgnore is VariantIgnore.None ? null : "'variantIgnore'" }.OfType<string>().ToList();
+                var both = unused.Count > 1;
+                Logger.LogWarning(
+                    $"{string.Join(" and ", unused)} {(both ? "apply" : "applies")} to 'targetFrameworks' and 'axes' only, which this metadata item does not set, so {(both ? "they are" : "it is")} ignored.",
+                    code: WarningCodes.Metadata.ConflictingTargetFramework);
+            }
+
             var (assemblies, frameworks) = await Compile(config);
 
             // A single framework has nothing to merge, and its output must not differ from plain selection.

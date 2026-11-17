@@ -141,6 +141,14 @@ partial class DotnetApiCatalog
                         $"No project of solution '{solution}' is known to target '{solutionTargetFramework}', each is documented at its default target framework instead.",
                         code: WarningCodes.Metadata.TargetFrameworkNotFound);
                 }
+
+                if (targetFrameworks is not null && !targetFrameworks.Contains(TargetFrameworkHelper.AllTargetFrameworks) &&
+                    solutionProjectCount > 0 && solutionProjectMatches == 0)
+                {
+                    Logger.LogWarning(
+                        $"No project of solution '{solution}' is known to target any of {string.Join(", ", targetFrameworks.Select(tfm => $"'{tfm}'"))}, so none of it is documented.",
+                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                }
             }
         }
 
@@ -195,6 +203,22 @@ partial class DotnetApiCatalog
                 var (compilation, assembly) = CompilationHelper.CreateCompilationFromAssembly(normalizedAssemblyPath, peReader, config.IncludePrivateMembers, metadataReferences);
                 hasCompilationError |= compilation.CheckDiagnostics(config.AllowCompilationErrors);
                 assemblies.Add((assembly, compilation));
+            }
+        }
+
+        // A single-target project is read from its symbols without its platform version, or is named as
+        // `targetFrameworks` lists it: it is the framework another project names with the version it targets.
+        if (frameworks is { Count: > 1 })
+        {
+            var named = frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var (compilation, unit) in frameworks.ToList())
+            {
+                var (value, framework) = TargetFrameworkAxis.SplitUnit(unit);
+                var symbols = compilation.SyntaxTrees.FirstOrDefault()?.Options.PreprocessorSymbolNames ?? [];
+                if (TargetFrameworkHelper.WithPlatformVersionOf(framework, symbols, named) is var versioned && versioned != framework)
+                {
+                    frameworks[compilation] = value is null ? versioned : TargetFrameworkAxis.GetUnit(value, versioned);
+                }
             }
         }
 
@@ -288,7 +312,15 @@ partial class DotnetApiCatalog
             // not target that one.
             List<(Project Project, string? Framework)> selection = targetFrameworks is null
                 ? [(project, TargetFrameworkHelper.GetTargetFrameworkFromName(project) ?? TargetFrameworkHelper.GetTargetFrameworkFromSymbols(project.ParseOptions?.PreprocessorSymbolNames ?? []))]
-                : TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution);
+                : await TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution);
+
+            // As with `targetFramework`, a solution none of whose projects targets a framework of the list is worth a
+            // warning; a project `src` lists too is reported by itself, so it counts only when it matches.
+            if (fromSolution && targetFrameworks is not null && (!listedProjects.Contains(path) || selection.Count > 0))
+            {
+                solutionProjectCount++;
+                solutionProjectMatches += selection.Any(s => s.Framework is not null) ? 1 : 0;
+            }
 
             var compilations = new List<Compilation>();
             foreach (var (selected, selectedFramework) in selection)

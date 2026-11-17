@@ -1128,6 +1128,111 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworksNamesAPlatformVersionAlikeForSingleTargetAndMultiTargetedProjects()
+    {
+        // The multi-targeted project names the platform version, the single-target one has only its symbols to tell.
+        // windows8.0 needs no Windows SDK package.
+        var multi = CreatePlatformProject("<TargetFrameworks>net8.0;net8.0-windows8.0</TargetFrameworks>");
+        var single = CreateProject(
+            "Desktop",
+            "<TargetFramework>net8.0-windows8.0</TargetFramework><EnableWindowsTargeting>true</EnableWindowsTargeting>",
+            "namespace Platform { public class Window { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(multi, single), TargetFrameworks = ["*"] });
+
+        AssertWarnings(listener);
+        Assert.Equal(["net8.0-windows8.0"], AppliesTo("Platform.Window.yml"));
+        Assert.Equal(["net8.0", "net8.0-windows8.0"], AppliesTo("Platform.yml"));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksOnAProjectWithoutFrameworkSymbolsReadsItsAttribute()
+    {
+        var legacy = CreateProject(
+            "Legacy",
+            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines>",
+            "namespace Legacy { public class Widget { } }");
+
+        using var listener = new TestListenerScope();
+
+        // netstandard2.0 first, which the project must not be taken for
+        await Exec(new() { Src = Src(CreateMultiTargetedProject(), legacy), TargetFrameworks = ["netstandard2.0", "net8.0"] });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("Legacy.csproj' does not target 'netstandard2.0',", warning.Message);
+        Assert.Equal(["net8.0"], AppliesTo("Legacy.Widget.yml"));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksOnAProjectThatSaysNotWhichFrameworkItTargetsWarns()
+    {
+        var legacy = CreateProject(
+            "Legacy",
+            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>",
+            "namespace Legacy { public class Widget { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(CreateMultiTargetedProject(), legacy), TargetFrameworks = ["netstandard2.0", "net8.0"] });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("Legacy.csproj' cannot be determined", warning.Message);
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Legacy.Widget.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworksWarnsForASolutionNoProjectOfWhichTargetsAny()
+    {
+        var solution = CreateSolution(
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(solution), TargetFrameworks = ["net8.O", "net9.0"] });
+
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Code == WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Contains("All.sln", warning.Message);
+        Assert.Contains("'net8.O', 'net9.0'", warning.Message);
+    }
+
+    [Fact]
+    public async Task TargetFrameworksDoesNotWarnForASolutionOneProjectOfWhichTargetsOne()
+    {
+        var solution = CreateSolution(
+            CreateMultiTargetedProject(),
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(solution), TargetFrameworks = ["net8.0"] });
+
+        AssertWarnings(listener);
+    }
+
+    [Theory]
+    [InlineData(true, false, "'defaultFramework' applies")]
+    [InlineData(false, true, "'variantIgnore' applies")]
+    [InlineData(true, true, "'defaultFramework' and 'variantIgnore' apply")]
+    public async Task OptionsOfAMergeWithoutTargetFrameworksOrAxesWarn(bool defaultFramework, bool variantIgnore, string expected)
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new()
+        {
+            Src = Src(project),
+            DefaultFramework = defaultFramework ? "net8.0" : null,
+            VariantIgnore = variantIgnore ? ["documentation"] : null,
+        });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.StartsWith(expected, warning.Message);
+    }
+
+    [Fact]
     public async Task EnumValuesOfAnotherFrameworkKeepTheDeclaringOrder()
     {
         var project = CreateProject("Enums", "<TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>", """
