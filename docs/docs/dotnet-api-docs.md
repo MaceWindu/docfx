@@ -156,14 +156,16 @@ When a project targets multiple frameworks, docfx loads every one of them but do
 
 ```json
 {
-  "metadata": {
-    "src": [{
-      "files": ["src/MyLib/MyLib.csproj"],
-      "src": "../"
-    }],
-    "dest": "api",
-    "targetFramework": "net8.0"
-  },
+  "metadata": [
+    {
+      "src": [{
+        "files": ["src/MyLib/MyLib.csproj"],
+        "src": "../"
+      }],
+      "dest": "api",
+      "targetFramework": "net8.0"
+    }
+  ]
 }
 ```
 

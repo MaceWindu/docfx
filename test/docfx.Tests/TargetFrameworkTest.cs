@@ -61,6 +61,27 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworkReportsTheAnalyzersOfTheFrameworkItSelects()
+    {
+        // The analyzer is referenced by the selected framework only, so a warning logged for the first one would miss it.
+        var project = CreateProject("Lib", "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>", "namespace Lib { public class C { } }", """
+            <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+              <Analyzer Include="Missing.Generator.dll" />
+            </ItemGroup>
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "netstandard2.0" });
+
+        var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).ToList();
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Code is WarningCodes.Metadata.FailedToResolveAnalyzer or WarningCodes.Metadata.FailedToLoadAnalyzer,
+            $"Expected one analyzer warning, got:{Environment.NewLine}" + string.Join(Environment.NewLine, warnings.Select(w => $"  {w.Code}: {w.Message}")));
+        Assert.Contains("Missing.Generator", warnings[0].Message);
+    }
+
+    [Fact]
     public async Task TargetFrameworkPropertyRetargetsReferencedProjects()
     {
         var project = CreateProjectReferencingNetStandardLibrary();

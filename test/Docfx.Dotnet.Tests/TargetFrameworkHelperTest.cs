@@ -72,6 +72,16 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows", false)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows10.0.19041.0", false)]
+    // a platform the SDK does not ship, `net8.0-xyz1.0`, comes with the symbol of its exact version
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz1.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz2.0", false)]
+    // without a version, `net8.0-desktop`, only its symbol: a project's own unless the framework asked for names it
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;DESKTOP", "net8.0-desktop", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;DESKTOP", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;DEBUG;TRACE", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net8.0-desktop", false)]
     [InlineData("NETFRAMEWORK;NET462;WINDOWS;WINDOWS7_0_OR_GREATER", "net462", true)]
     [InlineData("NETSTANDARD;NETSTANDARD2_0;ANDROID;ANDROID21_0_OR_GREATER", "netstandard2.0", true)]
     [InlineData("net;netcoreapp;net8_0", "net8.0", null)]
@@ -154,6 +164,21 @@ public class TargetFrameworkHelperTest
         var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
 
         selected.Name.Should().Be(expected);
+        matched.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SelectProjectOfAMultiTargetedProjectPrefersTheExactName()
+    {
+        // `net8.0-windows` also selects `net8.0-windows10.0.17763.0`, which comes first.
+        using var workspace = new AdhocWorkspace();
+        var projects = new[] { "Lib(net8.0-windows10.0.17763.0)", "Lib(net8.0-windows)" }
+            .Select(name => workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, name, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj")))
+            .ToList();
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], "net8.0-windows");
+
+        selected.Name.Should().Be("Lib(net8.0-windows)");
         matched.Should().BeTrue();
     }
 
