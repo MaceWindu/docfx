@@ -52,22 +52,10 @@ internal class SetDerivedClass : IResolverPipeline
                 foreach (var framework in frameworks)
                 {
                     var inheritance = item.Variants?.FirstOrDefault(v => v.Frameworks.Contains(framework) && v.Content?.Inheritance is { Count: > 0 })?.Content.Inheritance ?? item.Inheritance;
-                    if (GetSuperClass(inheritance, reference) is not { } superClass)
+                    if (GetSuperClass(inheritance, reference) is { } superClass)
                     {
-                        continue;
+                        AddDerivedIn(superClass, item.Name, framework);
                     }
-
-                    ref var derivedIn = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassFrameworks, superClass, out var exists);
-                    if (!exists)
-                    {
-                        derivedIn = [];
-                    }
-
-                    ref var units = ref CollectionsMarshal.GetValueRefOrAddDefault(derivedIn, item.Name, out var known);
-                    if (known)
-                        units.Add(framework);
-                    else
-                        units = [framework];
                 }
             }
 
@@ -89,9 +77,30 @@ internal class SetDerivedClass : IResolverPipeline
                         derivedClasses.Add(item.Name);
                     else
                         derivedClasses = [item.Name];
+
+                    // A type implementing an interface in only some frameworks is marked on the page of the interface.
+                    foreach (var framework in item.ImplementsAppliesTo?.GetValueOrDefault(implementedInterface) ?? [])
+                    {
+                        AddDerivedIn(superClass, item.Name, framework);
+                    }
                 }
             }
         }
+    }
+
+    private void AddDerivedIn(string superClass, string derivedClass, string framework)
+    {
+        ref var derivedIn = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassFrameworks, superClass, out var exists);
+        if (!exists)
+        {
+            derivedIn = [];
+        }
+
+        ref var units = ref CollectionsMarshal.GetValueRefOrAddDefault(derivedIn, derivedClass, out var known);
+        if (!known)
+            units = [framework];
+        else if (!units.Contains(framework))
+            units.Add(framework);
     }
 
     private void AppendDerivedClass(List<MetadataItem> items)

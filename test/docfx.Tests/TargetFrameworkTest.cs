@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Docfx.Common;
+using Docfx.DataContracts.Common;
 using Docfx.DataContracts.ManagedReference;
 using Docfx.Dotnet;
 using Docfx.Tests.Common;
@@ -708,18 +709,21 @@ public class TargetFrameworkTest : TestBase
         Assert.Equal("netstandard2.0", Assert.Single(item.Variants).Summary.Trim());
     }
 
-    [Fact]
-    public async Task ADefaultFrameworkNotDocumentedWarnsAndTheNearestProvidesTheContent()
+    [Theory]
+    [InlineData("netstandard2.0,net8.0", "net8.0")]
+    // one framework documented: nothing is merged, but a mistyped default is still worth a warning
+    [InlineData("net8.0", "net8.0")]
+    public async Task ADefaultFrameworkNotDocumentedWarnsAndTheNearestProvidesTheContent(string targetFrameworks, string expectedContent)
     {
         var project = CreateMultiTargetedProject();
 
         using var listener = new TestListenerScope();
 
-        await Exec(new() { Src = Src(project), TargetFrameworks = ["netstandard2.0", "net8.0"], DefaultFramework = "net10.0" });
+        await Exec(new() { Src = Src(project), TargetFrameworks = [.. targetFrameworks.Split(',')], DefaultFramework = "net10.0" });
 
         var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
         Assert.Contains("'net10.0'", warning.Message);
-        Assert.Equal("net8.0", Page("Lib.Shared.yml").Items[0].Summary.Trim());
+        Assert.Equal(expectedContent, Page("Lib.Shared.yml").Items[0].Summary.Trim());
     }
 
     [Fact]
@@ -889,6 +893,53 @@ public class TargetFrameworkTest : TestBase
         Assert.Contains(extensions, x => x.Contains("OnlyNet8"));
         Assert.Contains(extensions, x => x.Contains("OnlyNetStandard"));
         Assert.Equal(["netstandard2.0"], AppliesTo("Ext.Extensions.yml", "Ext.Extensions.OnlyNetStandard(Ext.Target)"));
+    }
+
+    [Fact]
+    public async Task ANestedNamespaceWithoutTypesAppliesWhereverTheNamespacesItHoldsDo()
+    {
+        var project = CreateProject("Root", "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>", """
+            namespace Root.Data { public class Row { } }
+            #if NET8_0
+            namespace Root.Deep.First { public class A { } }
+            namespace Root.Deep.Second { public class B { } }
+            #endif
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["*"], NamespaceLayout = NamespaceLayout.Nested });
+
+        AssertWarnings(listener);
+        Assert.Equal(["net8.0", "netstandard2.0"], AppliesTo("Root.yml"));
+        Assert.Equal(["net8.0"], AppliesTo("Root.Deep.yml"));
+
+        var toc = YamlUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, "toc.yml"));
+        var root = toc.Items.Single(i => i.Uid == "Root");
+        Assert.NotNull(root.Metadata["appliesTo"]);
+    }
+
+    [Theory]
+    [InlineData("netstandard2.0", "*", 1)]
+    [InlineData("", "*", 1)]
+    [InlineData("net8.0", "netstandard2.0", 0)]
+    public async Task TargetFrameworksReportsTheAnalyzersOfEveryFrameworkItDocumentsOnce(string analyzerFramework, string targetFrameworks, int expected)
+    {
+        var condition = analyzerFramework.Length == 0 ? "" : $" Condition=\"'$(TargetFramework)' == '{analyzerFramework}'\"";
+        var project = CreateProject("Lib", "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>", "namespace Lib { public class C { } }", $"""
+            <ItemGroup{condition}>
+              <Analyzer Include="Missing.Generator.dll" />
+            </ItemGroup>
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = [targetFrameworks] });
+
+        var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).ToList();
+        Assert.True(
+            warnings.Count == expected && warnings.All(w => w.Code is WarningCodes.Metadata.FailedToResolveAnalyzer or WarningCodes.Metadata.FailedToLoadAnalyzer),
+            $"Expected {expected} analyzer warnings, got:{Environment.NewLine}" + string.Join(Environment.NewLine, warnings.Select(w => $"  {w.Code}: {w.Message}")));
     }
 
     [Fact]
@@ -1293,6 +1344,16 @@ public class TargetFrameworkTest : TestBase
             #endif
 
                 public class Child : Base { }
+
+                public interface ISource { }
+
+            #if NET8_0
+                public class Reader : ISource { }
+            #else
+                public class Reader { }
+            #endif
+
+                public class Writer : ISource { }
             }
             """);
 
@@ -1302,6 +1363,12 @@ public class TargetFrameworkTest : TestBase
 
         AssertWarnings(listener);
         Assert.Equal(["Bases.Child", "Bases.Derived"], Page("Bases.Base.yml").Items[0].DerivedClasses);
+
+        // So does a class that implements an interface in only some of the interface's frameworks.
+        var source = Page("Bases.ISource.yml").Items[0];
+        Assert.Equal(["Bases.Reader", "Bases.Writer"], source.DerivedClasses);
+        Assert.Equal(["Bases.Reader"], source.DerivedClassesAppliesTo.Keys);
+        Assert.Equal(["net8.0"], source.DerivedClassesAppliesTo["Bases.Reader"].Single().Frameworks);
         Assert.Equal(["Bases.Derived"], Page("Bases.OtherBase.yml").Items[0].DerivedClasses);
 
         // A class that derives from a base in every framework of the base needs no mark either.

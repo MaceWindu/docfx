@@ -165,6 +165,24 @@ public class TargetFrameworkMergeTest
         method.TypeParameters.Should().BeNull();
     }
 
+    [Fact]
+    public void WhatAVariantLacksIsWrittenEmptyRatherThanLeftOut()
+    {
+        var result = Merge(
+            ("namespace N { public delegate void D(int x); public class T { public int M() => 0; } }", First),
+            ("namespace N { public delegate void D(); public class T { public void M() { } } }", Second));
+
+        // left out, it would read as the same as the API's
+        var method = result["N.T.M"].Variants.Should().ContainSingle().Subject.Content.Syntax;
+        method.Return.Should().NotBeNull();
+        method.Return.Type.Should().BeNull();
+        method.Parameters.Should().BeNull();
+
+        var handler = result["N.D"].Variants.Should().ContainSingle().Subject.Content.Syntax;
+        handler.Parameters.Should().BeEmpty();
+        handler.Return.Should().BeNull();
+    }
+
     [Theory]
     [InlineData("class")]
     [InlineData("interface")]
@@ -520,6 +538,47 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void IgnoringInheritedDocumentationComparesWithTheSummaryShown()
+    {
+        // `First` inherits an empty summary, which `Second`'s own fills; `Third` inherits a summary of its base
+        string Code(string baseSummary, string summary) => $$"""
+            namespace N
+            {
+                public class B { {{baseSummary}}
+                public virtual void M() { } }
+                public class T : B { {{summary}}
+                public override void M() { } }
+            }
+            """;
+
+        var result = MergeIgnoring(
+            VariantIgnore.InheritedDocumentation,
+            (Code("", ""), First),
+            (Code("", "/// <summary>own</summary>"), Second),
+            (Code("/// <summary>inherited</summary>", ""), Third));
+
+        var item = result["N.T.M"];
+        item.Summary.Should().Contain("own");
+        item.Variants.Should().ContainSingle().Which.Frameworks.Should().Equal(Third);
+        item.Variants[0].Content.Summary.Should().Contain("inherited");
+    }
+
+    [Theory]
+    [InlineData(nameof(VariantIgnore.None), false)]
+    [InlineData(nameof(VariantIgnore.Documentation), false)]
+    [InlineData(nameof(VariantIgnore.InheritedDocumentation), true)]
+    public void WhetherDocumentationIsInheritedIsReadOnlyToIgnoreIt(string ignore, bool expected)
+    {
+        var compilation = CompilationHelper.CreateCompilationFromCSharpCode(
+            "namespace N { public class B { /// <summary>base</summary>\npublic virtual void M() { } } public class T : B { /// <inheritdoc/>\npublic override void M() { } } }",
+            new Dictionary<string, string>(), "Lib");
+
+        var item = compilation.Assembly.GenerateMetadataItem(compilation, new() { VariantIgnore = Enum.Parse<VariantIgnore>(ignore) })!;
+
+        item.Items.Single().Items.Single(i => i.Name == "N.T").Items.Single().IsDocumentationInherited.Should().Be(expected);
+    }
+
+    [Fact]
     public void AnInheritdocInTheRemarksLeavesTheSummaryOfItsOwn()
     {
         string Code(string summary) => $$"""
@@ -564,7 +623,7 @@ public class TargetFrameworkMergeTest
         var items = units.Select(unit =>
         {
             var compilation = CompilationHelper.CreateCompilationFromCSharpCode(unit.Code, new Dictionary<string, string>(), "Lib");
-            var item = compilation.Assembly.GenerateMetadataItem(compilation)!;
+            var item = compilation.Assembly.GenerateMetadataItem(compilation, new() { VariantIgnore = ignore })!;
             DotnetApiCatalog.TagAppliesTo(item, unit.Framework);
             return item;
         }).ToList();

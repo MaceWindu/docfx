@@ -85,24 +85,21 @@ internal sealed class TargetFrameworkAxis
     }
 
     /// <summary>
-    /// Returns the id of the first value whose patterns match <paramref name="projectPath"/>.
+    /// Returns the id of the first value whose patterns match <paramref name="projectPath"/>, relative to any of
+    /// the <c>src</c> folders that hold it: the order of the values decides, not that of the folders.
     /// </summary>
     public string? Match(string projectPath)
     {
-        foreach (var basePath in _bases)
-        {
-            var relative = Path.GetRelativePath(basePath, projectPath).Replace('\\', '/');
-            if (relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative))
-            {
-                continue;
-            }
+        var relatives = _bases
+            .Select(basePath => Path.GetRelativePath(basePath, projectPath).Replace('\\', '/'))
+            .Where(relative => !relative.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+            .ToList();
 
-            foreach (var (id, _, files) in _values)
+        foreach (var (id, _, files) in _values)
+        {
+            if (relatives.Any(relative => files.Any(f => f.Match(relative))))
             {
-                if (files.Any(f => f.Match(relative)))
-                {
-                    return id;
-                }
+                return id;
             }
         }
 

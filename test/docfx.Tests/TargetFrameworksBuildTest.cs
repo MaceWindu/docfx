@@ -162,7 +162,7 @@ public class TargetFrameworksBuildTest : TestBase
         var site = await Build(template, targetFrameworks: "\"*\"");
         var page = await Page(site, "Lib.Child.html");
 
-        Assert.Matches("Base\\.OnlyNet8Base\\(\\)</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span></div>", page);
+        Assert.Matches("Base\\.OnlyNet8Base\\(\\)</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
         Assert.DoesNotMatch("Base\\.Everywhere\\(\\)</a>\\s*<span", page);
         Assert.DoesNotMatch("object\\.ToString\\(\\)</a>\\s*<span", page);
     }
@@ -219,6 +219,24 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Contains($"<dt>Applies to</dt><dd>{Both}</dd>", page);
         Assert.Contains(string.Format(Badge, Net8), page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AnOverloadPageOfTheDefaultTemplateMarksItsOverloadsAndShowsTheirVariants()
+    {
+        // The default template renders the page of a method or property group, unlike that of a field, with
+        // `partials/collection`, which shares the member markup of a type page.
+        var site = await Build("\"default\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+
+        var overloads = await Page(site, "Lib.Shared.Do.html");
+        Assert.Contains($"<strong>Applies to</strong>: {Both}</h6>", overloads);
+        Assert.Matches("<h4 id=\"[^\"]+\" data-uid=\"Lib\\.Shared\\.Do\\(System\\.Int32\\)\" data-applies-to=\"net8\\.0\">[^<]+ <span class=\"applies-to\">\\.NET 8</span></h4>", overloads);
+
+        var property = await Page(site, "Lib.Shared.Size.html");
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", property);
+        Assert.Contains("<h6 class=\"api-variant-label\">.NET Standard 2.0</h6>", property);
+        Assert.DoesNotContain("<h5 class=\"implements\">", property);
     }
 
     [Theory]

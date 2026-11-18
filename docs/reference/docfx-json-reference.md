@@ -486,7 +486,7 @@ Unlike the `TargetFramework` property in [`properties`](#properties), it applies
 
 ### `targetFrameworks`
 
-The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and a class that derives from a type in only some of its frameworks under `derivedClassesAppliesTo`; both are marked with them on the page.
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and a class that derives from a type, or implements an interface, in only some of its frameworks under `derivedClassesAppliesTo`; both are marked with them on the page.
 
 ```json
 {
@@ -523,7 +523,7 @@ A project that does not target it uses the framework nearest to it among those i
 
 ### `axes`
 
-An axis besides the target framework along which the projects of this metadata item differ, such as the version of a dependency they are built against. Each project gets the first value whose `files` match it, relative to the `src` of the item, and the APIs that several values share get one page, which lists the frameworks it exists in for each value. The `default` value, or the first one, provides the content of an API that exists in several.
+An axis besides the target framework along which the projects of this metadata item differ, such as the version of a dependency they are built against. Each project gets the first value whose `files` match it, relative to any `src` of the item that holds it, and the APIs that several values share get one page, which lists the frameworks it exists in for each value. The `default` value, or the first one, provides the content of an API that exists in several.
 
 ```json
 {

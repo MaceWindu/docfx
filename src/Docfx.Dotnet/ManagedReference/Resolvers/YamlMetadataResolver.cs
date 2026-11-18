@@ -78,6 +78,7 @@ internal static class YamlMetadataResolver
             Items = []
         };
         Dictionary<string, MetadataItem> namespacedItems = [];
+        List<MetadataItem> placeholders = [];
 
         var dotsPerNamespace = namespaces.ToDictionary(x => x.Key, x => x.Value.Name.Where(y => y == '.').Count());
         foreach (var member in namespaces
@@ -103,6 +104,7 @@ internal static class YamlMetadataResolver
                         };
                         missingNamespace.DisplayNames.Add(SyntaxLanguage.Default, partialParentNamespace);
                         namespacedItems[partialParentNamespace] = missingNamespace;
+                        placeholders.Add(missingNamespace);
                         allReferences.TryAdd(partialParentNamespace, new());
 
                         if (!partialParentNamespace.Contains('.'))
@@ -135,6 +137,35 @@ internal static class YamlMetadataResolver
                 root.Items.Add(member);
 
             namespacedItems[member.Name] = member;
+        }
+
+        // A namespace that only holds others exists wherever one of them does, as a namespace documented with
+        // types of its own: the deepest first, as a placeholder can hold another.
+        if (namespaces.Any(n => n.Value.AppliesTo is not null))
+        {
+            var order = new List<string>();
+            foreach (var frameworks in namespaces.Select(n => n.Value.AppliesTo).OfType<List<string>>())
+            {
+                // Every namespace lists its frameworks in the order of the merge, so each fits into one order.
+                var at = 0;
+                foreach (var framework in frameworks)
+                {
+                    var index = order.FindIndex(f => string.Equals(f, framework, StringComparison.OrdinalIgnoreCase));
+                    if (index < 0)
+                    {
+                        order.Insert(at, framework);
+                        index = at;
+                    }
+
+                    at = index + 1;
+                }
+            }
+
+            foreach (var placeholder in placeholders.OrderByDescending(p => p.Name.Count(c => c == '.')))
+            {
+                var units = placeholder.Items.SelectMany(i => i.AppliesTo ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                placeholder.AppliesTo = units.Count == 0 ? null : order.Where(units.Contains).ToList();
+            }
         }
 
         foreach (var member in namespacedItems.Values)

@@ -123,6 +123,18 @@ public class TargetFrameworkHelperTest
     }
 
     [Fact]
+    public void AProjectGetsTheFirstValueThatMatchesItWhicheverSrcFolderItIsMatchedFrom()
+    {
+        // `src/Ef3/Lib.csproj` is `Ef3/Lib.csproj` from the first folder and `Lib.csproj` from the second.
+        var root = Path.Combine(Directory.GetCurrentDirectory(), "src");
+        var axis = TargetFrameworkAxis.Create(
+            [new() { Name = "EF Core", Values = [new() { Id = "ef3", Files = ["Lib.csproj"] }, new() { Id = "ef9", Files = ["Ef3/**"] }] }],
+            [root, Path.Combine(root, "Ef3")]);
+
+        axis.Match(Path.Combine(root, "Ef3", "Lib.csproj")).Should().Be("ef3");
+    }
+
+    [Fact]
     public void AppliesToWithoutAnAxisIsOneGroup()
     {
         var groups = YamlViewModelExtensions.ToAppliesToViewModel(["net8.0", "net462"], null);

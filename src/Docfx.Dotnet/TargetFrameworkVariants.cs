@@ -109,22 +109,20 @@ internal static partial class TargetFrameworkVariants
         // A framework can build a type into an assembly of its own name.
         primary.AssemblyNameList = Union(primary.AssemblyNameList, other.AssemblyNameList);
 
-        // A member inherited in only some frameworks, as its base type differs, is marked with them on the page.
-        foreach (var uid in other.InheritedMembers ?? [])
-        {
-            primary.InheritedMembersAppliesTo ??= [];
-            if (primary.InheritedMembersAppliesTo.TryGetValue(uid, out var frameworks))
-            {
-                frameworks.Add(framework);
-            }
-            else
-            {
-                primary.InheritedMembersAppliesTo[uid] = [framework];
-            }
-        }
+        // A member inherited in only some frameworks, as its base type differs, is marked with them on the page,
+        // and so is a type implementing an interface in only some, on the page of the interface.
+        primary.InheritedMembersAppliesTo = AddFramework(primary.InheritedMembersAppliesTo, other.InheritedMembers, framework);
+        primary.ImplementsAppliesTo = AddFramework(primary.ImplementsAppliesTo, other.Implements, framework);
 
         if (string.IsNullOrWhiteSpace(primary.Summary))
         {
+            // The summary shown is now that framework's: a later framework that inherits its own is compared with
+            // it only if it is inherited too, or that framework would be shown text of another framework's own.
+            if (!string.IsNullOrWhiteSpace(other.Summary))
+            {
+                primary.IsDocumentationInherited = other.IsDocumentationInherited;
+            }
+
             primary.Summary = other.Summary;
         }
 
@@ -201,16 +199,22 @@ internal static partial class TargetFrameworkVariants
     /// <summary>
     /// The declaration, parameters, type parameters and return value only where they differ: a field whose
     /// constant differs would otherwise repeat a return type that is the same everywhere, and a parameter
-    /// described differently a declaration that is the same.
+    /// described differently a declaration that is the same. As what is the same is left out, parameters or a
+    /// return value the API has and the variant lacks are written empty: no parameters, and a return value
+    /// without a type, so that a template showing the variant whole does not take the API's.
     /// </summary>
     private static SyntaxDetail SyntaxThatDiffers(SyntaxDetail own, SyntaxDetail other, VariantIgnore ignore, bool baseLists)
     {
         return new()
         {
             Content = AreEquivalent(own.Content, other.Content, "content", ignore, baseLists) ? null : other.Content,
-            Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore, baseLists: false) ? null : other.Parameters,
+            Parameters = AreEquivalent(own.Parameters, other.Parameters, "parameters", ignore, baseLists: false)
+                ? null
+                : other.Parameters ?? [],
             TypeParameters = AreEquivalent(own.TypeParameters, other.TypeParameters, "typeParameters", ignore, baseLists: false) ? null : other.TypeParameters,
-            Return = AreEquivalent(own.Return, other.Return, "return", ignore, baseLists: false) ? null : other.Return,
+            Return = AreEquivalent(own.Return, other.Return, "return", ignore, baseLists: false)
+                ? null
+                : other.Return ?? new ApiParameter(),
         };
     }
 
@@ -437,6 +441,24 @@ internal static partial class TargetFrameworkVariants
             JsonValue value => value.GetValueKind() is JsonValueKind.String && value.GetValue<string>().Length == 0,
             _ => false,
         };
+    }
+
+    private static Dictionary<string, List<string>> AddFramework(Dictionary<string, List<string>> frameworksOf, List<string> uids, string framework)
+    {
+        foreach (var uid in uids ?? [])
+        {
+            frameworksOf ??= [];
+            if (frameworksOf.TryGetValue(uid, out var frameworks))
+            {
+                frameworks.Add(framework);
+            }
+            else
+            {
+                frameworksOf[uid] = [framework];
+            }
+        }
+
+        return frameworksOf;
     }
 
     private static List<string> Union(List<string> first, List<string> second)

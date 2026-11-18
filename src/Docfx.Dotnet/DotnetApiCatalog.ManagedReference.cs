@@ -244,6 +244,15 @@ partial class DotnetApiCatalog
             }
         }
 
+        if (item.Implements is { Count: > 0 } implemented)
+        {
+            item.ImplementsAppliesTo = [];
+            foreach (var uid in implemented)
+            {
+                item.ImplementsAppliesTo.TryAdd(uid, [framework]);
+            }
+        }
+
         foreach (var child in item.Items ?? [])
         {
             TagAppliesTo(child, framework);

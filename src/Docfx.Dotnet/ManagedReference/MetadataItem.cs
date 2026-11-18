@@ -185,6 +185,15 @@ internal class MetadataItem : ICloneable
     public Dictionary<string, List<string>> DerivedClassesAppliesTo { get; set; }
 
     /// <summary>
+    /// The target frameworks of this item each of its <see cref="Implements"/> is implemented in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> ImplementsAppliesTo { get; set; }
+
+    /// <summary>
     /// What differs in the frameworks that do not share the content of this item.
     /// </summary>
     [YamlIgnore]
