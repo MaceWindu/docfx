@@ -3,8 +3,9 @@
 
 import test from 'node:test'
 import assert from 'node:assert'
+import { TemplateResult } from 'lit-html'
 import {
-  Axis, Selection, Toc, TocEntry, applySelection, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, findPath, frameworkLabel,
+  Axis, Selection, Toc, TocEntry, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, findPath, frameworkLabel,
   getChoices, getSelection, hashId, initAppliesTo, isAvailable, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
@@ -214,6 +215,25 @@ test('a link keeps a valid choice for the next pages', () => {
   keepLinkSelection({ frameworks, axis: ef, key: 'ef-core' })
   assert.ok(!next.has('docfx.axis./docs/.framework'))
   assert.strictEqual(next.get('docfx.axis./docs/.ef-core'), 'ef3')
+
+  // the value of the axis of another part of the docs too, whose entries the table of contents filters by it
+  const other = installDom(site, 'https://example.org/docs/api/Guide.html?ef-core=ef3&driver=d9').storage
+  keepLinkSelection({ frameworks, axes: [ef, driver] })
+  assert.strictEqual(other.get('docfx.axis./docs/.ef-core'), 'ef3')
+  assert.ok(!other.has('docfx.axis./docs/.driver'))
+})
+
+test('a link page reloaded or gone back to keeps what was picked since', () => {
+  // the link picked .NET Framework 4.6.2, then the reader picked .NET 8 on another page
+  for (const navigation of ['reload', 'back_forward'] as const) {
+    const { storage } = installDom(site, 'https://example.org/docs/api/A.html?framework=net462&ef-core=ef3', navigation)
+    storage.set('docfx.axis./docs/.framework', 'net8.0')
+    keepLinkSelection({ frameworks, axis: ef, key: 'ef-core' })
+    assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net8.0', navigation)
+    assert.ok(!storage.has('docfx.axis./docs/.ef-core'), navigation)
+    // the page itself still shows what its address names
+    assert.deepStrictEqual(getSelection(ef, frameworks), { framework: 'net462', value: 'ef3' }, navigation)
+  }
 })
 
 // A table of contents including two API tables of contents, each with its axis on its entries, and an article.
@@ -483,6 +503,24 @@ test('a link to content hidden for the selection goes to the content shown', () 
   assert.strictEqual(shownTarget('missing'), null)
 })
 
+test('a link to an API named like the suffix of a copy goes to the same element of the content shown', () => {
+  installDom(`${site}
+  <article>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="Lib_Get_variant2_remarks">Remarks</h2></div>
+      <div class="api-content" data-applies-to="netstandard2.0" hidden><h2 id="Lib_Get_variant2_variant1_remarks">Remarks</h2></div>
+      <div class="api-content" data-applies-to="net462" hidden><h2 id="Lib_Get_variant2_variant2_remarks">Remarks</h2></div>
+    </div>
+  </article>`)
+
+  applySelection({ framework: 'netstandard2.0' })
+  assert.strictEqual(shownTarget('Lib_Get_variant2_remarks').id, 'Lib_Get_variant2_variant1_remarks')
+  applySelection({ framework: 'net462' })
+  assert.strictEqual(shownTarget('Lib_Get_variant2_variant1_remarks').id, 'Lib_Get_variant2_variant2_remarks')
+  applySelection({ framework: 'net8.0' })
+  assert.strictEqual(shownTarget('Lib_Get_variant2_variant2_remarks').id, 'Lib_Get_variant2_remarks')
+})
+
 test('a link on the page to content hidden for the selection scrolls to the content shown', () => {
   installDom(page, 'https://example.org/docs/api/Lib.Shared.html#Lib_Shared_Size_remarks')
   const scrolled = (id: string) => !!(globalThis.document.getElementById(id) as unknown as { scrolledIntoView?: boolean }).scrolledIntoView
@@ -523,6 +561,41 @@ test('the lists of a page dim what does not exist in the selection', () => {
   applySelection({})
   assert.deepStrictEqual(dimmed(), [])
   assert.deepStrictEqual(marked(), [])
+})
+
+test('an extension method of another part of the docs is dimmed by its framework only', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Context" data-applies-to="ef3:netstandard2.0 ef9:net8.0">Context</h1>
+    <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd>
+      <div id="Driver" data-applies-to="d1:net8.0">DriverExt.Use()</div>
+      <div id="Ef9" data-applies-to="ef9:net8.0">EfExt.Track()</div>
+    </dd></dl>
+  </article>`)
+  const dimmed = () => document.querySelectorAll('.applies-to-unavailable').map(e => e.id)
+
+  // the value of the Driver axis says nothing about EF Core 3.1
+  applySelection({ value: 'ef3' }, ef)
+  assert.deepStrictEqual(dimmed(), ['Ef9'])
+  applySelection({ value: 'ef9', framework: 'netstandard2.0' }, ef)
+  assert.deepStrictEqual(dimmed(), ['Driver', 'Ef9'])
+})
+
+test('a namespace that does not exist in the selection says so', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Data" data-applies-to="net8.0">Lib.Data</h1>
+    <div class="markdown summary"></div>
+    <h3 id="classes">Classes</h3>
+    <dl class="jumplist" data-applies-to="net8.0"><dt>Cache</dt><dd></dd></dl>
+  </article>`)
+
+  applySelection({ framework: 'netstandard2.0' })
+  const banner = document.getElementById('Lib_Data').nextElementSibling
+  assert.strictEqual(banner.className, 'applies-to-banner alert alert-warning')
+  assert.strictEqual(banner.textContent, 'Not available in .NET Standard 2.0')
+  applySelection({})
+  assert.strictEqual(document.querySelector('.applies-to-banner'), null)
 })
 
 test('In this article leaves out only what the selection hides', () => {
@@ -703,4 +776,20 @@ test('a page whose table of contents lists no frameworks shows them all', async(
   assert.strictEqual(applied, 2)
   assert.ok(!document.getElementById('Lib_Shared_Size_remarks').closest('[hidden]'))
   assert.ok(document.querySelectorAll('.api-variant').every(e => !e.hidden))
+})
+
+test('the dropdowns are named with what they pick', () => {
+  const locs = `${pickerSite}
+  <meta name="loc:appliesToFramework" content="Framework">
+  <meta name="loc:appliesToAll" content="All">
+  <meta name="loc:appliesToAllFrameworks" content="All frameworks">`
+  const isTemplate = (v: unknown): v is TemplateResult => Array.isArray((v as TemplateResult)?.strings)
+  // the templates of the dropdowns, and the value bound to the name of each button
+  const templates = (result: TemplateResult): TemplateResult[] => [result, ...result.values.filter(isTemplate).flatMap(templates)]
+  const names = (result: TemplateResult) => templates(result).flatMap(r => r.strings.flatMap((s, i) => s.endsWith("aria-label='") ? [r.values[i]] : []))
+
+  installDom(locs, 'https://example.org/docs/api/A.html?framework=net8.0')
+  assert.deepStrictEqual(names(appliesToPicker({ frameworks, axis: ef, key: 'ef-core' })), ['EF Core: All', 'Framework: .NET 8'])
+  installDom(locs, 'https://example.org/docs/api/A.html?ef-core=ef3')
+  assert.deepStrictEqual(names(appliesToPicker({ frameworks, axis: ef, key: 'ef-core' })), ['EF Core: EF Core 3.1', 'Framework: All frameworks'])
 })

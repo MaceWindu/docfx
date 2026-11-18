@@ -147,6 +147,12 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
     a {
       color: inherit;
     }
+
+    // a declaration, whose highlighting theme colours each token
+    code.hljs,
+    code.hljs * {
+      color: var(--bs-secondary-color);
+    }
   }
 
   // Lists are links only, which the muted colour no longer tells apart from text.
