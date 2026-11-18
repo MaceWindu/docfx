@@ -22,7 +22,8 @@ namespace Docfx.Dotnet;
 /// </remarks>
 internal static partial class TargetFrameworkHelper
 {
-    // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows.
+    // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows, of the
+    // platforms it ships. It defines one for any other platform too, which is recognized by the symbol of its version.
     private static readonly string[] s_platformSymbols = ["ANDROID", "BROWSER", "IOS", "MACCATALYST", "MACOS", "TIZEN", "TVOS", "WASI", "WINDOWS"];
 
     // The platforms whose frameworks have no version, `net8.0-browser`: the SDK defines no `_OR_GREATER` symbol for
@@ -167,8 +168,13 @@ internal static partial class TargetFrameworkHelper
     private static Version? GetPlatformVersion(Project project, string framework)
     {
         var symbols = (project.ParseOptions?.PreprocessorSymbolNames ?? []).ToHashSet(StringComparer.Ordinal);
-        return GetPlatformFromSymbols(symbols, GetTargetFrameworkSymbol(framework)).Version;
+        return GetPlatformFromSymbols(symbols, GetTargetFrameworkSymbol(framework), GetTargetFrameworkPlatform(framework)).Version;
     }
+
+    // `XYZ1_0`: the SDK defines the platform's symbol together with one for the exact version targeted, for any
+    // platform, also one the list of platforms does not know.
+    [GeneratedRegex(@"^([A-Z]+)(\d+(?:_\d+)*)$")]
+    private static partial Regex ExactPlatformVersionSymbolRegex();
 
     /// <summary>
     /// Gets the platform, and its version, of a project from its preprocessor symbols. The SDK defines one such
@@ -176,8 +182,11 @@ internal static partial class TargetFrameworkHelper
     /// up to the one targeted, the highest of which is that version: a project's own <c>WINDOWS</c> alone is not it,
     /// except for a platform whose frameworks have no version, such as <c>BROWSER</c>. A platform with version
     /// symbols wins over such a symbol, which a project can also define itself for code it shares with that platform.
+    /// A platform the SDK does not know, such as <c>net8.0-desktop</c>, is recognized by its symbol and the one of
+    /// its exact version, <c>XYZ1_0</c>; without a version it defines the platform's symbol only, which tells it
+    /// apart from a project's own symbol only when <paramref name="requestedPlatform"/> names it.
     /// </summary>
-    private static (string? Platform, Version? Version) GetPlatformFromSymbols(HashSet<string> symbols, string frameworkSymbol)
+    private static (string? Platform, Version? Version) GetPlatformFromSymbols(HashSet<string> symbols, string frameworkSymbol, string? requestedPlatform = null)
     {
         var underscore = frameworkSymbol.IndexOf('_');
         if (!frameworkSymbol.StartsWith("NET", StringComparison.Ordinal) || underscore < 0 ||
@@ -186,11 +195,25 @@ internal static partial class TargetFrameworkHelper
             return (null, null);
         }
 
+        // `NET8_0` has the form of an exact platform version too.
+        var otherPlatforms = symbols
+            .Select(s => ExactPlatformVersionSymbolRegex().Match(s))
+            .Where(m => m.Success)
+            .Select(m => m.Groups[1].Value)
+            .Where(p => symbols.Contains(p) && !s_frameworkFamilySymbols.Contains(p) && !s_platformSymbols.Contains(p))
+            .Distinct()
+            .Order(StringComparer.Ordinal);
+
         string? versionless = null;
-        foreach (var platform in s_platformSymbols.Where(symbols.Contains))
+        foreach (var platform in s_platformSymbols.Where(symbols.Contains).Concat(otherPlatforms))
         {
             var version = symbols
                 .Select(s => PlatformVersionSymbolRegex().Match(s))
+                .Where(m => m.Success && m.Groups[1].Value == platform)
+                .Select(m => ParseVersion(m.Groups[2].Value.Replace('_', '.')))
+                .Max()
+                ?? symbols
+                .Select(s => ExactPlatformVersionSymbolRegex().Match(s))
                 .Where(m => m.Success && m.Groups[1].Value == platform)
                 .Select(m => ParseVersion(m.Groups[2].Value.Replace('_', '.')))
                 .Max();
@@ -207,6 +230,11 @@ internal static partial class TargetFrameworkHelper
             {
                 versionless = platform;
             }
+        }
+
+        if (requestedPlatform is not null && !s_platformSymbols.Contains(requestedPlatform) && symbols.Contains(requestedPlatform))
+        {
+            return (requestedPlatform, null);
         }
 
         return (versionless, null);
@@ -334,7 +362,7 @@ internal static partial class TargetFrameworkHelper
             return false;
         }
 
-        var (projectPlatform, platformVersion) = GetPlatformFromSymbols(symbols, frameworkSymbol);
+        var (projectPlatform, platformVersion) = GetPlatformFromSymbols(symbols, frameworkSymbol, GetTargetFrameworkPlatform(targetFramework));
         if (!string.Equals(projectPlatform, GetTargetFrameworkPlatform(targetFramework), StringComparison.OrdinalIgnoreCase))
         {
             return false;
