@@ -249,8 +249,11 @@ export function parseHtml(markup: string): FakeElement {
   return root
 }
 
-/** The browser of a test: `document` of the markup at `url`, empty local storage, and history. */
-export function installDom(markup: string, url = 'https://example.org/docs/api/Lib.Shared.html') {
+/**
+ * The browser of a test: `document` of the markup at `url`, opened as `navigation` says, such as by following a link
+ * or reloading it, empty local storage, and history.
+ */
+export function installDom(markup: string, url = 'https://example.org/docs/api/Lib.Shared.html', navigation: NavigationTimingType = 'navigate') {
   const root = parseHtml(markup)
   const listeners = new Map<string, ((event: unknown) => void)[]>()
   const items = new Map<string, string>()
@@ -267,7 +270,8 @@ export function installDom(markup: string, url = 'https://example.org/docs/api/L
     get location() { return location.url },
     addEventListener: (type: string, listener: (event: unknown) => void) => listeners.set(type, [...(listeners.get(type) || []), listener]),
     // an event the browser sends, such as `pageshow`, with the fields the page reads
-    dispatchEvent: (event: { type: string }) => { (listeners.get(event.type) || []).forEach(l => l(event)); return true }
+    dispatchEvent: (event: { type: string }) => { (listeners.get(event.type) || []).forEach(l => l(event)); return true },
+    performance: { getEntriesByType: (type: string) => type === 'navigation' ? [{ type: navigation }] : [] }
   }
   const localStorage = {
     getItem: (key: string) => items.has(key) ? items.get(key) : null,

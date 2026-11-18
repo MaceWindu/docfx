@@ -297,6 +297,16 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
+    public async Task ANamespacePageNamesTheFrameworksOfItsNamespace()
+    {
+        // so that the picker says so on a namespace page whose namespace does not exist in the selection
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+
+        Assert.Matches("<h1 id=\"Lib\" data-uid=\"Lib\" class=\"text-break\" data-applies-to=\"net8.0 netstandard2.0\">", await Page(site, "Lib.html"));
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
     public async Task AnOverloadPageAppliesWhereverAnyOverloadDoes()
     {
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
@@ -770,6 +780,54 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Handles it.", variant);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheSeeAlsoLinksOfAPageAreSwappedForAVariantsOwn()
+    {
+        var site = await BuildWithAxis(v1Members: "", v2Members: "", typeComment: "/// <seealso href=\"https://example.org/{version}\"/>");
+        var page = await RawPage(site, "Lib.Widget.html");
+
+        // after the members, outside the content of the type: the links of the frameworks the page shows, and those of
+        // Version 1 in a copy the picker and a PDF swap in
+        var start = page.IndexOf("<h2 id=\"seealso\">", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var own = page.LastIndexOf("<div class=\"api-content\" data-applies-to=\"v2:net8.0\">", start, StringComparison.Ordinal);
+        Assert.True(own >= 0);
+        Assert.Contains("https://example.org/V2", page[own..ElementEnd(page, own)]);
+        Assert.DoesNotContain("https://example.org/V1", page[own..ElementEnd(page, own)]);
+
+        var copyStart = page.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", start, StringComparison.Ordinal);
+        Assert.True(copyStart >= 0);
+        var copy = page[copyStart..ElementEnd(page, copyStart)];
+        Assert.Contains("<h2 id=\"seealso_variant1\">", copy);
+        Assert.Contains("https://example.org/V1", copy);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAVariantWithoutAReturnValueOrParametersShowsNone()
+    {
+        // Version 2, the default, returns an int and takes a value; Version 1 neither
+        var site = await BuildWithAxis(
+            v1Members: "public void Get() { } public delegate void Handler();",
+            v2Members: "public int Get() => 0; public delegate void Handler(long value);");
+
+        var widget = await RawPage(site, "Lib.Widget.html");
+        var get = widget.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", widget.IndexOf("data-uid=\"Lib.Widget.Get\"", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(get >= 0);
+        var copy = widget[get..ElementEnd(widget, get)];
+        Assert.Contains("public void Get()", copy);
+        Assert.DoesNotContain("Returns", copy);
+
+        var handler = await RawPage(site, "Lib.Widget.Handler.html");
+        var start = handler.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        copy = handler[start..ElementEnd(handler, start)];
+        Assert.Contains("Handler()", copy);
+        Assert.DoesNotContain("Parameters", copy);
+        Assert.DoesNotContain("long", copy);
+    }
+
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
@@ -864,7 +922,7 @@ public class TargetFrameworksBuildTest : TestBase
     }
 
     /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>
-    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage")
+    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage", string typeComment = "")
     {
         foreach (var (version, members) in new[] { ("V1", v1Members), ("V2", v2Members) })
         {
@@ -883,6 +941,7 @@ public class TargetFrameworksBuildTest : TestBase
                 namespace Lib
                 {
                     /// <summary>Summary of {{version}}.</summary>
+                    {{typeComment.Replace("{version}", version)}}
                     public class Widget { {{members}} }
                 }
                 """, TestContext.Current.CancellationToken);

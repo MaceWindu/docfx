@@ -179,8 +179,10 @@ function handleAppliesTo(vm, parent, options) {
     if (variant.syntax) {
       // What is the same is left out, so a part the API has and the variant lacks, such as the return value of a
       // method that returns nothing in the variant's frameworks, is written empty: no type, or no parameters. The
-      // declaration of the variant shows it, so neither is listed.
-      if (variant.syntax.return && !variant.syntax.return.type) variant.syntax.return = "";
+      // declaration of the variant shows it, so neither is listed; the copy of the variant keeps that it has none.
+      variant.syntax.noReturn = !!variant.syntax.return && !variant.syntax.return.type;
+      if (variant.syntax.noReturn) variant.syntax.return = "";
+      variant.syntax.noParameters = !!variant.syntax.parameters && variant.syntax.parameters.length === 0;
       // a declaration that is the same is left out when only a description of its parts differs
       variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];
@@ -274,6 +276,12 @@ function setVariantViews(vm, isPage) {
   var valueKind = isPage ? "" : kind;
   var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
   vm.primaryAppliesToData = getAppliesToFrameworks(vm).filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+  if (isPage) {
+    // A page lists its see-also links after its members, outside its content, so it swaps them on their own when a
+    // variant has links of its own; the ids of a copy's headings end with the copy's suffix.
+    vm.hasSeeAlsoVariants = vm.variants.some(function (variant) { return variant.seealso.length > 0; });
+    vm.copySuffix = "";
+  }
   vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, valueKind, index); });
 }
 
@@ -295,6 +303,7 @@ function getVariantView(vm, variant, kind, valueKind, index) {
   // headings of the copy must not repeat the ids of the API's own
   var suffix = '_variant' + (index + 1);
   view.id = vm.id + suffix;
+  view.copySuffix = suffix;
   // nor the ids of what it lists, the values of an enum; the copy of another type shows none of its members
   view.children = kind === 'enum' && vm.children ? vm.children.map(function (child) { return withIdSuffix(child, suffix); }) : [];
   view.appliesToData = variant.appliesToData;
@@ -307,13 +316,14 @@ function getVariantView(vm, variant, kind, valueKind, index) {
   if (variant.syntax) {
     var own = vm.syntax || {};
     var syntax = {
-      // a variant leaves out a declaration that is the same, which the copy then takes from the API
+      // a variant leaves out a declaration that is the same, which the copy then takes from the API, unless the
+      // variant has none of it: no parameters, or no return value, where the API has them
       content: variant.syntax.content.length > 0 ? variant.syntax.content : own.content,
-      parameters: variant.syntax.parameters.length > 0 ? variant.syntax.parameters : (own.parameters || []),
+      parameters: variant.syntax.parameters.length > 0 || variant.syntax.noParameters ? variant.syntax.parameters : (own.parameters || []),
       typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
     };
     // before groupChildren, which names the value of a member of a type, both still hold it as a return value
-    setValue(syntax, variant.syntax.return || own.return, valueKind);
+    setValue(syntax, variant.syntax.noReturn ? "" : variant.syntax.return || own.return, valueKind);
     view.syntax = syntax;
   }
   return view;

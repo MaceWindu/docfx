@@ -204,8 +204,11 @@ export type TocEntry = { name?: string, href?: string, appliesTo?: AppliesToGrou
 /** A table of contents as `toc.json` has it. */
 export type Toc = { items?: TocEntry[], axis?: Axis, frameworkNames?: Record<string, string> }
 
-/** What a reader can pick on a page: the frameworks of its table of contents, and the axis of its part of the docs. */
-export type Choices = { frameworks: string[], axis?: Axis, key?: string }
+/**
+ * What a reader can pick on a page: the frameworks of its table of contents, and the axis of its part of the docs;
+ * `axes` are those of every part, whose entries the table of contents filters by the value picked for each.
+ */
+export type Choices = { frameworks: string[], axis?: Axis, key?: string, axes?: Axis[] }
 
 const changeEvent = 'docfx:appliestochange'
 
@@ -264,16 +267,34 @@ export function getSelection(axis?: Axis, frameworks?: string[]): Selection {
   }
 }
 
-/** Keeps the choice a link made, so that it carries on to the pages the reader goes to next. */
+/**
+ * Keeps the choice a link made, so that it carries on to the pages the reader goes to next: the framework, and the
+ * value of each axis it names, that of another part of the docs too, whose entries the table of contents filters by
+ * it. Only when the link is followed: a page reloaded, or shown again from the history of the tab or a restored
+ * session, would otherwise undo what the reader picked since.
+ */
 export function keepLinkSelection(choices: Choices) {
+  if (!isFollowedLink()) {
+    return
+  }
   const query = new URLSearchParams(window.location.search)
   const selection = getSelection(choices.axis, choices.frameworks)
   if (selection.framework && query.get('framework')?.toLowerCase() === selection.framework.toLowerCase()) {
     localStorage?.setItem(storageKey('framework'), selection.framework)
   }
-  if (choices.key && query.get(choices.key) && query.get(choices.key) === selection.value) {
-    localStorage?.setItem(storageKey(choices.key), selection.value)
+  const axes = [choices.axis, ...(choices.axes || [])].filter(a => a)
+  for (const key of new Set(axes.map(axisKey))) {
+    const value = query.get(key)
+    if (value && axes.some(a => axisKey(a) === key && a.values.some(v => v.id === value))) {
+      localStorage?.setItem(storageKey(key), value)
+    }
   }
+}
+
+/** Whether the page was opened by following a link or entering its address, rather than reloaded or gone back to. */
+function isFollowedLink(): boolean {
+  const entry = window.performance?.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined
+  return !entry || (entry.type !== 'reload' && entry.type !== 'back_forward')
 }
 
 /** Keeps what the reader picked in a dropdown, `undefined` for "All", and shows the page for it. */
@@ -327,7 +348,7 @@ export function getChoices(toc: Toc, path: TocEntry[] = []): Choices {
   const { frameworks, axes } = summarize(toc)
   const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis ||
     (axes.length === 1 && !path.some(entry => entry.appliesTo) ? axes[0] : undefined)
-  return { frameworks, axis, key: axis ? axisKey(axis) : undefined }
+  return { frameworks, axis, key: axis ? axisKey(axis) : undefined, axes }
 }
 
 /** The entries from the root down to the entry of the page at `url`, none when the table of contents has no such entry. */
@@ -536,16 +557,36 @@ export function shownTarget(id: string): Element | null {
   if (!target || !container || !target.closest('[hidden]')) {
     return target
   }
-  const base = id.replace(/_variant\d+/, '')
-  for (const block of Array.from(container.children)) {
-    if (block.classList.contains('api-content') && !(block as HTMLElement).hidden) {
-      const same = Array.from(block.querySelectorAll('[id]')).find(e => e.id.replace(/_variant\d+/, '') === base)
+  const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content'))
+  const base = withoutCopySuffix(id, blocks.indexOf(target.closest('.api-content')))
+  for (const [index, block] of blocks.entries()) {
+    if (!(block as HTMLElement).hidden) {
+      const same = Array.from(block.querySelectorAll('[id]')).find(e => withoutCopySuffix(e.id, index) === base)
       if (same) {
         return same
       }
     }
   }
   return target
+}
+
+/**
+ * An id of the content of an API at `index` among its copies, without the suffix of that copy: `_variant1` for the
+ * first, last in the id or before the part a template adds, such as `_remarks`. A member named like a suffix, such as
+ * `Get_variant2`, keeps its name.
+ */
+function withoutCopySuffix(id: string, index: number): string {
+  if (index <= 0) {
+    return id
+  }
+  const suffix = `_variant${index}`
+  for (let i = id.lastIndexOf(suffix); i >= 0; i = i > 0 ? id.lastIndexOf(suffix, i - 1) : -1) {
+    const end = i + suffix.length
+    if (end === id.length || id[end] === '_') {
+      return id.substring(0, i) + id.substring(end)
+    }
+  }
+  return id
 }
 
 /**
@@ -558,9 +599,11 @@ export function appliesToPicker(choices: Choices): TemplateResult {
   }
   const names = frameworkNames()
   const selection = getSelection(choices.axis, choices.frameworks)
-  const dropdown = (key: string, title: string, current: string, selected: string | undefined, items: { id: string, label: string }[]) => html`
+  // The button shows what is picked, such as ".NET 8", and is named with what it picks too, which a screen reader
+  // would not say otherwise: "Framework: .NET 8".
+  const dropdown = (key: string, title: string, name: string, current: string, selected: string | undefined, items: { id: string, label: string }[]) => html`
     <div class='dropdown applies-to-picker'>
-      <button type='button' title='${title}' class='btn border-0 dropdown-toggle' data-bs-toggle='dropdown' aria-expanded='false'>${current}</button>
+      <button type='button' title='${title}' aria-label='${name}' class='btn border-0 dropdown-toggle' data-bs-toggle='dropdown' aria-expanded='false'>${current}</button>
       <ul class='dropdown-menu dropdown-menu-end'>
         ${items.map(i => html`<li><a class='dropdown-item ${i.id === selected ? 'active' : ''}' aria-current=${i.id === selected ? 'true' : 'false'} href='#'
           @click=${(e: Event) => { e.preventDefault(); select(key, i.id) }}>${i.label}</a></li>`)}
@@ -568,15 +611,17 @@ export function appliesToPicker(choices: Choices): TemplateResult {
     </div>`
 
   const axis = choices.axis
+  const value = axis?.values.find(v => v.id === selection.value)?.label
   const axisDropdown = axis
-    ? dropdown(choices.key, axis.name,
+    ? dropdown(choices.key, axis.name, `${axis.name}: ${value || loc('appliesToAll')}`,
       // a value's label already names the axis ("EF Core 3.1"), "All" does not
-      axis.values.find(v => v.id === selection.value)?.label || `${axis.name}: ${loc('appliesToAll')}`,
+      value || `${axis.name}: ${loc('appliesToAll')}`,
       selection.value,
       [{ id: undefined, label: loc('appliesToAll') }, ...axis.values])
     : null
-  const frameworkDropdown = dropdown('framework', loc('appliesToFramework'),
-    selection.framework ? frameworkLabel(selection.framework, names) : loc('appliesToAllFrameworks'),
+  const framework = selection.framework ? frameworkLabel(selection.framework, names) : loc('appliesToAllFrameworks')
+  const frameworkDropdown = dropdown('framework', loc('appliesToFramework'), `${loc('appliesToFramework')}: ${framework}`,
+    framework,
     selection.framework,
     [{ id: undefined, label: loc('appliesToAllFrameworks') }, ...choices.frameworks.map(f => ({ id: f, label: frameworkLabel(f, names) }))])
   return html`${axisDropdown}${frameworkDropdown}`
@@ -661,10 +706,10 @@ export function applySelection(selection: Selection, axis?: Axis) {
   })
 
   // the classes derived, and the members inherited, in only some frameworks of a type, as a base type differs, and
-  // extension methods declared in only some
+  // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
     list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
-      if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)) {
         entry.classList.add('applies-to-unavailable')
         entry.appendChild(unavailableBadge(label, true))
       }
@@ -677,7 +722,9 @@ export function applySelection(selection: Selection, axis?: Axis) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
-    title.parentElement.querySelector('.facts')?.after(banner)
+    // after the namespace and Applies to of a type or member, or the title of a namespace, which has neither
+    const before = title.parentElement.querySelector('.facts') || title
+    before.after(banner)
   } else if (title && line && (axis || !units.some(u => u.value))) {
     // Without the axis, before the table of contents that names it is loaded, the line stays as the page has it
     // rather than show the ids of its values. With `_disableApiAppliesToFrameworks`, the line names the axis values only.
@@ -685,6 +732,14 @@ export function applySelection(selection: Selection, axis?: Axis) {
     line.hidden = true
     line.after(shownLine(units, selection, axis, withFrameworks))
   }
+}
+
+/**
+ * The units of an entry as the value picked for `axis` reads them: a value of another axis, such as that of an
+ * extension method declared in another part of the docs, says nothing about it, so only the framework counts.
+ */
+function unitsOnAxis(units: Unit[], axis?: Axis): Unit[] {
+  return axis ? units.map(u => u.value === undefined || axis.values.some(v => v.id === u.value) ? u : { framework: u.framework }) : units
 }
 
 /**
