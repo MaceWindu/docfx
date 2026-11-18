@@ -203,8 +203,25 @@ public class PdfFrameworkTest
         // in the table of contents of a PDF of one framework, it says which one cannot be read, and does not stop the others
         Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": "net8.0", "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json"));
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'"));
+
+        // nor does one that is not JSON at all
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, """u8.ToArray(), "broken/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'broken/toc.json'"));
         // the error count is global, and later tests check it
         Logger.ResetCount();
+    }
+
+    [Theory]
+    [InlineData("unavailable", false, "Unavailable")]
+    [InlineData("error:broken page", false, "Failed")]
+    [InlineData("unapplied", false, "NotApplied")]
+    // a page that timed out may not have run the script of its template yet, which says nothing of the template
+    [InlineData("unapplied", true, "TimedOut")]
+    [InlineData("", false, "None")]
+    [InlineData("", true, "None")]
+    public void APageThatDidNotApplyTheSelectionWarnsWhy(string state, bool timedOut, string expected)
+    {
+        Assert.Equal(expected, PdfBuilder.GetPrintSelectionProblem(state, timedOut).ToString());
     }
 
     [Fact]
@@ -217,10 +234,17 @@ public class PdfFrameworkTest
         Assert.Equal("A", string.Join(", ", Names(empty?.items)));
         Assert.Null(PdfBuilder.GetAppliesToScript(empty));
 
-        // a number, as YAML writes `pdfAxisValue: 8`, is the value it spells
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+
+        // a number, which the build would have made text, is the value it spells, and says so
         var number = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfAxisValue": 8, "items": [ { "name": "A", "appliesTo": [ { "version": "8", "frameworks": [ "net8.0" ] } ] } ] }"""u8.ToArray(), "toc.json");
         Assert.Equal("8", number?.pdfAxisValue);
-        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+        // as it is written in the table of contents, with its zeros
+        Assert.Equal("1.10", PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfAxisValue": 1.10 }"""u8.ToArray(), "toc.json")?.pdfAxisValue);
+        var numbers = listener.GetItemsByLogLevel(LogLevel.Warning).ToList();
+        Assert.Equal(2, numbers.Count);
+        Assert.All(numbers, w => Assert.Equal(WarningCodes.Build.UnquotedTocValue, w.Code));
+        Assert.Contains(numbers, w => w.Message.StartsWith("'pdfAxisValue' of table of contents 'toc.json' is the number 1.10"));
 
         // anything else is ignored, and says so
         var other = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": true, "pdfAxisValue": [ "ef8" ], "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json");

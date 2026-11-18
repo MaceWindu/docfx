@@ -730,6 +730,18 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
     }
   })
 
+  // In print, the anchor of an overload group, which each of its members follows, goes when all of them do, so that a
+  // link to the group is text, as to a member left out.
+  if (print) {
+    const anchors = document.querySelectorAll<HTMLElement>('article a[data-overload][id]')
+    for (const id of new Set(Array.from(anchors, a => a.id))) {
+      const group = Array.from(anchors).filter(a => a.id === id)
+      if (group.every(a => a.nextElementSibling?.hasAttribute('data-applies-to-left-out'))) {
+        group.forEach(leaveOut)
+      }
+    }
+  }
+
   // The entries of a list are marked as members are, not only dimmed, which a reader who cannot tell the colours
   // apart, or does not see them, would miss.
   // the types a namespace page lists, and the members of a type with a page each
@@ -764,7 +776,8 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
 
   // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
   // namespace page, where the headings of such groups are `h3`s without frameworks of their own. Only on API pages,
-  // and by the members that have frameworks: a hidden tab of an article has terms of its own.
+  // and by the members that have frameworks: a hidden tab of an article has terms of its own. Members left out, not
+  // hidden: the values of an enum in its own content, when a copy is shown in its place, are printed in the copy.
   if (print && document.querySelector('article h1[data-applies-to]')) {
     const member = 'h3[data-applies-to], dt[data-applies-to], dl.jumplist[data-applies-to]'
     document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
@@ -774,7 +787,7 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
         following.push(e as HTMLElement)
       }
       const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))
-      if (members.length > 0 && members.every(m => m.closest('[hidden]'))) {
+      if (members.length > 0 && members.every(m => m.closest('[data-applies-to-left-out]'))) {
         leaveOut(section)
         following.forEach(leaveOut)
       }

@@ -1006,6 +1006,45 @@ test('in print, what does not exist in the selection is left out', () => {
   assert.strictEqual(document.querySelector('.applies-to-banner'), null)
 })
 
+test('in print, an overload group goes with the last of its members', () => {
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 id="methods">Methods</h2>
+    <h3 id="Lib_Run" data-applies-to="net8.0 net462">Run</h3><p>Everywhere.</p>
+    <a id="Lib_Retry_" data-overload></a><h3 id="Lib_Retry" data-applies-to="net8.0">Retry()</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Retry_" data-overload></a><h3 id="Lib_Retry_int" data-applies-to="net8.0">Retry(int)</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Do_" data-overload></a><h3 id="Lib_Do" data-applies-to="net8.0">Do()</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Do_" data-overload></a><h3 id="Lib_Do_int" data-applies-to="net8.0 net462">Do(int)</h3><p>Everywhere.</p>
+  </article></body>`)
+
+  applySelection({ framework: 'net462' }, undefined, true)
+  // which a link to the group is text for, as for a member left out
+  const anchors = document.querySelectorAll('a[data-overload]')
+  assert.deepStrictEqual(anchors.map(a => `${a.id} ${a.hasAttribute('data-applies-to-left-out')}`),
+    ['Lib_Retry_ true', 'Lib_Retry_ true', 'Lib_Do_ false', 'Lib_Do_ false'])
+  assert.ok(!document.getElementById('methods').hidden)
+})
+
+test('in print, a section hidden for the copy shown in its place is not left out', () => {
+  // the enum is described differently on .NET Standard 2.0, and Fast is on .NET 8 only
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib_Mode" data-applies-to="net8.0 netstandard2.0">Mode</h1><div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="fields">Fields</h2><dl class="parameters">
+        <dt id="Lib_Mode_Plain" data-applies-to="net8.0 netstandard2.0"><code>Plain = 0</code></dt><dd></dd>
+      </dl></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="fields_variant1">Fields</h2><dl class="parameters">
+        <dt id="Lib_Mode_Plain_variant1" data-applies-to="net8.0 netstandard2.0"><code>Plain = 0</code></dt><dd></dd>
+      </dl></div>
+    </div>
+  </article></body>`)
+
+  applySelection({ framework: 'netstandard2.0' }, undefined, true)
+  // the values are printed, in the copy, so the links to them are kept
+  assert.ok(!document.getElementById('Lib_Mode_Plain_variant1').closest('[hidden]'))
+  assert.deepStrictEqual(document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]'), [])
+})
+
 test('in print, the value of another axis says nothing about a page whose axis has the same ids', () => {
   // EF Core has ef8 and ef9, the drivers have ef8 too; a PDF of ef9 prints a page of the drivers
   const markup = `${site}<body><article>
