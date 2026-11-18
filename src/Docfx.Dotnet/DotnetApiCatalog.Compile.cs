@@ -261,8 +261,14 @@ partial class DotnetApiCatalog
                         throw new DocfxException($"dotnet restore failed for '{path}' with exit code {process.ExitCode}.");
                     }
                 }
-                projectFrameworks?.Opening(path);
-                project = await workspace.OpenProjectAsync(path, msbuildLogger, projectFrameworks);
+                project = await workspace.OpenProjectAsync(path, msbuildLogger);
+            }
+
+            // With `targetFramework` or `targetFrameworks`, the analyzers reported are those of the frameworks
+            // documented, below; a project that is never documented reports those of the one loaded, as without them.
+            if (isNewlyLoaded && ((config.TargetFramework is null && targetFrameworks is null) || !project.SupportsCompilation))
+            {
+                ReportAnalyzers(project);
             }
 
             // Every framework of a file is loaded in its language, so the check holds for the one selected too,
@@ -334,8 +340,15 @@ partial class DotnetApiCatalog
             }
 
             var compilations = new List<Compilation>();
+            // An analyzer every framework references is one cause, reported once.
+            var reportedAnalyzers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (selected, selectedFramework) in selection)
             {
+                if (targetFrameworks is not null && isNewlyLoaded)
+                {
+                    ReportAnalyzersOnce(selected, reportedAnalyzers);
+                }
+
                 if (await selected.GetCompilationAsync() is not { } compilation)
                 {
                     continue;
@@ -363,9 +376,26 @@ partial class DotnetApiCatalog
 
         // Before the project is compiled: source generators run in the compilation, and a load failure is
         // reported only to the handlers attached by then.
-        static void ReportAnalyzers(Project project)
+        static void ReportAnalyzers(Project project) => ReportAnalyzersOnce(project, null);
+
+        // `reported` holds what the other frameworks of the same file reported already.
+        static void ReportAnalyzersOnce(Project project, HashSet<string>? reported)
         {
-            foreach (var unresolvedAnalyzer in project.AnalyzerReferences.OfType<UnresolvedAnalyzerReference>())
+            bool IsNew(string key)
+            {
+                if (reported is null)
+                {
+                    return true;
+                }
+
+                // A load failure is reported while a framework is compiled.
+                lock (reported)
+                {
+                    return reported.Add(key);
+                }
+            }
+
+            foreach (var unresolvedAnalyzer in project.AnalyzerReferences.OfType<UnresolvedAnalyzerReference>().Where(a => IsNew($"resolve {a.FullPath}")))
             {
                 Logger.LogWarning($"There is .NET Analyzer that can't be resolved. "
                                 + $"If this analyzer is .NET Source Generator project. "
@@ -377,6 +407,11 @@ partial class DotnetApiCatalog
             {
                 analyzer.AnalyzerLoadFailed += (sender, e) =>
                 {
+                    if (!IsNew($"load {analyzer.FullPath} {e.ErrorCode} {e.TypeName}"))
+                    {
+                        return;
+                    }
+
                     var analyzerName = analyzer.Display;
                     var errorCode = e.ErrorCode;
                     var referencedCompilerVersion = e.ReferencedCompilerVersion;

@@ -162,7 +162,8 @@ internal class ResolveReference : IResolverPipeline
                 }
             }
 
-            if (current.Syntax.Return != null)
+            // a variant's return value without a type says the variant has none
+            if (current.Syntax.Return?.Type != null)
             {
                 yield return current.Syntax.Return.Type;
             }

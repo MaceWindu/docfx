@@ -32,12 +32,12 @@
 {{#inheritedMembers}}
   <div>
   {{#definition}}
-    <xref uid="{{definition}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>
+    <xref uid="{{definition}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
   {{/definition}}
   {{^definition}}
-    <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>
+    <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
   {{/definition}}
-  {{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+  </div>
 {{/inheritedMembers}}
 {{#inheritedMembers.0}}
 </div>

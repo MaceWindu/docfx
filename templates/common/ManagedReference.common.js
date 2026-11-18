@@ -162,6 +162,11 @@ function handleAppliesTo(vm, parent, options) {
     // a part without a description must not show the description of the page, the summary of the API
     variant.exceptions.forEach(withDescription);
     if (variant.syntax) {
+      // What is the same is left out, so a part the API has and the variant lacks, such as the return value of a
+      // method that returns nothing in the variant's frameworks, is written empty: no type, or no parameters.
+      variant.syntax.noReturn = !!variant.syntax.return && !variant.syntax.return.type;
+      if (variant.syntax.noReturn) variant.syntax.return = "";
+      variant.syntax.noParameters = !!variant.syntax.parameters && variant.syntax.parameters.length === 0;
       // a declaration that is the same is left out when only a description of its parts differs
       variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];

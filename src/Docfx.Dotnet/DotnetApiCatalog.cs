@@ -96,6 +96,7 @@ public static partial class DotnetApiCatalog
             }
 
             var (assemblies, frameworks) = await Compile(config);
+            var documented = frameworks;
 
             // A single framework has nothing to merge, and its output must not differ from plain selection.
             if (frameworks?.Values.Distinct(StringComparer.OrdinalIgnoreCase).Skip(1).Any() != true)
@@ -125,8 +126,9 @@ public static partial class DotnetApiCatalog
             }
 
             // As the frameworks are ordered: `net8.0-windows` is documented by the project loaded as `net8.0-windows10.0.19041.0`.
-            if (frameworks is not null && config.DefaultFramework is { } defaultFramework &&
-                !frameworks.Values.Any(unit => TargetFrameworkHelper.IsSameFramework(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework)))
+            // Also for a single framework, where a mistyped default would otherwise go unnoticed.
+            if (documented is { Count: > 0 } && config.DefaultFramework is { } defaultFramework &&
+                !documented.Values.Any(unit => TargetFrameworkHelper.IsSameFramework(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework)))
             {
                 Logger.LogWarning(
                     $"No project is documented for the default framework '{defaultFramework}', so the nearest framework each project targets provides the content.",

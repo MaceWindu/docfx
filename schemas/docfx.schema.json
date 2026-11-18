@@ -701,7 +701,7 @@
             "type": "string"
           },
           "axes": {
-            "description": "An axis besides the target framework along which the projects of this item differ, such as the version of a dependency. Each project gets the first value whose files match it, and APIs that several values share get one page. One axis is supported.",
+            "description": "An axis besides the target framework along which the projects of this item differ, such as the version of a dependency. Each project gets the first value whose files match it, relative to any `src` that holds it, and APIs that several values share get one page. One axis is supported.",
             "type": "array",
             "maxItems": 1,
             "items": {
@@ -733,6 +733,7 @@
                       },
                       "files": {
                         "type": "array",
+                        "minItems": 1,
                         "items": { "type": "string" },
                         "description": "Glob patterns of the project files that have this value, relative to the `src` of the item."
                       }
