@@ -122,14 +122,27 @@ static class PdfBuilder
     /// </summary>
     internal static Outline? ReadPdfOutline(byte[] json, string path)
     {
-        if (JsonNode.Parse(json) is not JsonObject root ||
+        // Whether it has a PDF is not known then, but it would stop the PDFs of the others.
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogError($"Table of contents '{path}' cannot be read, so a PDF of it is not printed: {ex.Message}");
+            return null;
+        }
+
+        if (parsed is not JsonObject root ||
             !root.TryGetPropertyValue("pdf", out var pdf) || pdf is null || pdf.GetValueKind() is JsonValueKind.False)
         {
             return null;
         }
 
-        // A number, as YAML writes `pdfAxisValue: 8`, is the value it spells; an empty option, or one that is not
-        // text, selects nothing, rather than stop the PDF.
+        // A number is the value it spells, with a warning: the build makes text of a number YAML read, as in
+        // `pdfAxisValue: 8`, so only a table of contents written otherwise has one. An empty option, or one that is
+        // not text, selects nothing, rather than stop the PDF.
         var ignored = new HashSet<string>();
         ReadOptions(root);
         foreach (var name in ignored)
@@ -167,7 +180,11 @@ static class PdfBuilder
                         switch (item[name]?.GetValueKind())
                         {
                             case JsonValueKind.Number:
-                                item[name] = item[name]!.ToJsonString();
+                                var text = item[name]!.ToJsonString();
+                                item[name] = text;
+                                Logger.LogWarning(
+                                    $"'{name}' of table of contents '{path}' is the number {text}, which is used as '{text}': write it as text, quoted.",
+                                    code: WarningCodes.Build.UnquotedTocValue);
                                 break;
                             case JsonValueKind.String or null:
                                 break;
@@ -376,6 +393,20 @@ static class PdfBuilder
         "() => window.docfxAppliesTo && window.docfxAppliesTo.error ? 'error:' + window.docfxAppliesTo.error" +
         " : !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
         " : document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : ''";
+
+    internal enum PrintSelectionProblem { None, Unavailable, Failed, TimedOut, NotApplied }
+
+    /// <summary>
+    /// What to warn about a page by its <see cref="PrintSelectionStateScript"/> state. A page that timed out may not
+    /// have run the script of its template yet, so not having applied the selection says nothing of the template then.
+    /// </summary>
+    internal static PrintSelectionProblem GetPrintSelectionProblem(string state, bool timedOut) => state switch
+    {
+        "unavailable" => PrintSelectionProblem.Unavailable,
+        _ when state.StartsWith("error:", StringComparison.Ordinal) => PrintSelectionProblem.Failed,
+        "unapplied" => timedOut ? PrintSelectionProblem.TimedOut : PrintSelectionProblem.NotApplied,
+        _ => PrintSelectionProblem.None,
+    };
 
     /// <summary>The ids of what a page of a PDF of one framework or axis value leaves out, as the <c>modern</c> template marks it.</summary>
     internal const string LeftOutIdsScript =
@@ -649,6 +680,7 @@ static class PdfBuilder
             var page = await RentPage(pageContext, pool);
             var headings = new List<HeadingInfo>();
             string[] leftOut = [];
+            var timedOut = false;
 
             try
             {
@@ -716,18 +748,24 @@ static class PdfBuilder
                     && checkedPages.TryAdd((outline, pagePath), true))
                 {
                     var state = await page.EvaluateAsync<string>(PrintSelectionStateScript);
-                    if (state is "unavailable")
+                    var problem = GetPrintSelectionProblem(state, timedOut);
+                    if (problem is PrintSelectionProblem.Unavailable)
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' documents an API that does not exist in its 'pdfFramework' or 'pdfAxisValue', " +
                             "but is printed, without its members: its entry in the table of contents does not say what the API applies to. Include the API's own table of contents to leave such pages out.");
                     }
-                    else if (state.StartsWith("error:", StringComparison.Ordinal))
+                    else if (problem is PrintSelectionProblem.Failed)
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' failed to apply its 'pdfFramework' or 'pdfAxisValue', so it may show what the selection lacks: {state["error:".Length..]}");
                     }
-                    else if (state is "unapplied" && builtPages.Contains(Uri.UnescapeDataString(pagePath)) && unappliedOutlines.TryAdd(outline, true))
+                    else if (problem is PrintSelectionProblem.TimedOut)
+                    {
+                        Logger.LogWarning(
+                            $"'{pagePath}' in '{outline.Label}' timed out before it applied its 'pdfFramework' or 'pdfAxisValue', so it may show what the selection lacks.");
+                    }
+                    else if (problem is PrintSelectionProblem.NotApplied && builtPages.Contains(Uri.UnescapeDataString(pagePath)) && unappliedOutlines.TryAdd(outline, true))
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +

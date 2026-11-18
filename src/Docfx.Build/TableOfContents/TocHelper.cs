@@ -85,9 +85,9 @@ public static class TocHelper
     }
 
     /// <summary>
-    /// The keys whose values name frameworks and axis values by id, which pages compare as text.
+    /// The keys whose values name frameworks and axis values by id, which pages and PDFs compare as text.
     /// </summary>
-    internal static readonly string[] IdKeys = ["appliesTo", "axis"];
+    internal static readonly string[] IdKeys = ["appliesTo", "axis", "pdfFramework", "pdfAxisValue"];
 
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
