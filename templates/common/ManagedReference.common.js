@@ -163,10 +163,9 @@ function handleAppliesTo(vm, parent, options) {
     variant.exceptions.forEach(withDescription);
     if (variant.syntax) {
       // What is the same is left out, so a part the API has and the variant lacks, such as the return value of a
-      // method that returns nothing in the variant's frameworks, is written empty: no type, or no parameters.
-      variant.syntax.noReturn = !!variant.syntax.return && !variant.syntax.return.type;
-      if (variant.syntax.noReturn) variant.syntax.return = "";
-      variant.syntax.noParameters = !!variant.syntax.parameters && variant.syntax.parameters.length === 0;
+      // method that returns nothing in the variant's frameworks, is written empty: no type, or no parameters. The
+      // declaration of the variant shows it, so neither is listed.
+      if (variant.syntax.return && !variant.syntax.return.type) variant.syntax.return = "";
       // a declaration that is the same is left out when only a description of its parts differs
       variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];
@@ -207,8 +206,8 @@ function handleAppliesTo(vm, parent, options) {
   }
 }
 
-// A member inherited, or a class derived, in only some frameworks of the type, as a base type differs, is marked
-// with them.
+// A member inherited, an interface implemented, or a class derived, in only some frameworks of the type, as a base
+// type differs, is marked with them.
 function handleInheritedMembers(model, options) {
   var inheritedIn = model.inheritedMembersAppliesTo || {};
   (model.inheritedMembers || []).forEach(function (member) {
@@ -217,6 +216,12 @@ function handleInheritedMembers(model, options) {
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
+  var implementedIn = model.implementsAppliesTo || {};
+  (model.implements || []).forEach(function (implemented) {
+    var appliesTo = Object.prototype.hasOwnProperty.call(implementedIn, implemented.uid) ? implementedIn[implemented.uid] : [];
+    implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
+  });
   // in the order of the derived classes, which carry no uid
   var derivedIn = model.derivedClassesAppliesTo || [];
   (model.derivedClasses || []).forEach(function (derived, index) {
@@ -224,6 +229,11 @@ function handleInheritedMembers(model, options) {
     derived.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     derived.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
+  // The types that implement an interface are listed on its page where they can differ between frameworks
+  // only, so that the page of any other interface stays as it is.
+  if (model.type && model.type.toLowerCase() === 'interface' && model.derivedClasses && model.derivedClasses.length > 0) {
+    model.showImplementingTypes = true;
+  }
 }
 
 function groupChildren(model, category) {

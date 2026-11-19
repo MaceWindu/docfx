@@ -359,6 +359,16 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> Implements { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="Implements"/> is implemented in, for those implemented in only
+    /// some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "implementsAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("implementsAppliesTo")]
+    [JsonPropertyName("implementsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ImplementsAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.InheritedMembers)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children
     [JsonProperty(Constants.PropertyName.InheritedMembers)]

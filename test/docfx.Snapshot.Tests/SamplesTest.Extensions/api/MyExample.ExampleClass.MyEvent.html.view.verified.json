@@ -204,6 +204,7 @@
     "appliesTo",
     "variants",
     "inheritedMembersAppliesTo",
+    "implementsAppliesTo",
     "derivedClassesAppliesTo",
     "attributes",
     "additionalNotes"

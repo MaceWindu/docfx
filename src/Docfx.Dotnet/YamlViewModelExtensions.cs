@@ -274,15 +274,29 @@ internal static class YamlViewModelExtensions
     /// </summary>
     private static Dictionary<string, List<AppliesToViewModel>> ToInheritedMembersAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
     {
-        if (model.InheritedMembersAppliesTo is not { } inheritedIn || model.AppliesTo is not { } frameworks)
+        return ToPartialAppliesTo(model.InheritedMembers, model.InheritedMembersAppliesTo, model.AppliesTo, axis);
+    }
+
+    /// <summary>
+    /// The frameworks of the interfaces <paramref name="model"/> implements in only some of its frameworks, in the
+    /// order of its own; an interface it implements in all of them is not listed.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToImplementsAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        return ToPartialAppliesTo(model.Implements, model.ImplementsAppliesTo, model.AppliesTo, axis);
+    }
+
+    private static Dictionary<string, List<AppliesToViewModel>> ToPartialAppliesTo(List<string> uids, Dictionary<string, List<string>> appliesToByUid, List<string> frameworks, TargetFrameworkAxis axis)
+    {
+        if (appliesToByUid is null || frameworks is null)
         {
             return null;
         }
 
         var result = new Dictionary<string, List<AppliesToViewModel>>();
-        foreach (var uid in model.InheritedMembers ?? [])
+        foreach (var uid in uids ?? [])
         {
-            if (inheritedIn.TryGetValue(uid, out var units) && units.Count < frameworks.Count)
+            if (appliesToByUid.TryGetValue(uid, out var units) && units.Count < frameworks.Count)
             {
                 result[uid] = ToAppliesToViewModel(frameworks.Where(f => units.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList(), axis);
             }
@@ -357,6 +371,7 @@ internal static class YamlViewModelExtensions
             DerivedClassesAppliesTo = ToDerivedClassesAppliesTo(model, config.Axis),
             Inheritance = model.Inheritance,
             Implements = model.Implements,
+            ImplementsAppliesTo = ToImplementsAppliesTo(model, config.Axis),
             InheritedMembers = model.InheritedMembers,
             InheritedMembersAppliesTo = ToInheritedMembersAppliesTo(model, config.Axis),
             ExtensionMethods = model.ExtensionMethods,

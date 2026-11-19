@@ -486,7 +486,7 @@ Unlike the `TargetFramework` property in [`properties`](#properties), it applies
 
 ### `targetFrameworks`
 
-The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, and a class that derives from a type, or implements an interface, in only some of its frameworks under `derivedClassesAppliesTo`; both are marked with them on the page.
+The target frameworks to document together, or `"*"` for every framework a project targets. Each API gets one page, whose `appliesTo` lists the frameworks it exists in. The first framework listed provides the content of an API that exists in several. Where another framework differs, such as a different signature or summary, the differences are recorded under `variants` in the generated YAML (a declaration that differs comes with its parameters, type parameters and return value only where those differ too), and implemented interfaces, inherited members, extension methods, derived classes and assemblies are combined. A member inherited in only some frameworks, as the base type differs, is listed with them under `inheritedMembersAppliesTo`, an interface a type implements in only some of its frameworks under `implementsAppliesTo`, and a class that derives from a type, or implements an interface, in only some of its frameworks under `derivedClassesAppliesTo`; each is marked with them on the page, and the page of an interface then lists the types that implement it.
 
 ```json
 {
@@ -498,7 +498,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 }
 ```
 
-It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets any of the frameworks. A project whose preprocessor symbols do not say which framework it targets, such as one that sets `DisableImplicitFrameworkDefines`, is matched by its `TargetFrameworkAttribute`; one without either is not documented, with a `TargetFrameworkNotFound` warning.
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets any of the frameworks. A project that targets a single framework is matched as with `targetFramework`, by the attributes the .NET SDK generates and then its preprocessor symbols; one that says neither is not documented, with a `TargetFrameworkNotFound` warning. With `"*"`, such a project is named as its symbols spell its framework where they agree with the attributes (`net8.0-windows`), else as the attributes name it, and an alias in `TargetFrameworks` by the framework it stands for.
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
@@ -740,7 +740,7 @@ File(s) specified are not returned in search results
 
 ### `_disableApiAppliesTo`
 
-Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks): the `Applies to` line, and the marks of members, inherited members and derived classes that exist in fewer frameworks. What differs in other frameworks is still shown, and each API's frameworks are still recorded in the HTML as `data-applies-to`.
+Do not show which target frameworks an API applies to on API pages built with [`targetFrameworks`](#targetframeworks): the `Applies to` line, and the marks of members, inherited members, implemented interfaces and derived classes that exist in fewer frameworks. What differs in other frameworks is still shown, and each API's frameworks are still recorded in the HTML as `data-applies-to`.
 
 ### `_disableApiAppliesToFrameworks`
 

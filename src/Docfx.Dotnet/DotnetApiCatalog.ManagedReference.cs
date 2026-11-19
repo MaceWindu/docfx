@@ -68,6 +68,9 @@ partial class DotnetApiCatalog
             }
         }
 
+        // the frameworks in the order of the merge, which a namespace that only holds others lists its frameworks in
+        var mergeOrder = frameworks is null ? null : frameworkGroups.Select(group => frameworks[group[0].compilation]).ToList();
+
         Logger.LogInfo($"Creating output...");
         var allMembers = new Dictionary<string, MetadataItem>();
         var allReferences = new Dictionary<string, ReferenceItem>();
@@ -106,7 +109,7 @@ partial class DotnetApiCatalog
         Dictionary<string, MetadataItem> allMembers, Dictionary<string, ReferenceItem> allReferences)
         {
             var outputFileNames = new Dictionary<string, int>(FilePathComparer.OSPlatformSensitiveStringComparer);
-            var model = YamlMetadataResolver.ResolveMetadata(allMembers, allReferences, config.NamespaceLayout);
+            var model = YamlMetadataResolver.ResolveMetadata(allMembers, allReferences, config.NamespaceLayout, mergeOrder);
 
             // generate toc.yml
             model.TocYamlViewModel.Type = MemberType.Toc;

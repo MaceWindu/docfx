@@ -139,34 +139,39 @@ internal static partial class TargetFrameworkHelper
     /// <returns>
     /// The projects found, which is none when the file targets none of the frameworks: unlike a single
     /// framework, a list states what to include, so nothing else is documented in place of a missing one.
-    /// A framework is <see langword="null"/> when it can only be read from the compilation, or, for a project
-    /// that says neither in its preprocessor symbols nor in a <c>TargetFrameworkAttribute</c> which framework it
-    /// targets, not at all.
+    /// A framework is <see langword="null"/> when it can only be read from the compilation (see
+    /// <see cref="GetFrameworkLabel"/>), or, for a project that says neither in a <c>TargetFrameworkAttribute</c>
+    /// nor in its preprocessor symbols which framework it targets, not at all.
     /// </returns>
-    public static async Task<List<(Project Project, string? Framework)>> SelectProjects(Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, bool fromSolution = false)
+    /// <param name="beforeCompile">Called with the project before it is first compiled here.</param>
+    public static async Task<List<(Project Project, string? Framework)>> SelectProjects(
+        Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, bool fromSolution = false, Action<Project>? beforeCompile = null)
     {
         var candidates = GetProjectsFromSameFile(solution, project);
+        var singleTarget = candidates.Count == 1 && GetTargetFrameworkFromName(project) is null;
 
         if (targetFrameworks.Contains(AllTargetFrameworks))
         {
             // The project the workspace opened goes first, so that the framework a project is documented
             // at by default comes first among its own. Which framework provides the content is decided per
             // entry, by the order the frameworks first appear across its projects, so with several projects
-            // that list their frameworks in different orders, `defaultFramework` is what chooses it.
+            // that list their frameworks in different orders, `defaultFramework` is what chooses it. A project that
+            // targets a single framework is named from its compilation, which the caller builds.
             return candidates
                 .OrderBy(p => p.Id == project.Id ? 0 : 1)
-                .Select(p => (p, GetTargetFrameworkFromName(p) ?? GetTargetFrameworkFromSymbols(p.ParseOptions?.PreprocessorSymbolNames ?? [])))
+                .Select(p => (p, singleTarget ? null : GetFrameworkLabel(p, null)))
                 .ToList();
         }
 
-        // A project whose symbols do not say which framework it targets is matched by the TargetFrameworkAttribute
-        // of its compilation, as with `targetFramework`. That compilation is the one documented, so it is not built twice.
-        string? attributeFramework = null;
-        if (candidates.Count == 1 && GetTargetFrameworkFromName(project) is null &&
-            !(project.ParseOptions?.PreprocessorSymbolNames ?? []).Any(s_frameworkFamilySymbols.Contains))
+        // A project that targets a single framework is matched by the attributes of its compilation first, as
+        // with `targetFramework`. That compilation is the one documented, so it is not built twice.
+        IAssemblySymbol? assembly = null;
+        var symbols = project.ParseOptions?.PreprocessorSymbolNames ?? [];
+        if (singleTarget)
         {
-            attributeFramework = await project.GetCompilationAsync() is { } compilation ? GetTargetFrameworkFromAttribute(compilation.Assembly) : null;
-            if (attributeFramework is null)
+            beforeCompile?.Invoke(project);
+            assembly = (await project.GetCompilationAsync())?.Assembly;
+            if (GetTargetFramework(assembly, symbols) is null)
             {
                 // which framework to say it applies to is not known, so it is left to the caller, which reports it
                 return [(project, null)];
@@ -180,9 +185,12 @@ internal static partial class TargetFrameworkHelper
             var available = candidates.Where(p => !selected.Any(s => s.Item1.Id == p.Id)).ToList();
             // An exact name wins over one that differs only in the platform version, as with `targetFramework`.
             if ((available.FirstOrDefault(p => string.Equals(GetTargetFrameworkFromName(p), targetFramework, StringComparison.OrdinalIgnoreCase))
-                ?? available.FirstOrDefault(p => attributeFramework is not null ? MatchesFramework(attributeFramework, targetFramework) : Targets(p, targetFramework))) is { } match)
+                ?? available.FirstOrDefault(p => singleTarget
+                    ? GetTargetFramework(assembly, symbols, GetTargetFrameworkPlatform(targetFramework)) is { } framework && MatchesFramework(framework, targetFramework)
+                    : Targets(p, targetFramework))) is { } match)
             {
-                selected.Add((match, GetTargetFrameworkFromName(match) ?? targetFramework));
+                // named as the list names it, unless the project's name is a framework rather than an alias
+                selected.Add((match, GetTargetFrameworkFromName(match) is { } name && IsFrameworkName(name) ? name : targetFramework));
             }
             else
             {
@@ -214,29 +222,50 @@ internal static partial class TargetFrameworkHelper
             .ToList();
     }
 
+    // A project loaded for one of several frameworks.
     private static bool Targets(Project project, string targetFramework)
     {
-        return GetTargetFrameworkFromName(project) is { } name
-            ? MatchesFramework(name, targetFramework, GetPlatformVersion(project, name))
-            // one whose symbols do not say is matched by its attribute before
-            : TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework) ?? false;
+        return GetFrameworkOfTarget(project, GetTargetFrameworkPlatform(targetFramework)) is { } framework
+            && MatchesFramework(framework, targetFramework, GetPlatformVersion(project, framework));
+    }
+
+    private static bool IsFrameworkName(string name) => TargetFrameworkSymbolRegex().IsMatch(GetTargetFrameworkSymbol(name));
+
+    /// <summary>
+    /// Names the framework of a project as <c>targetFrameworks: "*"</c> lists it: by the name a project loaded for
+    /// one of several frameworks has, or the framework an alias of it stands for; for a project that targets a
+    /// single framework, by <paramref name="assembly"/>, its compilation, with the spelling of its preprocessor
+    /// symbols where both agree, which leave out the platform version the project file most likely leaves out
+    /// too: <c>net8.0-windows</c>, not the <c>net8.0-windows7.0</c> the attributes say.
+    /// </summary>
+    internal static string? GetFrameworkLabel(Project project, IAssemblySymbol? assembly)
+    {
+        var symbols = project.ParseOptions?.PreprocessorSymbolNames ?? [];
+        if (GetTargetFrameworkFromName(project) is { } name)
+        {
+            return IsFrameworkName(name) ? name : GetTargetFrameworkFromSymbols(symbols) ?? name;
+        }
+
+        var spelled = GetTargetFrameworkFromSymbols(symbols);
+        var exact = GetTargetFramework(assembly, symbols);
+        return spelled is not null && exact is not null && MatchesFramework(exact, spelled) ? spelled : exact ?? spelled;
     }
 
     /// <summary>
     /// Reads the framework back from the preprocessor symbols the .NET SDK defines for it, with its platform
-    /// but not the platform version, which no symbol names exactly: <c>net8.0-windows</c> for
-    /// <c>net8.0-windows10.0.19041.0</c>.
+    /// but not the platform version, which only the version symbols give: <c>net8.0-windows</c> for
+    /// <c>net8.0-windows10.0.19041.0</c>. A platform outside the list the SDK ships is not read, as with
+    /// <c>targetFramework</c> when it names no platform.
     /// </summary>
     internal static string? GetTargetFrameworkFromSymbols(IEnumerable<string> preprocessorSymbols)
     {
         var symbols = preprocessorSymbols.ToHashSet(StringComparer.Ordinal);
-        if (symbols.FirstOrDefault(s => TargetFrameworkSymbolRegex().IsMatch(s)) is not { } frameworkSymbol)
+        if (GetTargetFrameworkFromSymbols(symbols) is not { } framework)
         {
             return null;
         }
 
-        var framework = frameworkSymbol.ToLowerInvariant().Replace('_', '.');
-        return GetPlatformFromSymbols(symbols, frameworkSymbol).Platform is { } platform
+        return GetPlatformFromSymbols(symbols, GetTargetFrameworkSymbol(framework)).Platform is { } platform
             ? $"{framework}-{platform.ToLowerInvariant()}"
             : framework;
     }

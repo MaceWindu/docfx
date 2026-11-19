@@ -735,7 +735,7 @@
                         "type": "array",
                         "minItems": 1,
                         "items": { "type": "string" },
-                        "description": "Glob patterns of the project files that have this value, relative to the `src` of the item."
+                        "description": "Glob patterns of the project files that have this value, relative to any `src` that holds it."
                       }
                     }
                   }
@@ -748,7 +748,7 @@
             }
           },
           "variantIgnore": {
-            "description": "The kinds of difference between the frameworks of `targetFrameworks` that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.",
+            "description": "The kinds of difference between the frameworks of `targetFrameworks`, or the values of `axes`, that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.",
             "anyOf": [
               {
                 "type": "string",

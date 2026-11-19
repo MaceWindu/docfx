@@ -25,15 +25,17 @@ internal static class YamlMetadataResolver
     /// TODO: Save to ...yml.map
     /// </summary>
     /// <param name="allMembers"></param>
+    /// <param name="frameworkOrder">The frameworks in the order they were merged in, if there are any.</param>
     /// <returns></returns>
     public static MetadataModel ResolveMetadata(
         Dictionary<string, MetadataItem> allMembers,
         Dictionary<string, ReferenceItem> allReferences,
-        NamespaceLayout namespaceLayout)
+        NamespaceLayout namespaceLayout,
+        List<string> frameworkOrder = null)
     {
         MetadataModel viewModel = new()
         {
-            TocYamlViewModel = GenerateToc(allMembers, allReferences, namespaceLayout),
+            TocYamlViewModel = GenerateToc(allMembers, allReferences, namespaceLayout, frameworkOrder),
             Members = [],
         };
         ResolverContext context = new()
@@ -47,14 +49,14 @@ internal static class YamlMetadataResolver
         return viewModel;
     }
 
-    private static MetadataItem GenerateToc(Dictionary<string, MetadataItem> allMembers, Dictionary<string, ReferenceItem> allReferences, NamespaceLayout namespaceLayout)
+    private static MetadataItem GenerateToc(Dictionary<string, MetadataItem> allMembers, Dictionary<string, ReferenceItem> allReferences, NamespaceLayout namespaceLayout, List<string> frameworkOrder)
     {
         var namespaces = allMembers.Where(s => s.Value.Type == MemberType.Namespace);
 
         return namespaceLayout switch
         {
             NamespaceLayout.Flattened => GenerateFlatToc(namespaces),
-            NamespaceLayout.Nested => GenerateNestedToc(namespaces, allReferences),
+            NamespaceLayout.Nested => GenerateNestedToc(namespaces, allReferences, frameworkOrder),
             _ => GenerateFlatToc(namespaces),
         };
     }
@@ -70,7 +72,7 @@ internal static class YamlMetadataResolver
         };
     }
 
-    private static MetadataItem GenerateNestedTocStructure(IEnumerable<KeyValuePair<string, MetadataItem>> namespaces, Dictionary<string, ReferenceItem> allReferences)
+    private static MetadataItem GenerateNestedTocStructure(IEnumerable<KeyValuePair<string, MetadataItem>> namespaces, Dictionary<string, ReferenceItem> allReferences, List<string> frameworkOrder)
     {
         var root = new MetadataItem()
         {
@@ -140,31 +142,14 @@ internal static class YamlMetadataResolver
         }
 
         // A namespace that only holds others exists wherever one of them does, as a namespace documented with
-        // types of its own: the deepest first, as a placeholder can hold another.
-        if (namespaces.Any(n => n.Value.AppliesTo is not null))
+        // types of its own, listing them in the order of the merge, as every namespace does: the deepest first, as
+        // a placeholder can hold another.
+        if (frameworkOrder is not null && namespaces.Any(n => n.Value.AppliesTo is not null))
         {
-            var order = new List<string>();
-            foreach (var frameworks in namespaces.Select(n => n.Value.AppliesTo).OfType<List<string>>())
-            {
-                // Every namespace lists its frameworks in the order of the merge, so each fits into one order.
-                var at = 0;
-                foreach (var framework in frameworks)
-                {
-                    var index = order.FindIndex(f => string.Equals(f, framework, StringComparison.OrdinalIgnoreCase));
-                    if (index < 0)
-                    {
-                        order.Insert(at, framework);
-                        index = at;
-                    }
-
-                    at = index + 1;
-                }
-            }
-
             foreach (var placeholder in placeholders.OrderByDescending(p => p.Name.Count(c => c == '.')))
             {
                 var units = placeholder.Items.SelectMany(i => i.AppliesTo ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                placeholder.AppliesTo = units.Count == 0 ? null : order.Where(units.Contains).ToList();
+                placeholder.AppliesTo = units.Count == 0 ? null : frameworkOrder.Where(units.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             }
         }
 
@@ -197,9 +182,9 @@ internal static class YamlMetadataResolver
         }
     }
 
-    private static MetadataItem GenerateNestedToc(IEnumerable<KeyValuePair<string, MetadataItem>> namespaces, Dictionary<string, ReferenceItem> allReferences)
+    private static MetadataItem GenerateNestedToc(IEnumerable<KeyValuePair<string, MetadataItem>> namespaces, Dictionary<string, ReferenceItem> allReferences, List<string> frameworkOrder)
     {
-        var root = GenerateNestedTocStructure(namespaces, allReferences);
+        var root = GenerateNestedTocStructure(namespaces, allReferences, frameworkOrder);
 
         Queue<MetadataItem> metadataItemQueue = new();
         metadataItemQueue.Enqueue(root);

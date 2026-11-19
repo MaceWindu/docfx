@@ -73,7 +73,7 @@
   <dd>
 {{/implements.0}}
 {{#implements}}
-    <div>{{{specName.0.value}}}</div>
+    <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/implements}}
 {{#implements.0}}
   </dd>
@@ -94,6 +94,16 @@
 </dl>
 {{/derivedClasses.0}}
 {{/inClass}}
+{{#showImplementingTypes}}
+<dl class="typelist derived">
+  <dt>{{__global.derived}}</dt>
+  <dd>
+{{#derivedClasses}}
+    <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+{{/derivedClasses}}
+  </dd>
+</dl>
+{{/showImplementingTypes}}
 
 {{#inheritedMembers.0}}
 <dl class="typelist inheritedMembers">
