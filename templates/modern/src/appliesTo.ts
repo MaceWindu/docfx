@@ -1056,10 +1056,23 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
   // hidden: the values of an enum in its own content, when a copy is shown in its place, are printed in the copy.
   if (print && document.querySelector('article h1[data-applies-to]')) {
     const member = 'h3[data-applies-to], dt[data-applies-to], dl.jumplist[data-applies-to]'
+    // the headings of a member's own markdown, such as its example, are none of the page's sections
+    const ofMembers = new Set(Array.from(document.querySelectorAll('article h3[data-uid]')).flatMap(h => memberElements(h).slice(1)))
+    const inMember = (e: Element) => {
+      for (let a = e; a; a = a.parentElement) {
+        if (ofMembers.has(a)) {
+          return true
+        }
+      }
+      return false
+    }
     document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
+      if (inMember(section)) {
+        return
+      }
       const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
       const following: HTMLElement[] = []
-      for (let e = section.nextElementSibling; e && !ends.test(e.tagName); e = e.nextElementSibling) {
+      for (let e = section.nextElementSibling; e && !(ends.test(e.tagName) && !inMember(e)); e = e.nextElementSibling) {
         following.push(e as HTMLElement)
       }
       const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))
@@ -1249,14 +1262,17 @@ function variantsAfter(contents: Element): Element[] {
 
 /**
  * The elements of a member: its heading and what follows up to the next heading or member, or for the value of an
- * enum, its term and description.
+ * enum, its term and description. The heading of a member docfx writes has its uid: its example is markdown as it
+ * is, whose headings are not the page's, so it ends only at the next member, section, or the see-also links of
+ * the page.
  */
 export function memberElements(heading: Element): Element[] {
   const elements = [heading]
+  const written = heading.hasAttribute('data-uid')
   for (let e = heading.nextElementSibling; e; e = e.nextElementSibling) {
     const ends = heading.tagName === 'DT'
       ? e.tagName !== 'DD'
-      : /^H[1-3]$/.test(e.tagName) || e.hasAttribute('data-overload') || isSeeAlsoContents(e)
+      : e.hasAttribute('data-overload') || isSeeAlsoContents(e) || (written ? endsMember(e) : /^H[1-3]$/.test(e.tagName))
     if (ends) {
       break
     }
@@ -1270,6 +1286,12 @@ const isSeeAlso = (h: Element) => h.tagName === 'H2' && /^seealso(_variant\d+)?$
 /** The see-also links of a page whose variants have links of their own, which come in a content of their own for each. */
 function isSeeAlsoContents(e: Element): boolean {
   return e.classList.contains('api-contents') && Array.from(e.querySelectorAll('h2')).some(isSeeAlso)
+}
+
+function endsMember(e: Element): boolean {
+  return e.tagName === 'H1' ||
+    (e.tagName === 'H2' && (e.classList.contains('section') || isSeeAlso(e))) ||
+    (e.tagName === 'H3' && e.hasAttribute('data-uid'))
 }
 
 /**
