@@ -566,6 +566,39 @@ test('the see-also of a page that differs between frameworks is not part of the 
   assert.strictEqual(document.getElementById('seealso_variant1').closest('.applies-to-unavailable'), null)
 })
 
+// A type page as docfx writes it: the example of a member is its markdown as it is, headings included.
+const exampleHeadingsPage = `${site}<body><article>
+    <h1 id="Lib" data-uid="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 class="section" id="methods">Methods</h2>
+    <h3 id="Lib_Stop" data-uid="Lib.Stop" data-applies-to="net8.0">Stop</h3>
+    <h4 class="section" id="Lib_Stop_examples">Examples</h4>
+    <h2 id="usage">Usage</h2><p>Stop it.</p>
+    <h3 id="notes">Notes</h3><p>Only on .NET 8.</p>
+    <h3 id="Lib_Run" data-uid="Lib.Run" data-applies-to="net8.0 net462">Run</h3><p>Everywhere.</p>
+    <h2 id="seealso">See Also</h2><div class="seealso"><div>Lib</div></div>
+  </article></body>`
+
+test('a heading of a member\'s example does not end the member', () => {
+  const { document } = installDom(exampleHeadingsPage)
+  const ids = (id: string) => memberElements(document.getElementById(id) as unknown as Element).map(e => e.tagName + (e.id ? '#' + e.id : ''))
+
+  assert.deepStrictEqual(ids('Lib_Stop'), ['H3#Lib_Stop', 'H4#Lib_Stop_examples', 'H2#usage', 'P', 'H3#notes', 'P'])
+  // nor do the see-also links of the page belong to the last member
+  assert.deepStrictEqual(ids('Lib_Run'), ['H3#Lib_Run', 'P'])
+
+  // in print, the member goes whole, and the section keeps the member left
+  applySelection({ framework: 'net462' }, undefined, true)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+  assert.ok(hidden('Lib_Stop') && hidden('usage') && hidden('notes'))
+  assert.ok(!hidden('methods') && !hidden('Lib_Run') && !hidden('seealso'))
+
+  // nor do they when a variant has links of its own, which the page swaps in
+  const swapped = installDom(exampleHeadingsPage.replace('<h2 id="seealso">See Also</h2><div class="seealso"><div>Lib</div></div>',
+    '<div class="api-contents"><div class="api-content" data-applies-to="net8.0"><h2 id="seealso">See Also</h2></div>' +
+    '<div class="api-content" data-applies-to="net462" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2></div></div>')).document
+  assert.deepStrictEqual(memberElements(swapped.getElementById('Lib_Run') as unknown as Element).map(e => e.tagName), ['H3', 'P'])
+})
+
 test('a link to content hidden for the selection goes to the content shown', () => {
   installDom(page)
   applySelection({ framework: 'netstandard2.0' })

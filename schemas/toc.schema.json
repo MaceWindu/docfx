@@ -122,11 +122,11 @@
         },
         "pdfFramework": {
           "type": [ "string", "number" ],
-          "description": "The target framework to print API pages for, such as 'net8.0', for API documented with 'targetFrameworks'. APIs that do not exist in it are left out."
+          "description": "The target framework to print API pages for, such as 'net8.0', for API documented with 'targetFrameworks'. APIs that do not exist in it are left out. A number is used as the text it spells, with an UnquotedTocValue warning: quote it."
         },
         "pdfAxisValue": {
           "type": [ "string", "number" ],
-          "description": "The id of the axis value to print API pages for, such as 'ef9', for API documented with 'axes'. APIs that do not exist in it are left out."
+          "description": "The id of the axis value to print API pages for, such as 'ef9', for API documented with 'axes'. APIs that do not exist in it are left out. A number, such as an unquoted 3.10 that YAML reads as 3.1, is used as the text it spells, with an UnquotedTocValue warning: quote it."
         }
       }
     },

@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Buffers;
@@ -130,7 +130,7 @@ static class PdfBuilder
         }
         catch (JsonException ex)
         {
-            Logger.LogError($"Table of contents '{path}' cannot be read, so a PDF of it is not printed: {ex.Message}");
+            Logger.LogError($"Table of contents '{path}' is not JSON, so whether it has a PDF is not known, and none is printed of it: {ex.Message}");
             return null;
         }
 
@@ -161,6 +161,12 @@ static class PdfBuilder
             if (outline is not null)
             {
                 outline.tocPath = path;
+            }
+            // An empty entry, `appliesTo: [~]` written by hand, would stop every PDF where the selection reads it.
+            if (selects && outline is not null && EmptyEntry(outline) is { } empty)
+            {
+                Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {empty} has an empty entry.");
+                return null;
             }
             return outline;
         }
@@ -208,6 +214,26 @@ static class PdfBuilder
             }
         }
 
+        // Where the selection reads a list that has an empty entry: `items`, `appliesTo`, its `frameworks`, or the
+        // `values` of an axis.
+        static string? EmptyEntry(Outline node)
+        {
+            var name = node.name is { Length: > 0 } ? node.name : node.href ?? "the root";
+            if (node.items?.Any(item => item is null) is true)
+            {
+                return $"'items' of '{name}'";
+            }
+            if (node.appliesTo?.Any(group => group is null || group.frameworks?.Any(f => f is null) is true) is true)
+            {
+                return $"'appliesTo' of '{name}'";
+            }
+            if (node.axis?.values?.Any(v => v is null) is true)
+            {
+                return $"'axis' of '{name}'";
+            }
+            return (node.items ?? []).Select(EmptyEntry).FirstOrDefault(found => found is not null);
+        }
+
         static void WithoutAppliesTo(JsonNode? node)
         {
             switch (node)
@@ -249,7 +275,8 @@ static class PdfBuilder
         var groups = Descendants(outline).SelectMany(node => node.appliesTo ?? []).ToList();
         var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
         var warned = false;
-        if (value is not null && (axes.Count > 0 ? !axes.Any(axis => HasValue(axis, value)) : groups.Count > 0 && !groups.Any(group => group.version == value)))
+        var valueOnAnAxis = value is not null && axes.Any(axis => HasValue(axis, value));
+        if (value is not null && (axes.Count > 0 ? !valueOnAnAxis : groups.Count > 0 && !groups.Any(group => group.version == value)))
         {
             Logger.LogWarning($"'pdfAxisValue' of '{outline.Label}' is '{value}', which is not a value of an axis of its API.");
             warned = true;
@@ -315,8 +342,9 @@ static class PdfBuilder
                     continue;
                 }
 
-                // A heading that only groups other items goes when they all do.
-                var groupsOthers = item.href is null && item.items is { Length: > 0 };
+                // A heading that only groups other items goes when they all do; an empty href is no page, as the
+                // pages of the PDF read it.
+                var groupsOthers = string.IsNullOrEmpty(item.href) && item.items is { Length: > 0 };
                 Visit(item, itemAxis);
                 if (!groupsOthers || item.items is { Length: > 0 })
                 {
@@ -334,8 +362,9 @@ static class PdfBuilder
             return (item.appliesTo is { Length: > 0 } && IsAvailable(item, itemAxis)) || HasAvailableApi(item.items, itemAxis);
         });
 
-        // a table of contents from before axes were written to it names none
-        bool ValueApplies(Axis? axis) => value is not null && (axis is null || HasValue(axis, value));
+        // A table of contents from before axes were written to it names none. A value of none of the axes it names
+        // applies to nothing, as on its pages, which are told the values of no axis then.
+        bool ValueApplies(Axis? axis) => value is not null && (axis is null ? axes.Count == 0 || valueOnAnAxis : HasValue(axis, value));
 
         bool IsAvailable(Outline node, Axis? axis)
         {
@@ -378,7 +407,7 @@ static class PdfBuilder
             (node.items ?? []).SelectMany(item =>
             {
                 var itemAxis = item.axis ?? axis;
-                IEnumerable<(string Href, Axis Axis)> own = item.href is not null && itemAxis is not null ? [(item.href, itemAxis)] : [];
+                IEnumerable<(string Href, Axis Axis)> own = !string.IsNullOrEmpty(item.href) && itemAxis is not null ? [(item.href, itemAxis)] : [];
                 return own.Concat(PagesWithAxis(item, itemAxis));
             });
     }
@@ -734,7 +763,15 @@ static class PdfBuilder
                         Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
                         if (!anchored)
                         {
-                            await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                            // Playwright waits for a script tag without a timeout: a page whose own script keeps it
+                            // busy would hold the PDF up for good. Its headings are then not linked.
+                            try
+                            {
+                                await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript }).WaitAsync(scriptTimeout, cancellationToken);
+                            }
+                            catch (TimeoutException)
+                            {
+                            }
                         }
                     }
                 }

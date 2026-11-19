@@ -112,6 +112,59 @@ public class PdfFrameworkTest
     }
 
     [Fact]
+    public void AValueOfNoAxisOfTheTableOfContentsLeavesNothingOut()
+    {
+        using var listener = new TestListenerScope();
+        // an entry without an axis, written by hand with the value of an axis, next to the API of an axis
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc
+            .Replace("{ \"name\": \"EF\", ", "{ \"name\": \"Old\", \"href\": \"old.html\", \"appliesTo\": [ { \"version\": \"ef3\", \"frameworks\": [ \"net8.0\" ] } ] }, { \"name\": \"EF\", ")
+            .Replace("{value}", "ef9"));
+        Assert.Equal("Old", outline.items[0].name);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        // as on its pages, which are told the values of no axis
+        Assert.Equal("Old, EF, Everywhere, FromEF8, Drivers, OnlyD1, OnlyD2", string.Join(", ", Names(outline.items)));
+        Assert.Contains("\"axisValues\":[]", PdfBuilder.GetAppliesToScript(outline));
+    }
+
+    [Fact]
+    public void AHeadingWithAnEmptyHrefGoesWithItsItems()
+    {
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            { "pdf": true, "pdfFramework": "net462", "items": [
+              { "name": "Group", "href": "", "items": [ { "name": "OnlyNet8", "href": "a.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ] } ] },
+              { "name": "Everywhere", "href": "b.html", "appliesTo": [ { "frameworks": [ "net8.0", "net462" ] } ] }
+            ] }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("Everywhere", string.Join(", ", Names(outline.items)));
+    }
+
+    [Theory]
+    [InlineData("""[ { "name": "A", "href": "a.html", "appliesTo": [ null ] } ]""")]
+    [InlineData("""[ { "name": "A", "href": "a.html", "appliesTo": [ { "frameworks": [ null ] } ] } ]""")]
+    [InlineData("""[ { "name": "A", "axis": { "name": "EF Core", "values": [ null ] }, "items": [ { "name": "B", "href": "b.html" } ] } ]""")]
+    [InlineData("""[ { "name": "A", "items": [ null ] } ]""")]
+    public void AnEmptyEntryWhereTheSelectionReadsSkipsOnlyThatPdf(string items)
+    {
+        using var listener = new TestListenerScope();
+
+        Assert.Null(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes($$"""{ "pdf": true, "pdfFramework": "net8.0", "items": {{items}} }"""), "api/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'") && x.Message.Contains("empty entry"));
+
+        // a PDF that selects nothing does not read them
+        if (!items.Contains("\"items\": [ null ]", StringComparison.Ordinal))
+        {
+            Assert.NotNull(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes($$"""{ "pdf": true, "items": {{items}} }"""), "toc.json"));
+        }
+        // the error count is global, and later tests check it
+        Logger.ResetCount();
+    }
+
+    [Fact]
     public void AValueOfTwoAxesLeavesOutWhatEachLacksAndWarns()
     {
         using var listener = new TestListenerScope();
