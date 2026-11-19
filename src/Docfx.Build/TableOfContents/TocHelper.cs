@@ -90,8 +90,9 @@ public static class TocHelper
 
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
-    /// names the axis value `3.10` would name 3.1, which pages do not match. What it holds is used as the text the
-    /// number spells, with a warning to quote it: `docfx metadata` quotes such ids itself.
+    /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false` are read as booleans.
+    /// What it holds is used as the text the value spells, with a warning to quote it: `docfx metadata` quotes such
+    /// ids itself.
     /// </summary>
     private static void KeepIdsAsText(TocItemViewModel item, string file)
     {
@@ -123,6 +124,15 @@ public static class TocHelper
                         file: file,
                         code: WarningCodes.Build.UnquotedTocValue);
                     return text;
+                case bool flag:
+                    // YAML reads only these two spellings as a boolean
+                    var word = flag ? "true" : "false";
+                    Logger.LogWarning(
+                        $"'{key}' of table of contents '{file}' holds {word} unquoted, which YAML reads as a boolean, so it is used as '{word}': " +
+                        "quote it, \"" + word + "\", to keep it as written.",
+                        file: file,
+                        code: WarningCodes.Build.UnquotedTocValue);
+                    return word;
                 case IDictionary map:
                     foreach (var name in map.Keys.Cast<object>().ToList())
                     {

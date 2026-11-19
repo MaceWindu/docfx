@@ -4209,6 +4209,7 @@
     "appliesToAll": "All",
     "appliesToAllFrameworks": "All frameworks",
     "appliesToUnavailable": "Not available in {selection}",
+    "appliesToPickerLabel": "{name}: {value}",
     "syntax": "Syntax",
     "overrides": "Overrides",
     "implements": "Implements",

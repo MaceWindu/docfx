@@ -693,6 +693,8 @@ public class TargetFrameworksBuildTest : TestBase
         // the types of a namespace, which the picker dims
         Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a [^>]*>OnlyNet8</a>", await RawPage(site, "Lib.html"));
         Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>Switches</a>", await RawPage(site, "Lib.Base.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>ISource</a>", await RawPage(site, "Lib.SometimesSource.html"));
+        Assert.Matches("<div><a [^>]*>ISource</a>", await RawPage(site, "Lib.AlwaysSource.html"));
         Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Base\\.OnlyNet8Base\\(\\)</a>", await RawPage(site, "Lib.Child.html"));
 
         var shared = await RawPage(site, "Lib.Shared.html");
@@ -817,11 +819,14 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Handles it.", variant);
     }
 
-    [Fact]
+    [Theory]
     [Trait("Related", "docfx")]
-    public async Task TheSeeAlsoLinksOfAPageAreSwappedForAVariantsOwn()
+    [InlineData("class", "public void Do() { }", "samePage")]
+    [InlineData("class", "public void Do() { }", "separatePages")]
+    [InlineData("enum", "A", "samePage")]
+    public async Task TheSeeAlsoLinksOfAPageAreSwappedForAVariantsOwn(string typeKind, string members, string memberLayout)
     {
-        var site = await BuildWithAxis(v1Members: "", v2Members: "", typeComment: "/// <seealso href=\"https://example.org/{version}\"/>");
+        var site = await BuildWithAxis(v1Members: members, v2Members: members, memberLayout: memberLayout, typeComment: "/// <seealso href=\"https://example.org/{version}\"/>", typeKind: typeKind);
         var page = await RawPage(site, "Lib.Widget.html");
 
         // after the members, outside the content of the type: the links of the frameworks the page shows, and those of
@@ -959,7 +964,7 @@ public class TargetFrameworksBuildTest : TestBase
     }
 
     /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>
-    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage", string typeComment = "")
+    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage", string typeComment = "", string typeKind = "class")
     {
         foreach (var (version, members) in new[] { ("V1", v1Members), ("V2", v2Members) })
         {
@@ -979,7 +984,7 @@ public class TargetFrameworksBuildTest : TestBase
                 {
                     /// <summary>Summary of {{version}}.</summary>
                     {{typeComment.Replace("{version}", version)}}
-                    public class Widget { {{members}} }
+                    public {{typeKind}} Widget { {{members}} }
                 }
                 """, TestContext.Current.CancellationToken);
         }
