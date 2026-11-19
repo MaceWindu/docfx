@@ -1472,8 +1472,10 @@ const printPage = `${site}
     <article>
       <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1>
       <div class="facts"></div>
+      <dl class="typelist implements"><dt>Implements</dt><dd><div id="Implements_All">IAll</div><div id="Implements_Net8" data-applies-to="net8.0">INet8</div></dd></dl>
       <dl class="typelist derived"><dt>Derived</dt><dd><div id="Derived_All">All</div><div id="Derived_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
       <dl class="typelist inheritedMembers" id="inherited"><dt>Inherited Members</dt><dd><div id="Inherited_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
+      <dl class="typelist extensionMethods" id="extensions"><dt>Extension Methods</dt><dd><div id="Extension_Net8" data-applies-to="net8.0">Ext.Twice()</div></dd></dl>
       <h2 id="events">Events</h2>
       <a id="Lib_Changed_" data-overload></a>
       <h3 id="Lib_Changed" data-applies-to="net8.0">Changed</h3>
@@ -1503,13 +1505,16 @@ test('in print, what does not exist in the selection is left out', () => {
   assert.ok(!hidden('classes'))
   assert.ok(hidden('interfaces'))
   assert.ok(document.querySelectorAll('dl.jumplist')[1].hidden)
-  // the classes derived, and the members inherited, in other frameworks only, and a list with none left
+  // the interfaces implemented, the classes derived, the members inherited and the extension methods, in other
+  // frameworks only, and a list with none left
+  assert.ok(!hidden('Implements_All') && hidden('Implements_Net8'))
   assert.ok(!hidden('Derived_All') && hidden('Derived_Net8'))
   assert.ok(hidden('Inherited_Net8') && hidden('inherited'))
+  assert.ok(hidden('Extension_Net8') && hidden('extensions'))
   // what is left out is marked for `docfx pdf`, which makes the links to it text
   assert.deepStrictEqual(
     document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]').map(e => e.id),
-    ['Derived_Net8', 'inherited', 'Inherited_Net8', 'events', 'Lib_Changed_', 'Lib_Changed', 'Lib_Stop', 'interfaces'])
+    ['Implements_Net8', 'Derived_Net8', 'inherited', 'Inherited_Net8', 'extensions', 'Extension_Net8', 'events', 'Lib_Changed_', 'Lib_Changed', 'Lib_Stop', 'interfaces'])
   // nothing is marked, as nothing is left to mark
   assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner'), [])
   assert.ok(!document.body.hasAttribute('data-applies-to-unavailable'))

@@ -89,6 +89,9 @@ public static class TocHelper
     /// </summary>
     internal static readonly string[] IdKeys = ["appliesTo", "axis", "pdfFramework", "pdfAxisValue"];
 
+    // The options of the PDF of a table of contents, which only its root has: `docfx pdf` reads no others.
+    private static readonly string[] RootIdKeys = ["pdfFramework", "pdfAxisValue"];
+
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
     /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false`, also as `True`,
@@ -132,11 +135,11 @@ public static class TocHelper
             }
         }
 
-        void Visit(TocItemViewModel item)
+        void Visit(TocItemViewModel item, bool isRoot = true)
         {
             foreach (var key in IdKeys)
             {
-                if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+                if ((isRoot || !RootIdKeys.Contains(key)) && item.Metadata.TryGetValue(key, out var value) && value is not null)
                 {
                     path.Add(key);
                     item.Metadata[key] = AsText(value, key);
@@ -149,7 +152,7 @@ public static class TocHelper
                 if (item.Items[i] is { } child)
                 {
                     path.Add(i);
-                    Visit(child);
+                    Visit(child, isRoot: false);
                     path.RemoveAt(path.Count - 1);
                 }
             }
