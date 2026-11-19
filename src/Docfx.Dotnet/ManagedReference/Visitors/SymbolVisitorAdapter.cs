@@ -718,7 +718,7 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
     /// <summary>
     /// Whether the documentation of <paramref name="symbol"/> comes from another symbol: its own comment, before
     /// <c>inheritdoc</c> is expanded, is empty, or its summary is wholly inherited, by an <c>inheritdoc</c> of the
-    /// whole comment or one that is all its summary holds. One in its remarks or a parameter leaves its summary its own.
+    /// whole comment before any summary of its own, or one that is all its summary holds. One in its remarks or a parameter leaves its summary its own.
     /// </summary>
     private static bool IsDocumentationInherited(ISymbol symbol)
     {
@@ -744,13 +744,16 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
 
         // The comment of a symbol comes in a `member` element, or as it is written.
         var member = root.Elements().Count() == 1 && root.Element("member") is { } wrapped ? wrapped : root;
-        if (member.Elements("inheritdoc").Any())
+        var summary = member.Element("summary");
+
+        // An `inheritdoc` of the whole comment expands to every part of the base in its place, and the first summary
+        // is the one shown: a summary of its own before it stays its own.
+        if (member.Elements("inheritdoc").FirstOrDefault() is { } inheritdoc && (summary is null || inheritdoc.IsBefore(summary)))
         {
             return true;
         }
 
-        return member.Element("summary") is { } summary
-            && summary.Nodes().Where(node => node is not System.Xml.Linq.XText text || !string.IsNullOrWhiteSpace(text.Value)).ToList()
+        return summary is not null && summary.Nodes().Where(node => node is not System.Xml.Linq.XText text || !string.IsNullOrWhiteSpace(text.Value)).ToList()
                 is [System.Xml.Linq.XElement { Name.LocalName: "inheritdoc" }];
     }
 

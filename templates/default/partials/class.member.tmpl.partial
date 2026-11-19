@@ -144,10 +144,10 @@
 {{/implements.0}}
 {{#implements}}
   {{#definition}}
-    <div><xref uid="{{definition}}" altProperty="fullName" displayProperty="nameWithType"/></div>
+    <div><xref uid="{{definition}}" altProperty="fullName" displayProperty="nameWithType"/>{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
   {{/definition}}
   {{^definition}}
-    <div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
+    <div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/>{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
   {{/definition}}
 {{/implements}}
 {{/isCollection}}
