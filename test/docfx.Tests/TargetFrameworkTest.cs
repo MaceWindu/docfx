@@ -276,6 +276,65 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task TargetFrameworkOnASingleTargetProjectWithOwnSymbolsShapedLikeAPlatform()
+    {
+        // `SQLITE` and `SQLITE3` have the form of a platform and its version, `net8.0-sqlite3.0`; the attributes say net8.0.
+        var project = CreateProject(
+            "Single",
+            "<TargetFramework>net8.0</TargetFramework><DefineConstants>$(DefineConstants);SQLITE;SQLITE3</DefineConstants>",
+            "namespace Single { public class Widget { } }");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "net8.0" });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Single.Widget.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkOnASolutionFilter()
+    {
+        var library = CreateMultiTargetedProject();
+        var solution = CreateSolution(
+            library,
+            CreateProject("Analyzer", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Analyzer { public class Rule { } }"));
+        var filter = Path.Combine(_projectFolder, "Lib.slnf");
+        File.WriteAllText(filter, $$"""
+            { "solution": { "path": "{{Path.GetFileName(solution)}}", "projects": [ "{{Path.GetRelativePath(_projectFolder, library).Replace("\\", "\\\\")}}" ] } }
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(filter), TargetFramework = "netstandard2.0" });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNetStandard.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkSelectsTheFrameworkOfAListedProjectAProjectOfASolutionReferenced()
+    {
+        // Loading the solution's App loads every framework of Lib, which `src` then lists itself.
+        var library = CreateMultiTargetedProject();
+        var app = CreateProject(
+            "App",
+            "<TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>",
+            "namespace App { public class Widget { } }",
+            $"""<ItemGroup><ProjectReference Include="{Path.GetFullPath(library)}" /></ItemGroup>""");
+        var solution = CreateSolution(app);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = new(new FileMappingItem(solution, library)) { Expanded = true }, TargetFramework = "netstandard2.0" });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNetStandard.yml")));
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
+    [Fact]
     public async Task TargetFrameworkSelectsTheFrameworkOfAProjectAnEarlierOneReferenced()
     {
         // App references Lib, so loading App loads every framework of Lib too, and Lib is then taken from

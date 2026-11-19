@@ -16,14 +16,15 @@ namespace Docfx.Dotnet;
 /// <see cref="Microsoft.CodeAnalysis.MSBuild.MSBuildWorkspace"/> loads every target framework of a
 /// multi-targeted project as a separate project, and names each one after its framework, e.g.
 /// <c>Foo(net8.0)</c>. Roslyn exposes no MSBuild properties, so that name is the only place the
-/// framework can be read from. A project that targets a single framework is not given the suffix,
-/// and its framework is recognized by the preprocessor symbol the .NET SDK defines for it instead, or else
-/// by the <c>TargetFrameworkAttribute</c> of its compilation.
+/// framework can be read from. A project that targets a single framework is not given the suffix: its
+/// framework is read from the <c>TargetFrameworkAttribute</c> and <c>TargetPlatformAttribute</c> the .NET SDK
+/// generates into its compilation, and from the preprocessor symbols the SDK defines only what those leave out.
 /// </remarks>
 internal static partial class TargetFrameworkHelper
 {
     // The symbols the .NET SDK defines for the platform of an OS-specific framework such as net8.0-windows, of the
-    // platforms it ships. It defines one for any other platform too, which is recognized by the symbol of its version.
+    // platforms it ships. It defines one for any other platform too, which only the framework asked for tells
+    // apart from a project's own symbol.
     private static readonly string[] s_platformSymbols = ["ANDROID", "BROWSER", "IOS", "MACCATALYST", "MACOS", "TIZEN", "TVOS", "WASI", "WINDOWS"];
 
     // The platforms whose frameworks have no version, `net8.0-browser`: the SDK defines no `_OR_GREATER` symbol for
@@ -71,27 +72,22 @@ internal static partial class TargetFrameworkHelper
 
         beforeCompile?.Invoke(project);
 
-        var targets = TargetsFramework(project.ParseOptions?.PreprocessorSymbolNames ?? [], targetFramework);
-        // A project without the symbols, such as one that sets `DisableImplicitFrameworkDefines`, still has
-        // the attribute the SDK generates. The compilation is the one documented, so it is not built twice.
-        // `TargetsFramework` says null only for a framework that names one exact version.
-        if (targets is null && await project.GetCompilationAsync() is { } compilation &&
-            GetTargetFrameworkFromAttribute(compilation.Assembly) is { } attributeFramework)
+        // The compilation is the one documented, so reading its attributes builds nothing twice.
+        var compilation = await project.GetCompilationAsync();
+        var projectFramework = GetTargetFramework(compilation?.Assembly, project.ParseOptions?.PreprocessorSymbolNames ?? [], GetTargetFrameworkPlatform(targetFramework));
+        if (projectFramework is null)
         {
-            targets = MatchesFramework(attributeFramework, targetFramework);
+            Report($"Project '{project.FilePath}' says neither in a TargetFrameworkAttribute nor in its preprocessor symbols which framework it targets, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
+            return (project, false);
         }
 
-        switch (targets)
+        if (MatchesFramework(projectFramework, targetFramework))
         {
-            case true:
-                return (project, true);
-            case false:
-                Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting the target framework it has instead.");
-                return (project, false);
-            default:
-                Report($"Project '{project.FilePath}' says neither in its preprocessor symbols nor in a TargetFrameworkAttribute which framework it targets, so whether it targets '{targetFramework}' is not known. It is documented as it is.");
-                return (project, false);
+            return (project, true);
         }
+
+        Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{projectFramework}' instead.");
+        return (project, false);
 
         (Project, bool) SelectByName()
         {
@@ -102,7 +98,7 @@ internal static partial class TargetFrameworkHelper
                 return (exact, true);
             }
 
-            if (candidates.FirstOrDefault(p => GetTargetFrameworkFromName(p) is { } tfm && MatchesFramework(tfm, targetFramework, GetPlatformVersion(p, tfm))) is { } match)
+            if (candidates.FirstOrDefault(p => GetFrameworkOfTarget(p, GetTargetFrameworkPlatform(targetFramework)) is { } tfm && MatchesFramework(tfm, targetFramework, GetPlatformVersion(p, tfm))) is { } match)
             {
                 return (match, true);
             }
@@ -147,6 +143,71 @@ internal static partial class TargetFrameworkHelper
     }
 
     /// <summary>
+    /// Gets the framework of a project loaded for one of several target frameworks: its name says it, unless
+    /// <c>TargetFrameworks</c> lists an alias such as <c>modern</c>, whose framework its symbols then tell.
+    /// Its compilation would say it too, but only by building every framework of the project.
+    /// </summary>
+    private static string? GetFrameworkOfTarget(Project project, string? requestedPlatform)
+    {
+        var name = GetTargetFrameworkFromName(project);
+        return name is null || TargetFrameworkSymbolRegex().IsMatch(GetTargetFrameworkSymbol(name))
+            ? name
+            : GetTargetFramework(null, project.ParseOptions?.PreprocessorSymbolNames ?? [], requestedPlatform) ?? name;
+    }
+
+    /// <summary>
+    /// Gets the framework a project that targets a single framework is built for, such as <c>net8.0-windows10.0.19041.0</c>.
+    /// The <c>TargetFrameworkAttribute</c> and <c>TargetPlatformAttribute</c> the SDK generates into its compilation
+    /// name it exactly; the preprocessor symbols give only what they leave out, as when <c>GenerateAssemblyInfo</c>
+    /// is off, which generates no <c>TargetPlatformAttribute</c>, or <c>GenerateTargetFrameworkAttribute</c> is.
+    /// </summary>
+    /// <param name="requestedPlatform">
+    /// The platform of the framework asked for: among the symbols, that of a platform outside the list the SDK
+    /// ships is told apart from a project's own symbol, such as <c>SQLITE</c> and <c>SQLITE3</c>, only by being asked for.
+    /// </param>
+    /// <returns><see langword="null"/> when neither says which framework the project targets.</returns>
+    internal static string? GetTargetFramework(IAssemblySymbol? assembly, IEnumerable<string> preprocessorSymbols, string? requestedPlatform = null)
+    {
+        var fromAttribute = assembly is null ? null : GetTargetFrameworkFromAttribute(assembly);
+        if (fromAttribute is not null && GetTargetFrameworkPlatform(fromAttribute) is not null)
+        {
+            return fromAttribute;
+        }
+
+        var symbols = preprocessorSymbols.ToHashSet(StringComparer.Ordinal);
+        var framework = fromAttribute ?? GetTargetFrameworkFromSymbols(symbols);
+        if (framework is null)
+        {
+            return null;
+        }
+
+        var (platform, version) = GetPlatformFromSymbols(symbols, GetTargetFrameworkSymbol(framework), requestedPlatform);
+        return platform is null ? framework : $"{framework}-{platform.ToLowerInvariant()}{FormatVersion(version)}";
+    }
+
+    // The framework symbol the SDK defines for a project, without its platform: `NET8_0` is `net8.0`.
+    private static string? GetTargetFrameworkFromSymbols(HashSet<string> symbols)
+    {
+        // A project without the family symbols (a non-SDK project, or `DisableImplicitFrameworkDefines`) does not say.
+        if (!s_frameworkFamilySymbols.Any(symbols.Contains))
+        {
+            return null;
+        }
+
+        return symbols.Where(s => TargetFrameworkSymbolRegex().IsMatch(s)).Order(StringComparer.Ordinal).FirstOrDefault() is { } symbol
+            ? symbol.ToLowerInvariant().Replace('_', '.')
+            : null;
+    }
+
+    // `10.0.19041.0`, and `7.0` for 7.0.0.0, as frameworks write them.
+    private static string FormatVersion(Version? version)
+    {
+        return version is null ? ""
+            : version.Build <= 0 && version.Revision <= 0 ? $"{version.Major}.{version.Minor}"
+            : version.ToString();
+    }
+
+    /// <summary>
     /// Whether a project that targets <paramref name="projectFramework"/> targets <paramref name="targetFramework"/>:
     /// the same framework on the same platform, and the same platform version unless <paramref name="targetFramework"/>
     /// leaves it out. <c>net8.0-windows</c> selects <c>net8.0-windows10.0.19041.0</c>, while
@@ -178,13 +239,13 @@ internal static partial class TargetFrameworkHelper
 
     /// <summary>
     /// Gets the platform, and its version, of a project from its preprocessor symbols. The SDK defines one such
-    /// as <c>WINDOWS</c> for .NET 5 and later only, together with a <c>WINDOWS7_0_OR_GREATER</c> for every version
-    /// up to the one targeted, the highest of which is that version: a project's own <c>WINDOWS</c> alone is not it,
-    /// except for a platform whose frameworks have no version, such as <c>BROWSER</c>. A platform with version
-    /// symbols wins over such a symbol, which a project can also define itself for code it shares with that platform.
-    /// A platform the SDK does not know, such as <c>net8.0-desktop</c>, is recognized by its symbol and the one of
-    /// its exact version, <c>XYZ1_0</c>; without a version it defines the platform's symbol only, which tells it
-    /// apart from a project's own symbol only when <paramref name="requestedPlatform"/> names it.
+    /// as <c>WINDOWS</c> for .NET 5 and later only, together with the one of the exact version targeted,
+    /// <c>WINDOWS10_0_19041_0</c>, and a <c>WINDOWS7_0_OR_GREATER</c> for every version it knows up to that one:
+    /// a project's own <c>WINDOWS</c> alone is not it, except for a platform whose frameworks have no version,
+    /// such as <c>BROWSER</c>. A platform with version symbols wins over such a symbol, which a project can also
+    /// define itself for code it shares with that platform. A platform outside the list the SDK ships, such as
+    /// <c>net8.0-xyz1.0</c>, has symbols of the same form as a project's own <c>SQLITE</c> and <c>SQLITE3</c>, so
+    /// it counts only when <paramref name="requestedPlatform"/> names it.
     /// </summary>
     private static (string? Platform, Version? Version) GetPlatformFromSymbols(HashSet<string> symbols, string frameworkSymbol, string? requestedPlatform = null)
     {
@@ -195,25 +256,17 @@ internal static partial class TargetFrameworkHelper
             return (null, null);
         }
 
-        // `NET8_0` has the form of an exact platform version too.
-        var otherPlatforms = symbols
-            .Select(s => ExactPlatformVersionSymbolRegex().Match(s))
-            .Where(m => m.Success)
-            .Select(m => m.Groups[1].Value)
-            .Where(p => symbols.Contains(p) && !s_frameworkFamilySymbols.Contains(p) && !s_platformSymbols.Contains(p))
-            .Distinct()
-            .Order(StringComparer.Ordinal);
+        var requestedOther = requestedPlatform is not null && !s_platformSymbols.Contains(requestedPlatform) && symbols.Contains(requestedPlatform)
+            ? requestedPlatform
+            : null;
 
         string? versionless = null;
-        foreach (var platform in s_platformSymbols.Where(symbols.Contains).Concat(otherPlatforms))
+        foreach (var platform in s_platformSymbols.Where(symbols.Contains).Concat(requestedOther is null ? [] : [requestedOther]))
         {
+            // The exact version is the highest: an SDK whose list stops below it has no `_OR_GREATER` symbol of
+            // it, and an older SDK may define no exact one.
             var version = symbols
-                .Select(s => PlatformVersionSymbolRegex().Match(s))
-                .Where(m => m.Success && m.Groups[1].Value == platform)
-                .Select(m => ParseVersion(m.Groups[2].Value.Replace('_', '.')))
-                .Max()
-                ?? symbols
-                .Select(s => ExactPlatformVersionSymbolRegex().Match(s))
+                .Select(s => PlatformVersionSymbolRegex().Match(s) is { Success: true } m ? m : ExactPlatformVersionSymbolRegex().Match(s))
                 .Where(m => m.Success && m.Groups[1].Value == platform)
                 .Select(m => ParseVersion(m.Groups[2].Value.Replace('_', '.')))
                 .Max();
@@ -232,17 +285,14 @@ internal static partial class TargetFrameworkHelper
             }
         }
 
-        if (requestedPlatform is not null && !s_platformSymbols.Contains(requestedPlatform) && symbols.Contains(requestedPlatform))
-        {
-            return (requestedPlatform, null);
-        }
-
-        return (versionless, null);
+        // `net8.0-desktop`: without a version the SDK defines the platform's symbol only
+        return (requestedOther ?? versionless, null);
     }
 
     /// <summary>
     /// Reads the framework from the <c>TargetFrameworkAttribute</c> of an assembly, and its platform from the
-    /// <c>TargetPlatformAttribute</c>, for a project whose preprocessor symbols do not name it.
+    /// <c>TargetPlatformAttribute</c>, which the SDK generates for a platform with a version unless
+    /// <c>GenerateAssemblyInfo</c> is off: <c>net8.0-windows10.0.19041.0</c>, or <c>net8.0</c> without it.
     /// </summary>
     internal static string? GetTargetFrameworkFromAttribute(IAssemblySymbol assembly)
     {
@@ -343,31 +393,15 @@ internal static partial class TargetFrameworkHelper
     internal static bool? TargetsFramework(IEnumerable<string> preprocessorSymbols, string targetFramework)
     {
         // `net` or `netstandard` would otherwise match the family symbol every project of the family defines.
-        var frameworkSymbol = GetTargetFrameworkSymbol(targetFramework);
-        if (!TargetFrameworkSymbolRegex().IsMatch(frameworkSymbol))
+        if (!TargetFrameworkSymbolRegex().IsMatch(GetTargetFrameworkSymbol(targetFramework)))
         {
             return false;
         }
 
         // C# symbols are case-sensitive, and the SDK defines these in upper case: a project's own `Windows`
         // or `Net` symbol is not one of them.
-        var symbols = preprocessorSymbols.ToHashSet(StringComparer.Ordinal);
-        if (!s_frameworkFamilySymbols.Any(symbols.Contains))
-        {
-            return null;
-        }
-
-        if (!symbols.Contains(frameworkSymbol))
-        {
-            return false;
-        }
-
-        var (projectPlatform, platformVersion) = GetPlatformFromSymbols(symbols, frameworkSymbol, GetTargetFrameworkPlatform(targetFramework));
-        if (!string.Equals(projectPlatform, GetTargetFrameworkPlatform(targetFramework), StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return GetTargetFrameworkPlatformVersion(targetFramework) is not { } version || version == platformVersion;
+        return GetTargetFramework(null, preprocessorSymbols, GetTargetFrameworkPlatform(targetFramework)) is { } framework
+            ? MatchesFramework(framework, targetFramework)
+            : null;
     }
 }
