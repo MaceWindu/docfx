@@ -53,8 +53,8 @@ partial class DotnetApiCatalog
         // A solution whose projects an earlier solution already reported has nothing new to warn about.
         var solutionProjectsReported = 0;
 
-        // A project is reported once: as a warning when `src` lists it, though a listed solution holds it too;
-        // nor does it count against the solution then, which would report the same cause twice.
+        // A project `src` lists is reported once, as a warning, also when a listed solution holds it. The solution
+        // then counts it only if it matches: one that does not is the project's warning, not the solution's.
         var listedProjects = files.TryGetValue(FileType.Project, out var listed)
             ? listed.Select(f => f.NormalizedPath).ToHashSet(FilePathComparer.OSPlatformSensitiveComparer)
             : [];
@@ -207,7 +207,9 @@ partial class DotnetApiCatalog
                 project = await workspace.OpenProjectAsync(path, msbuildLogger);
             }
 
-            if (config.TargetFramework is null && isNewlyLoaded)
+            // With `targetFramework`, the analyzers reported are those of the framework selected, below; a project
+            // that is never documented reports those of the one loaded, as without the option.
+            if (isNewlyLoaded && (config.TargetFramework is null || !project.SupportsCompilation))
             {
                 ReportAnalyzers(project);
             }

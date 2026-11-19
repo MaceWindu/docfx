@@ -72,11 +72,18 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows", false)]
     [InlineData("NET;NETCOREAPP;NET8_0;WINDOWS", "net8.0-windows10.0.19041.0", false)]
-    // a platform the SDK does not ship, `net8.0-xyz1.0`, comes with the symbol of its exact version
-    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0", false)]
+    // the SDK defines the symbol of the exact version too, the highest, also one its list of versions lacks
+    [InlineData("NET;NETCOREAPP;NET8_0;ANDROID;ANDROID21_0_OR_GREATER;ANDROID34_0_OR_GREATER;ANDROID35_0", "net8.0-android35.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;ANDROID;ANDROID21_0_OR_GREATER;ANDROID34_0_OR_GREATER;ANDROID35_0", "net8.0-android34.0", false)]
+    [InlineData("NET;NETCOREAPP;NET10_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER;WINDOWS10_0_26100_0;CSWINRT3_0", "net10.0-windows10.0.26100.1", true)]
+    // a platform the SDK does not ship, `net8.0-xyz1.0`, has symbols of the same form as a project's own
+    // `SQLITE` and `SQLITE3`, so it counts only when the framework asked for names it
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz1.0", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;XYZ;XYZ1_0", "net8.0-xyz2.0", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;SQLITE;SQLITE3", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;EF;EF8;DEBUG", "net8.0", true)]
     // without a version, `net8.0-desktop`, only its symbol: a project's own unless the framework asked for names it
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;DESKTOP", "net8.0-desktop", true)]
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;DESKTOP", "net8.0", true)]
@@ -260,6 +267,83 @@ public class TargetFrameworkHelperTest
         var (_, matched) = await TargetFrameworkHelper.SelectProject(project.Solution, project, targetFramework);
 
         matched.Should().Be(expectMatch);
+    }
+
+    [Theory]
+    // the attributes name the framework exactly, so a project's own symbols do not make it another
+    [InlineData("Windows10.0.19041.0", "NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS10_0_17763_0_OR_GREATER", null, "net8.0-windows10.0.19041.0")]
+    [InlineData("Windows10.0.26100.1", "NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS10_0_26100_0_OR_GREATER", null, "net8.0-windows10.0.26100.1")]
+    [InlineData("", "NET;NETCOREAPP;NET8_0;SQLITE;SQLITE3", null, "net8.0")]
+    [InlineData("", "NET;NETCOREAPP;NET8_0;SQLITE;SQLITE3", "SQLITE", "net8.0-sqlite3.0")]
+    // without a TargetPlatformAttribute (`GenerateAssemblyInfo` off), the symbols give the platform
+    [InlineData("", "NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER;WINDOWS10_0_19041_0_OR_GREATER", null, "net8.0-windows10.0.19041.0")]
+    [InlineData("", "NET;NETCOREAPP;NET8_0;BROWSER", null, "net8.0-browser")]
+    // nor does the SDK generate one for a platform without a version
+    [InlineData("", "NET;NETCOREAPP;NET8_0;DESKTOP", "DESKTOP", "net8.0-desktop")]
+    [InlineData("", "NET;NETCOREAPP;NET8_0;DESKTOP", null, "net8.0")]
+    [InlineData("", "", null, "net8.0")]
+    public async Task GetTargetFrameworkReadsTheAttributesFirst(string platform, string symbols, string requestedPlatform, string expected)
+    {
+        var project = CreateProjectWithAttributes(".NETCoreApp,Version=v8.0", platform, symbols);
+        var compilation = await project.GetCompilationAsync(TestContext.Current.CancellationToken);
+
+        TargetFrameworkHelper.GetTargetFramework(compilation.Assembly, symbols.Split(';', StringSplitOptions.RemoveEmptyEntries), requestedPlatform)
+            .Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net8.0")]
+    [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard2.0")]
+    [InlineData("NETFRAMEWORK;NET462", "net462")]
+    [InlineData("TRACE", null)]
+    public void GetTargetFrameworkWithoutTheAttributesReadsTheSymbols(string symbols, string expected)
+    {
+        TargetFrameworkHelper.GetTargetFramework(null, symbols.Split(';')).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task SelectProjectOfASingleTargetProjectWithOwnSymbolsShapedLikeAPlatform()
+    {
+        var project = CreateProjectWithAttributes(".NETCoreApp,Version=v8.0", "", "NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER;SQLITE;SQLITE3");
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(project.Solution, project, "net8.0");
+
+        matched.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("net8.0", "Lib(modern)")]
+    [InlineData("netstandard2.0", "Lib(legacy)")]
+    // the alias itself names it as well
+    [InlineData("legacy", "Lib(legacy)")]
+    public async Task SelectProjectOfAMultiTargetedProjectWithAliasesReadsTheirSymbols(string targetFramework, string expected)
+    {
+        // `<TargetFrameworks>modern;legacy</TargetFrameworks>`, with `TargetFrameworkIdentifier` and version set per alias
+        using var workspace = new AdhocWorkspace();
+        var projects = new[] { ("Lib(modern)", "NET;NETCOREAPP;NET8_0"), ("Lib(legacy)", "NETSTANDARD;NETSTANDARD2_0") }
+            .Select(p => workspace.AddProject(ProjectInfo.Create(
+                ProjectId.CreateNewId(), VersionStamp.Default, p.Item1, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
+                parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: p.Item2.Split(';')))))
+            .ToList();
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(workspace.CurrentSolution, projects[0], targetFramework);
+
+        selected.Name.Should().Be(expected);
+        matched.Should().BeTrue();
+    }
+
+    private static Project CreateProjectWithAttributes(string frameworkName, string platform, string symbols)
+    {
+        var source = $"""[assembly: System.Runtime.Versioning.TargetFramework("{frameworkName}")]"""
+            + (platform.Length > 0 ? $"""[assembly: System.Runtime.Versioning.TargetPlatform("{platform}")]""" : "");
+
+        var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject(ProjectInfo.Create(
+            ProjectId.CreateNewId(), VersionStamp.Default, "Lib", "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
+            compilationOptions: new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: symbols.Split(';', StringSplitOptions.RemoveEmptyEntries)),
+            metadataReferences: [MetadataReference.CreateFromFile(typeof(System.Runtime.Versioning.TargetFrameworkAttribute).Assembly.Location)]));
+        return workspace.AddDocument(project.Id, "AssemblyInfo.cs", Microsoft.CodeAnalysis.Text.SourceText.From(source)).Project;
     }
 
     [Theory]

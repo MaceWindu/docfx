@@ -171,6 +171,8 @@ When a project targets multiple frameworks, docfx loads every one of them but do
 
 `targetFramework` picks a framework among the ones the project was loaded with. The projects it references are left alone, and each one is built for the framework MSBuild resolves for that reference, exactly as in a normal build.
 
+A project that targets a single framework is matched by the `TargetFrameworkAttribute` and `TargetPlatformAttribute` the .NET SDK generates into its assembly, and by the preprocessor symbols the SDK defines only where those attributes are not generated.
+
 Setting the `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json-reference.md#properties) instead also loads only that framework, which is faster, but MSBuild applies a global property to every project it loads, including referenced projects. A project that references a `netstandard2.0` library then loads that library for `net8.0` as well, which no longer matches the reference MSBuild resolved for it: docfx logs `Found project reference without a matching metadata reference` and `Unresolved metadata reference removed from project`, and the library may fail to build for a framework it was never meant to target.
 
 If a project listed in `src` does not target the requested framework, or does not say which framework it targets, docfx logs a `TargetFrameworkNotFound` warning and documents the framework the project selects by default. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets the framework; see [`targetFramework`](../reference/docfx-json-reference.md#targetframework).
