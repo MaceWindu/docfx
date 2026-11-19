@@ -194,9 +194,30 @@ internal static partial class TargetFrameworkHelper
             return null;
         }
 
-        return symbols.Where(s => TargetFrameworkSymbolRegex().IsMatch(s)).Order(StringComparer.Ordinal).FirstOrDefault() is { } symbol
+        // A migrated project may keep the symbol of a framework it targeted before, such as `NET45` in a net462
+        // project: the SDK's is the highest of the family whose symbol the SDK defines too, as `NETFRAMEWORK`.
+        var exact = symbols.Where(s => TargetFrameworkSymbolRegex().IsMatch(s)).ToList();
+        var ofDefinedFamily = exact.Where(s => symbols.Contains(GetFamilySymbol(s))).ToList();
+        return (ofDefinedFamily.Count > 0 ? ofDefinedFamily : exact)
+            .OrderByDescending(GetFrameworkSymbolVersion)
+            .ThenBy(s => s, StringComparer.Ordinal)
+            .FirstOrDefault() is { } symbol
             ? symbol.ToLowerInvariant().Replace('_', '.')
             : null;
+
+        // `NET462` is a .NET Framework, `NET8_0` a .NET 5 or later, which defines `NET`.
+        static string GetFamilySymbol(string symbol) =>
+            symbol.StartsWith("NETSTANDARD", StringComparison.Ordinal) ? "NETSTANDARD"
+            : symbol.StartsWith("NETCOREAPP", StringComparison.Ordinal) ? "NETCOREAPP"
+            : symbol.Contains('_') ? "NET"
+            : "NETFRAMEWORK";
+
+        // `NET462` is 4.6.2, `NET8_0` is 8.0.
+        static Version? GetFrameworkSymbolVersion(string symbol)
+        {
+            var digits = new string(symbol.SkipWhile(char.IsLetter).ToArray());
+            return ParseVersion(digits.Contains('_') ? digits.Replace('_', '.') : string.Join('.', digits.ToCharArray()));
+        }
     }
 
     // `10.0.19041.0`, and `7.0` for 7.0.0.0, as frameworks write them.
@@ -382,26 +403,5 @@ internal static partial class TargetFrameworkHelper
 
         var platform = new string(targetFramework[(dash + 1)..].TakeWhile(char.IsLetter).ToArray());
         return platform.Length == 0 ? null : platform.ToUpperInvariant();
-    }
-
-    /// <summary>
-    /// Tells from the preprocessor symbols of a project that targets a single framework whether that
-    /// framework is <paramref name="targetFramework"/>, platform included, the way a multi-targeted project
-    /// is matched by name: <c>net8.0</c> does not match a <c>net8.0-windows</c> project, nor the reverse.
-    /// </summary>
-    /// <returns><see langword="null"/> when the symbols do not say which framework the project targets.</returns>
-    internal static bool? TargetsFramework(IEnumerable<string> preprocessorSymbols, string targetFramework)
-    {
-        // `net` or `netstandard` would otherwise match the family symbol every project of the family defines.
-        if (!TargetFrameworkSymbolRegex().IsMatch(GetTargetFrameworkSymbol(targetFramework)))
-        {
-            return false;
-        }
-
-        // C# symbols are case-sensitive, and the SDK defines these in upper case: a project's own `Windows`
-        // or `Net` symbol is not one of them.
-        return GetTargetFramework(null, preprocessorSymbols, GetTargetFrameworkPlatform(targetFramework)) is { } framework
-            ? MatchesFramework(framework, targetFramework)
-            : null;
     }
 }

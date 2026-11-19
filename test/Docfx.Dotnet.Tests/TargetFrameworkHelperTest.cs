@@ -97,13 +97,23 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "netcoreapp", false)]
     [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard", false)]
     [InlineData("NETFRAMEWORK;NET462", "netframework", false)]
-    [InlineData("TRACE", "net", false)]
+    // a migrated project's own symbol of a framework it targeted before is not the SDK's, the highest of its family
+    [InlineData("NETFRAMEWORK;NET462;NET45", "net462", true)]
+    [InlineData("NETFRAMEWORK;NET462;NET45", "net45", false)]
+    [InlineData("NET;NETCOREAPP;NET8_0;NET45", "net8.0", true)]
+    [InlineData("NET;NETCOREAPP;NET10_0;NET8_0;NETCOREAPP3_1", "net10.0", true)]
+    [InlineData("NETSTANDARD;NETSTANDARD2_0;NET45", "netstandard2.0", true)]
     // a non-SDK project, or one with DisableImplicitFrameworkDefines, does not say
+    [InlineData("TRACE", "net", null)]
     [InlineData("TRACE;DEBUG", "net48", null)]
     [InlineData("", "net8.0", null)]
-    public void TargetsFramework(string symbols, string targetFramework, bool? expected)
+    public void SelectingASingleTargetProjectWithoutTheAttributesReadsItsSymbols(string symbols, string targetFramework, bool? expected)
     {
-        TargetFrameworkHelper.TargetsFramework(symbols.Split(';', StringSplitOptions.RemoveEmptyEntries), targetFramework).Should().Be(expected);
+        // what SelectProject does for a project without a TargetFrameworkAttribute
+        var framework = TargetFrameworkHelper.GetTargetFramework(
+            null, symbols.Split(';', StringSplitOptions.RemoveEmptyEntries), TargetFrameworkHelper.GetTargetFrameworkPlatform(targetFramework));
+
+        (framework is null ? (bool?)null : TargetFrameworkHelper.MatchesFramework(framework, targetFramework)).Should().Be(expected);
     }
 
     [Theory]
@@ -295,6 +305,8 @@ public class TargetFrameworkHelperTest
     [InlineData("NET;NETCOREAPP;NET8_0;NET8_0_OR_GREATER", "net8.0")]
     [InlineData("NETSTANDARD;NETSTANDARD2_0", "netstandard2.0")]
     [InlineData("NETFRAMEWORK;NET462", "net462")]
+    [InlineData("NETFRAMEWORK;NET462;NET45", "net462")]
+    [InlineData("NETFRAMEWORK;NET48;NET472", "net48")]
     [InlineData("TRACE", null)]
     public void GetTargetFrameworkWithoutTheAttributesReadsTheSymbols(string symbols, string expected)
     {

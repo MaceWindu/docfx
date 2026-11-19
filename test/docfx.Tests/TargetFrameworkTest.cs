@@ -583,7 +583,7 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Theory]
-    // the version comes from the `WINDOWS8_0_OR_GREATER` symbol; windows8.0 needs no Windows SDK package
+    // the version comes from the `TargetPlatformAttribute("Windows8.0")` the SDK generates; windows8.0 needs no Windows SDK package
     [InlineData("net8.0-windows8.0", false)]
     [InlineData("net8.0-windows8", false)]
     [InlineData("net8.0-windows", false)]
