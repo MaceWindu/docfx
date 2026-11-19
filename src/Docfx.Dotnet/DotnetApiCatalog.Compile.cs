@@ -315,11 +315,24 @@ partial class DotnetApiCatalog
                 return [];
             }
 
+            // An analyzer every framework references is one cause, reported once. A single-target project is
+            // compiled, and so reported, while it is selected.
+            var reportedAnalyzers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var analyzersReportedFor = new HashSet<ProjectId>();
+            void ReportAnalyzersOf(Project selected)
+            {
+                if (analyzersReportedFor.Add(selected.Id))
+                {
+                    ReportAnalyzersOnce(selected, reportedAnalyzers);
+                }
+            }
+
             // With `targetFramework`, the project selected above, which is at its default framework if it does
-            // not target that one.
+            // not target that one; a single-target project is named from its compilation, below.
             List<(Project Project, string? Framework)> selection = targetFrameworks is null
-                ? [(project, TargetFrameworkHelper.GetTargetFrameworkFromName(project) ?? TargetFrameworkHelper.GetTargetFrameworkFromSymbols(project.ParseOptions?.PreprocessorSymbolNames ?? []))]
-                : await TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, fromSolution);
+                ? [(project, TargetFrameworkHelper.GetTargetFrameworkFromName(project) is null ? null : TargetFrameworkHelper.GetFrameworkLabel(project, null))]
+                : await TargetFrameworkHelper.SelectProjects(
+                    workspace.CurrentSolution, project, targetFrameworks, fromSolution, isNewlyLoaded ? ReportAnalyzersOf : null);
 
             // As with `targetFramework`, a solution none of whose projects targets a framework of the list is worth a
             // warning; a project `src` lists too is reported by itself, so it counts only when it matches.
@@ -331,13 +344,11 @@ partial class DotnetApiCatalog
             }
 
             var compilations = new List<Compilation>();
-            // An analyzer every framework references is one cause, reported once.
-            var reportedAnalyzers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (selected, selectedFramework) in selection)
             {
                 if (targetFrameworks is not null && isNewlyLoaded)
                 {
-                    ReportAnalyzersOnce(selected, reportedAnalyzers);
+                    ReportAnalyzersOf(selected);
                 }
 
                 if (await selected.GetCompilationAsync() is not { } compilation)
@@ -345,7 +356,7 @@ partial class DotnetApiCatalog
                     continue;
                 }
 
-                if ((selectedFramework ?? TargetFrameworkHelper.GetTargetFrameworkFromAttribute(compilation.Assembly)) is not { } framework)
+                if ((selectedFramework ?? TargetFrameworkHelper.GetFrameworkLabel(selected, compilation.Assembly)) is not { } framework)
                 {
                     Logger.LogWarning(
                         $"The target framework of project '{selected.FilePath}' cannot be determined, so it is not documented.",

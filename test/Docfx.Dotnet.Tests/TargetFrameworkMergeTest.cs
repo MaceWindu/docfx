@@ -613,6 +613,37 @@ public class TargetFrameworkMergeTest
         SymbolVisitorAdapter.IsDocumentationInherited(comment).Should().Be(expected);
     }
 
+    [Fact]
+    public void ANamespaceThatOnlyHoldsOthersListsItsFrameworksInTheOrderOfTheMerge()
+    {
+        // No namespace orders First relative to Second, so only the order of the merge does.
+        var units = new[]
+        {
+            ("namespace A.X { public class C { } }", Second),
+            ("namespace A.Y { public class D { } }", First),
+            ("namespace A.X { public class C { } } namespace A.Y { public class D { } }", Third),
+        };
+        var items = units.Select(unit =>
+        {
+            var compilation = CompilationHelper.CreateCompilationFromCSharpCode(unit.Item1, new Dictionary<string, string>(), "Lib");
+            var item = compilation.Assembly.GenerateMetadataItem(compilation, new())!;
+            DotnetApiCatalog.TagAppliesTo(item, unit.Item2);
+            return item;
+        }).ToList();
+        var result = new Dictionary<string, MetadataItem>();
+        DotnetApiCatalog.MergeTargetFrameworks(result, items);
+        var references = new Dictionary<string, ReferenceItem>();
+        foreach (var reference in items.SelectMany(i => i.References ?? []))
+        {
+            references.TryAdd(reference.Key, reference.Value);
+        }
+
+        var model = YamlMetadataResolver.ResolveMetadata(result, references, NamespaceLayout.Nested, [Second, First, Third]);
+
+        var placeholder = model.TocYamlViewModel.Items.Single(i => i.Name == "A");
+        placeholder.AppliesTo.Should().Equal(Second, First, Third);
+    }
+
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
     {
         return MergeIgnoring(VariantIgnore.None, units);

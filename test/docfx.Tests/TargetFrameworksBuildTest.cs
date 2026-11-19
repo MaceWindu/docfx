@@ -52,6 +52,17 @@ public class TargetFrameworksBuildTest : TestBase
 
                 public class Child : Base { }
 
+                public interface ISource { }
+
+                public class AlwaysSource : ISource { }
+
+                public class SometimesSource
+            #if NET8_0
+                    : ISource
+            #endif
+                {
+                }
+
             #if NET8_0
                 public class Switches : Base { }
             #else
@@ -184,6 +195,31 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
     [InlineData("\"default\", \"modern\"")]
+    public async Task AnInterfaceListsTheTypesThatImplementItMarkingThoseThatDoInSomeFrameworks(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.ISource.html");
+
+        Assert.Matches("SometimesSource</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
+        Assert.Matches("AlwaysSource</a>\\s*</div>", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AnInterfaceImplementedInSomeFrameworksIsMarkedWithThem(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+
+        Assert.Matches("ISource</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", await Page(site, "Lib.SometimesSource.html"));
+        Assert.Matches("ISource</a>\\s*</div>", await Page(site, "Lib.AlwaysSource.html"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
     public async Task ATypeBuiltIntoAssembliesOfDifferentNamesListsEach(string template)
     {
         var site = await Build(template, targetFrameworks: "\"*\"");
@@ -271,7 +307,7 @@ public class TargetFrameworksBuildTest : TestBase
     {
         var site = await Build("\"default\"", targetFrameworks: "\"*\"", extraBuild: "\"exportRawModel\": true,");
 
-        foreach (var (page, key) in new[] { ("Lib.Child.raw.json", "inheritedMembersAppliesTo"), ("Lib.Base.raw.json", "derivedClassesAppliesTo") })
+        foreach (var (page, key) in new[] { ("Lib.Child.raw.json", "inheritedMembersAppliesTo"), ("Lib.Base.raw.json", "derivedClassesAppliesTo"), ("Lib.SometimesSource.raw.json", "implementsAppliesTo") })
         {
             var raw = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, page), TestContext.Current.CancellationToken));
             Assert.NotNull(raw[key]);

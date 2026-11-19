@@ -1371,6 +1371,13 @@ public class TargetFrameworkTest : TestBase
         Assert.Equal(["net8.0"], source.DerivedClassesAppliesTo["Bases.Reader"].Single().Frameworks);
         Assert.Equal(["Bases.Derived"], Page("Bases.OtherBase.yml").Items[0].DerivedClasses);
 
+        // The class marks the interface on its own page too; one implemented in every framework needs no mark.
+        var reader = Page("Bases.Reader.yml").Items[0];
+        Assert.Contains("Bases.ISource", reader.Implements);
+        Assert.Equal(["Bases.ISource"], reader.ImplementsAppliesTo.Keys);
+        Assert.Equal(["net8.0"], reader.ImplementsAppliesTo["Bases.ISource"].Single().Frameworks);
+        Assert.Null(Page("Bases.Writer.yml").Items[0].ImplementsAppliesTo);
+
         // A class that derives from a base in every framework of the base needs no mark either.
         var derivedFromBase = Page("Bases.Base.yml").Items[0].DerivedClassesAppliesTo;
         Assert.Equal(["Bases.Derived"], derivedFromBase.Keys);

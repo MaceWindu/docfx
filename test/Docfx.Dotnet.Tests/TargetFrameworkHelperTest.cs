@@ -71,7 +71,11 @@ public class TargetFrameworkHelperTest
 
     [Theory]
     [InlineData("net8.0", "NET", "NETCOREAPP", "NET8_0", "NET8_0_OR_GREATER", "NET7_0_OR_GREATER")]
-    [InlineData("net10.0", "NET10_0_OR_GREATER", "NET10_0")]
+    [InlineData("net10.0", "NET", "NET10_0_OR_GREATER", "NET10_0")]
+    // without the family symbols (a non-SDK project, or `DisableImplicitFrameworkDefines`) a `NET10_0` is the project's own
+    [InlineData(null, "NET10_0")]
+    // a platform outside the list the SDK ships has symbols of the same form as a project's own pair
+    [InlineData("net8.0", "NET", "NET8_0", "SQLITE", "SQLITE3")]
     [InlineData("netstandard2.0", "NETSTANDARD", "NETSTANDARD2_0", "NETSTANDARD1_6_OR_GREATER")]
     [InlineData("netcoreapp3.1", "NETCOREAPP", "NETCOREAPP3_1")]
     [InlineData("net462", "NETFRAMEWORK", "NET462", "NET461_OR_GREATER")]
@@ -97,6 +101,46 @@ public class TargetFrameworkHelperTest
             "Lib");
 
         TargetFrameworkHelper.GetTargetFrameworkFromAttribute(compilation.Assembly).Should().Be("netstandard2.1");
+    }
+
+    [Theory]
+    // the attributes decide, the symbols spell it where both agree: a project file most likely writes `net8.0-windows`
+    [InlineData("Windows7.0", "NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0-windows")]
+    [InlineData("Windows10.0.19041.0", "NET;NETCOREAPP;NET8_0;WINDOWS;WINDOWS10_0_19041_0_OR_GREATER", "net8.0-windows")]
+    // a platform the symbols cannot tell from a project's own pair, which the attributes name
+    [InlineData("Xyz1.0", "NET;NETCOREAPP;NET8_0;XYZ;XYZ1_0", "net8.0-xyz1.0")]
+    [InlineData("", "NET;NETCOREAPP;NET8_0;SQLITE;SQLITE3", "net8.0")]
+    // no symbols at all (`DisableImplicitFrameworkDefines`)
+    [InlineData("Windows10.0.19041.0", "", "net8.0-windows10.0.19041.0")]
+    public async Task GetFrameworkLabelOfASingleTargetProject(string platform, string symbols, string expected)
+    {
+        var project = CreateProjectWithAttributes(".NETCoreApp,Version=v8.0", platform, symbols);
+        var compilation = await project.GetCompilationAsync(TestContext.Current.CancellationToken);
+
+        TargetFrameworkHelper.GetFrameworkLabel(project, compilation.Assembly).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("Lib(net8.0-windows)", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0-windows")]
+    // an alias in `TargetFrameworks` is named for the framework it stands for
+    [InlineData("Lib(modern)", "NET;NETCOREAPP;NET8_0", "net8.0")]
+    public void GetFrameworkLabelOfAMultiTargetedProject(string name, string symbols, string expected)
+    {
+        using var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject(ProjectInfo.Create(
+            ProjectId.CreateNewId(), VersionStamp.Default, name, "Lib", LanguageNames.CSharp, filePath: "/src/Lib/Lib.csproj",
+            parseOptions: new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(preprocessorSymbols: symbols.Split(';'))));
+
+        TargetFrameworkHelper.GetFrameworkLabel(project, null).Should().Be(expected);
+    }
+
+    [Theory]
+    // a single-target project named from its attributes, `net8.0-windows7.0`, is the multi-targeted project's `net8.0-windows`
+    [InlineData("net8.0-windows", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0-windows7.0", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows", "NET;NET8_0;WINDOWS;WINDOWS7_0_OR_GREATER", "net8.0-windows10.0.19041.0", "net8.0-windows")]
+    public void WithPlatformVersionOfMergesAFrameworkNamedWithItsVersion(string framework, string symbols, string named, string expected)
+    {
+        TargetFrameworkHelper.WithPlatformVersionOf(framework, symbols.Split(';'), [framework, named]).Should().Be(expected);
     }
 
     [Theory]
