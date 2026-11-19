@@ -325,11 +325,27 @@ const summaries = new WeakMap<Toc, TocSummary>()
 function summarize(toc: Toc): TocSummary {
   if (!summaries.has(toc)) {
     const frameworks: string[] = []
-    const axes: Axis[] = toc.axis ? [toc.axis] : []
+    const axes: Axis[] = []
+    // Parts of a merged table of contents can each have an axis of the same name, which is one choice of the reader:
+    // with the values of all of them, so that a value only another part has can be picked and kept too.
+    const add = (axis: Axis) => {
+      const index = axes.findIndex(a => a.name === axis.name)
+      if (index < 0) {
+        axes.push(axis)
+        return
+      }
+      const values = axis.values.filter(v => !axes[index].values.some(a => a.id === v.id))
+      if (values.length > 0) {
+        axes[index] = { ...axes[index], values: [...axes[index].values, ...values] }
+      }
+    }
+    if (toc.axis) {
+      add(toc.axis)
+    }
     const visit = (items: TocEntry[]) => items?.forEach(item => {
       unitsOf(item.appliesTo).forEach(u => frameworks.push(u.framework))
-      if (item.axis && !axes.some(a => a.name === item.axis.name)) {
-        axes.push(item.axis)
+      if (item.axis) {
+        add(item.axis)
       }
       visit(item.items)
     })
@@ -610,17 +626,19 @@ export function appliesToPicker(choices: Choices): TemplateResult {
       </ul>
     </div>`
 
+  // "Framework: .NET 8", by a token, as the colon is written differently in some languages
+  const label = (name: string, value: string) => loc('appliesToPickerLabel', { name, value })
   const axis = choices.axis
   const value = axis?.values.find(v => v.id === selection.value)?.label
   const axisDropdown = axis
-    ? dropdown(choices.key, axis.name, `${axis.name}: ${value || loc('appliesToAll')}`,
+    ? dropdown(choices.key, axis.name, label(axis.name, value || loc('appliesToAll')),
       // a value's label already names the axis ("EF Core 3.1"), "All" does not
-      value || `${axis.name}: ${loc('appliesToAll')}`,
+      value || label(axis.name, loc('appliesToAll')),
       selection.value,
       [{ id: undefined, label: loc('appliesToAll') }, ...axis.values])
     : null
   const framework = selection.framework ? frameworkLabel(selection.framework, names) : loc('appliesToAllFrameworks')
-  const frameworkDropdown = dropdown('framework', loc('appliesToFramework'), `${loc('appliesToFramework')}: ${framework}`,
+  const frameworkDropdown = dropdown('framework', loc('appliesToFramework'), label(loc('appliesToFramework'), framework),
     framework,
     selection.framework,
     [{ id: undefined, label: loc('appliesToAllFrameworks') }, ...choices.frameworks.map(f => ({ id: f, label: frameworkLabel(f, names) }))])
@@ -705,7 +723,8 @@ export function applySelection(selection: Selection, axis?: Axis) {
     }
   })
 
-  // the classes derived, and the members inherited, in only some frameworks of a type, as a base type differs, and
+  // the classes derived, the interfaces implemented, and the members inherited, in only some frameworks of a type,
+  // as a base type differs, and
   // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
     list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {

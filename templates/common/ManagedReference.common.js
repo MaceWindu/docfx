@@ -262,6 +262,7 @@ function handleImplements(vm, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(implementedIn, implemented.uid) ? implementedIn[implemented.uid] : [];
     // set on every one, so that mustache does not look up the values of the type or member
     implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    implemented.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
 }

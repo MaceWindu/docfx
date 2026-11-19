@@ -916,7 +916,7 @@ items:
     }
 
     [Fact]
-    public void AFrameworkOrAxisValueThatYamlReadsAsANumberIsUsedAsTextAndWarns()
+    public void AFrameworkOrAxisValueThatYamlReadsAsANumberOrBooleanIsUsedAsTextAndWarns()
     {
         var content = """
             - name: EF Core
@@ -927,6 +927,8 @@ items:
                   label: EF Core 3.1
                 - id: "10"
                   label: EF Core 10
+                - id: false
+                  label: EF Core off
               appliesTo:
               - version: 3.10
                 frameworks: [ net8.0 ]
@@ -955,15 +957,17 @@ items:
         var axisValues = (IList)((IDictionary)entry.Metadata["axis"])["values"];
         Assert.Equal("3.1", ((IDictionary)axisValues[0])["id"]);
         Assert.Equal("10", ((IDictionary)axisValues[1])["id"]);
+        Assert.Equal("false", ((IDictionary)axisValues[2])["id"]);
         Assert.Equal("3.1", ((IDictionary)((IList)entry.Metadata["appliesTo"])[0])["version"]);
         Assert.Equal("10", ((IDictionary)((IList)entry.Items[0].Metadata["appliesTo"])[0])["version"]);
         // other keys are not ids
         Assert.Equal(7, entry.Metadata["memberLayout"]);
 
-        Assert.Equal(3, listener.Items.Count);
+        Assert.Equal(4, listener.Items.Count);
         Assert.All(listener.Items, item => Assert.Equal(LogLevel.Warning, item.LogLevel));
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds 3.1 unquoted"));
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'appliesTo' of table of contents 'toc.yml' holds 10 unquoted"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false unquoted, which YAML reads as a boolean"));
     }
 
     [Theory]

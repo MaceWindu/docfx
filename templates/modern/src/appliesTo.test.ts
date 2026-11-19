@@ -296,6 +296,28 @@ test('the axis of the part of the docs a page is in', () => {
   assert.strictEqual(getChoices(toc).frameworks, getChoices(toc).frameworks)
 })
 
+test('parts of the docs with an axis of the same name offer the values of all of them', () => {
+  const ef10: Axis = { name: 'EF Core', values: [{ id: 'ef9', label: 'EF Core 9' }, { id: 'ef10', label: 'EF Core 10' }] }
+  const toc: Toc = {
+    items: [
+      mergedToc().items[0],
+      { name: 'EF 10', axis: ef10, items: [{ name: 'OnlyEf10', href: 'ef10/OnlyEf10.html', appliesTo: [{ version: 'ef10', frameworks: ['net10.0'] }] }] },
+      { name: 'Guide', href: 'guide.html' }
+    ]
+  }
+  const tocUrl = new URL('https://example.org/docs/toc.json')
+  const choices = getChoices(toc, findPath(toc.items, tocUrl, { pathname: '/docs/guide.html' }))
+  assert.deepStrictEqual(choices.axis.values.map(v => v.id), ['ef3', 'ef9', 'ef10'])
+  // the axes of the parts themselves are left as they are
+  assert.deepStrictEqual(ef.values.map(v => v.id), ['ef3', 'ef9'])
+  assert.strictEqual(getChoices(toc, findPath(toc.items, tocUrl, { pathname: '/docs/ef10/OnlyEf10.html' })).axis, ef10)
+
+  // a link to an article keeps a value only the second part has (the storage key has the root of the site the page names)
+  const { storage } = installDom(site, 'https://example.org/docs/api/Guide.html?ef-core=ef10')
+  keepLinkSelection(choices)
+  assert.strictEqual(storage.get('docfx.axis./docs/.ef-core'), 'ef10')
+})
+
 test('the table of contents shows what exists in the selection', () => {
   const { storage } = installDom(site, 'https://example.org/docs/api/A.html')
   const toc = mergedToc()
@@ -543,6 +565,7 @@ test('the lists of a page dim what does not exist in the selection', () => {
     <h3 id="classes">Classes</h3>
     <dl class="jumplist" id="Shared" data-applies-to="net8.0 netstandard2.0"><dt>Shared</dt><dd></dd></dl>
     <dl class="jumplist" id="OnlyNet8" data-applies-to="net8.0"><dt>OnlyNet8</dt><dd></dd></dl>
+    <dl class="typelist implements"><dt>Implements</dt><dd><div id="IAlways">IAlways</div><div id="ISource" data-applies-to="net8.0">ISource</div></dd></dl>
     <dl class="typelist derived"><dt>Derived</dt><dd><div id="Child">Child</div><div id="Switches" data-applies-to="net8.0">Switches</div></dd></dl>
     <dl class="typelist inheritedMembers"><dt>Inherited Members</dt><dd><div id="Run" data-applies-to="net8.0">Base.Run()</div></dd></dl>
     <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd><div id="Twice" data-applies-to="net8.0">Ext.Twice()</div></dd></dl>
@@ -552,8 +575,8 @@ test('the lists of a page dim what does not exist in the selection', () => {
   const marked = () => document.querySelectorAll('.applies-to-unavailable-badge').map(b => (b.closest('dl.jumplist') || b.parentElement).id + ': ' + b.textContent)
 
   applySelection({ framework: 'netstandard2.0' })
-  assert.deepStrictEqual(dimmed(), ['OnlyNet8', 'Switches', 'Run', 'Twice'])
-  assert.deepStrictEqual(marked(), ['OnlyNet8', 'Switches', 'Run', 'Twice'].map(id => `${id}: Not available in .NET Standard 2.0`))
+  assert.deepStrictEqual(dimmed(), ['OnlyNet8', 'ISource', 'Switches', 'Run', 'Twice'])
+  assert.deepStrictEqual(marked(), ['OnlyNet8', 'ISource', 'Switches', 'Run', 'Twice'].map(id => `${id}: Not available in .NET Standard 2.0`))
   applySelection({ framework: 'net10.0' })
   assert.deepStrictEqual(dimmed(), [])
   assert.deepStrictEqual(marked(), [])
@@ -782,7 +805,8 @@ test('the dropdowns are named with what they pick', () => {
   const locs = `${pickerSite}
   <meta name="loc:appliesToFramework" content="Framework">
   <meta name="loc:appliesToAll" content="All">
-  <meta name="loc:appliesToAllFrameworks" content="All frameworks">`
+  <meta name="loc:appliesToAllFrameworks" content="All frameworks">
+  <meta name="loc:appliesToPickerLabel" content="{name}: {value}">`
   const isTemplate = (v: unknown): v is TemplateResult => Array.isArray((v as TemplateResult)?.strings)
   // the templates of the dropdowns, and the value bound to the name of each button
   const templates = (result: TemplateResult): TemplateResult[] => [result, ...result.values.filter(isTemplate).flatMap(templates)]

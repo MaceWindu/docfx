@@ -62,7 +62,7 @@
   <dd>
 {{/implements.0}}
 {{#implements}}
-    <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+    <div{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/implements}}
 {{#implements.0}}
   </dd>

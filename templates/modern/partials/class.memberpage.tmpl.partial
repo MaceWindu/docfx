@@ -14,4 +14,18 @@
 
 {{/children}}
 
+{{^hasSeeAlsoVariants}}
 {{>partials/class.seealso}}
+{{/hasSeeAlsoVariants}}
+{{#hasSeeAlsoVariants}}
+<div class="api-contents">
+<div class="api-content" data-applies-to="{{primaryAppliesToData}}">
+{{>partials/class.seealso}}
+</div>
+{{#variantViews}}
+<div class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden>
+{{>partials/class.seealso}}
+</div>
+{{/variantViews}}
+</div>
+{{/hasSeeAlsoVariants}}
