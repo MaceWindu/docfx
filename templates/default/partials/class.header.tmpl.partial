@@ -11,7 +11,7 @@
   {{/inheritance}}
   <div class="level{{level}}"><span class="xref">{{name.0.value}}</span></div>
   {{#derivedClasses}}
-    <div class="level{{index}}">{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+    <div class="level{{index}}">{{{specName.0.value}}}{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
   {{/derivedClasses}}
 </div>
 {{/inClass}}
@@ -19,7 +19,7 @@
 <div class="derivedClasses">
   <h5>{{__global.derived}}</h5>
   {{#derivedClasses}}
-  <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+  <div>{{{specName.0.value}}}{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
   {{/derivedClasses}}
 </div>
 {{/showImplementingTypes}}
@@ -28,7 +28,7 @@
   <h5>{{__global.implements}}</h5>
 {{/implements.0}}
 {{#implements}}
-  <div>{{{specName.0.value}}}{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
+  <div>{{{specName.0.value}}}{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/implements}}
 {{#implements.0}}
 </div>
@@ -40,10 +40,10 @@
 {{#inheritedMembers}}
   <div>
   {{#definition}}
-    <xref uid="{{definition}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
+    <xref uid="{{definition}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
   {{/definition}}
   {{^definition}}
-    <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
+    <xref uid="{{uid}}" text="{{nameWithType.0.value}}" alt="{{fullName.0.value}}"/>{{#showAppliesToBadge}} <span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
   {{/definition}}
   </div>
 {{/inheritedMembers}}

@@ -52,15 +52,16 @@ public class TargetFrameworksBuildTest : TestBase
 
                 public class Child : Base { }
 
-                public interface ISource { }
+                public interface ISource { void Open(); }
 
-                public class AlwaysSource : ISource { }
+                public class AlwaysSource : ISource { public void Open() { } }
 
                 public class SometimesSource
             #if NET8_0
                     : ISource
             #endif
                 {
+                    public void Open() { }
                 }
 
             #if NET8_0
@@ -259,6 +260,17 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
+    public async Task AMemberPageOfTheDefaultTemplateMarksAnInterfaceMemberImplementedInSomeFrameworks()
+    {
+        // The default template lists what a member implements on the page of a method or property group only.
+        var site = await Build("\"default\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+
+        Assert.Matches("ISource\\.Open\\(\\)</a> <span class=\"applies-to\">\\.NET 8</span></div>", await Page(site, "Lib.SometimesSource.Open.html"));
+        Assert.Matches("ISource\\.Open\\(\\)</a></div>", await Page(site, "Lib.AlwaysSource.Open.html"));
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
     public async Task AnOverloadPageOfTheDefaultTemplateMarksItsOverloadsAndShowsTheirVariants()
     {
         // The default template renders the page of a method or property group, unlike that of a field, with
@@ -448,6 +460,11 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Applies to", page);
         Assert.DoesNotContain("data-applies-to", page);
         Assert.DoesNotContain("api-variant", page);
+
+        // an interface lists the types that implement it only with the frameworks they do in
+        var interfacePage = await Page(site, "Lib.ISource.html");
+        Assert.DoesNotContain("Derived", interfacePage);
+        Assert.DoesNotContain("AlwaysSource", interfacePage);
     }
 
     [Theory]

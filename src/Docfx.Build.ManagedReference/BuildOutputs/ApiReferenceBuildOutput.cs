@@ -291,6 +291,13 @@ public class ApiReferenceBuildOutput
             output.Metadata[Constants.PropertyName.AppliesTo] = vm.AppliesTo;
         }
 
+        // The interface members a member implements in only some of its frameworks, which the default template
+        // marks where it lists them.
+        if (vm.ImplementsAppliesTo != null)
+        {
+            output.Metadata["implementsAppliesTo"] = vm.ImplementsAppliesTo;
+        }
+
         return output;
     }
 

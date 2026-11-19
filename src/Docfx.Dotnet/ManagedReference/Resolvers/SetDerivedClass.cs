@@ -8,7 +8,8 @@ namespace Docfx.Dotnet;
 
 internal class SetDerivedClass : IResolverPipeline
 {
-    // A set: a type that implements an interface twice, as `IConverter<int>` and `IConverter<string>`, derives from it once.
+    // A set: a type that implements an interface twice, as `IConverter<int>` and `IConverter<string>`, derives from it
+    // once, and a run for the same classes, as a build of the same project in the same process is, lists them once still.
     private readonly Dictionary<string, HashSet<string>> _derivedClassMapping = [];
 
     // base class -> derived class -> the frameworks it derives from that base in
@@ -37,11 +38,7 @@ internal class SetDerivedClass : IResolverPipeline
             {
                 if (GetSuperClass(inheritance, reference) is { } superClass && superClasses.Add(superClass))
                 {
-                    ref var derivedClasses = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassMapping, superClass, out var exists);
-                    if (exists)
-                        derivedClasses.Add(item.Name);
-                    else
-                        derivedClasses = [item.Name];
+                    AddDerived(superClass, item.Name);
                 }
             }
 
@@ -72,11 +69,7 @@ internal class SetDerivedClass : IResolverPipeline
                         superClass = referenceItem.Definition ?? superClass;
                     }
 
-                    ref var derivedClasses = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassMapping, superClass, out var exists);
-                    if (exists)
-                        derivedClasses.Add(item.Name);
-                    else
-                        derivedClasses = [item.Name];
+                    AddDerived(superClass, item.Name);
 
                     // A type implementing an interface in only some frameworks is marked on the page of the interface.
                     foreach (var framework in item.ImplementsAppliesTo?.GetValueOrDefault(implementedInterface) ?? [])
@@ -86,6 +79,15 @@ internal class SetDerivedClass : IResolverPipeline
                 }
             }
         }
+    }
+
+    private void AddDerived(string superClass, string derivedClass)
+    {
+        ref var derivedClasses = ref CollectionsMarshal.GetValueRefOrAddDefault(_derivedClassMapping, superClass, out var exists);
+        if (exists)
+            derivedClasses.Add(derivedClass);
+        else
+            derivedClasses = [derivedClass];
     }
 
     private void AddDerivedIn(string superClass, string derivedClass, string framework)
@@ -113,8 +115,7 @@ internal class SetDerivedClass : IResolverPipeline
                 case MemberType.Interface:
                     if (_derivedClassMapping.TryGetValue(item.Name, out var derivedClasses))
                     {
-                        derivedClasses.Sort();
-                        item.DerivedClasses = derivedClasses;
+                        item.DerivedClasses = [.. derivedClasses.Order()];
                         if (_derivedClassFrameworks.TryGetValue(item.Name, out var derivedIn))
                         {
                             item.DerivedClassesAppliesTo = derivedIn;

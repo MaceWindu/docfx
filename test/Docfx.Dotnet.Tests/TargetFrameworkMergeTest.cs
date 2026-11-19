@@ -598,6 +598,64 @@ public class TargetFrameworkMergeTest
         result["N.T.M"].Variants.Should().ContainSingle().Which.Content.Summary.Should().Contain("two");
     }
 
+    [Fact]
+    public void AnInheritdocOfTheWholeCommentLeavesASummaryOfItsOwnBeforeIt()
+    {
+        // The `inheritdoc` expands in its place, and the first summary is the one shown.
+        string Code(string summary, bool summaryFirst)
+        {
+            var own = $"/// <summary>{summary}</summary>";
+            var comment = summaryFirst ? $"{own}\n/// <inheritdoc/>" : $"/// <inheritdoc/>\n{own}";
+            return $$"""
+                namespace N
+                {
+                    public class B { /// <summary>base</summary>
+                    public virtual void M() { } }
+                    public class T : B {
+                    {{comment}}
+                    public override void M() { } }
+                }
+                """;
+        }
+
+        var own = MergeIgnoring(VariantIgnore.InheritedDocumentation, (Code("Fast path", true), First), (Code("Slow path", true), Second));
+        own["N.T.M"].Summary.Should().Contain("Fast path");
+        own["N.T.M"].Variants.Should().ContainSingle().Which.Content.Summary.Should().Contain("Slow path");
+
+        var inherited = MergeIgnoring(VariantIgnore.InheritedDocumentation, (Code("Fast path", false), First), (Code("Slow path", false), Second));
+        inherited["N.T.M"].Summary.Should().Contain("base");
+        inherited["N.T.M"].Variants.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public void ATypeImplementingAnInterfaceTwiceIsListedOnceAsDerived()
+    {
+        // `class C : IConverter<int>, IConverter<string>`, resolved twice, as two runs in one process do
+        MetadataModel Model() => new()
+        {
+            Members =
+            [
+                new() { Name = "N.IConverter`1", Type = MemberType.Interface },
+                new() { Name = "N.C", Type = MemberType.Class, Implements = ["N.IConverter{System.Int32}", "N.IConverter{System.String}"] },
+            ],
+        };
+        var context = new ResolverContext
+        {
+            References = new()
+            {
+                ["N.IConverter{System.Int32}"] = new() { Definition = "N.IConverter`1" },
+                ["N.IConverter{System.String}"] = new() { Definition = "N.IConverter`1" },
+            },
+        };
+        var pipeline = new SetDerivedClass();
+
+        pipeline.Run(Model(), context);
+        var second = Model();
+        pipeline.Run(second, context);
+
+        second.Members[0].DerivedClasses.Should().Equal("N.C");
+    }
+
     [Theory]
     [InlineData("", true)]
     [InlineData("<member name=\"M:N.T.M\"><inheritdoc/></member>", true)]
@@ -608,6 +666,10 @@ public class TargetFrameworkMergeTest
     [InlineData("<member name=\"M:N.T.M\"><summary>own</summary><param name=\"a\"><inheritdoc/></param></member>", false)]
     [InlineData("<summary><inheritdoc/></summary>", true)]
     [InlineData("<summary>own</summary>", false)]
+    // an inheritdoc of the whole comment expands in its place and the first summary is shown: its own before it stays its own
+    [InlineData("<member name=\"M:N.T.M\"><inheritdoc/><summary>Fast path</summary></member>", true)]
+    [InlineData("<member name=\"M:N.T.M\"><summary>Fast path</summary><inheritdoc/></member>", false)]
+    [InlineData("<member name=\"M:N.T.M\"><inheritdoc/><summary><inheritdoc/></summary></member>", true)]
     public void DocumentationIsInheritedWhenItsSummaryIsWhollyInherited(string comment, bool expected)
     {
         SymbolVisitorAdapter.IsDocumentationInherited(comment).Should().Be(expected);

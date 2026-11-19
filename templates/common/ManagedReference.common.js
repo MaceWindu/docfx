@@ -27,6 +27,7 @@ exports.transform = function (model) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
       if (showAppliesTo) handleAppliesTo(item, model, appliesToOptions);
       else delete item.variants;
+      if (showAppliesTo) handleImplements(item, appliesToOptions);
     });
   }
 
@@ -216,12 +217,7 @@ function handleInheritedMembers(model, options) {
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
-  var implementedIn = model.implementsAppliesTo || {};
-  (model.implements || []).forEach(function (implemented) {
-    var appliesTo = Object.prototype.hasOwnProperty.call(implementedIn, implemented.uid) ? implementedIn[implemented.uid] : [];
-    implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
-    implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
-  });
+  handleImplements(model, options);
   // in the order of the derived classes, which carry no uid
   var derivedIn = model.derivedClassesAppliesTo || [];
   (model.derivedClasses || []).forEach(function (derived, index) {
@@ -234,6 +230,17 @@ function handleInheritedMembers(model, options) {
   if (model.type && model.type.toLowerCase() === 'interface' && model.derivedClasses && model.derivedClasses.length > 0) {
     model.showImplementingTypes = true;
   }
+}
+
+// An interface, or for a member an interface member, implemented in only some frameworks of the type or member.
+function handleImplements(vm, options) {
+  var implementedIn = vm.implementsAppliesTo || {};
+  (vm.implements || []).forEach(function (implemented) {
+    var appliesTo = Object.prototype.hasOwnProperty.call(implementedIn, implemented.uid) ? implementedIn[implemented.uid] : [];
+    // set on every one, so that mustache does not look up the values of the type or member
+    implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
+  });
 }
 
 function groupChildren(model, category) {
