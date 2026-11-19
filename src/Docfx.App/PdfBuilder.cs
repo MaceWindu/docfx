@@ -144,7 +144,7 @@ static class PdfBuilder
         // `pdfAxisValue: 8`, so only a table of contents written otherwise has one. An empty option, or one that is
         // not text, selects nothing, rather than stop the PDF.
         var ignored = new HashSet<string>();
-        ReadOptions(root);
+        ReadOptions(root, warn: true);
         foreach (var name in ignored)
         {
             Logger.LogWarning($"'{name}' of table of contents '{path}' is not text, and is ignored.");
@@ -176,7 +176,9 @@ static class PdfBuilder
             return null;
         }
 
-        void ReadOptions(JsonNode? node)
+        // Only the root's options are read; those of an item below it are made readable as text without a warning,
+        // which would be about something that has no effect.
+        void ReadOptions(JsonNode? node, bool warn)
         {
             switch (node)
             {
@@ -188,27 +190,33 @@ static class PdfBuilder
                             case JsonValueKind.Number:
                                 var text = item[name]!.ToJsonString();
                                 item[name] = text;
-                                Logger.LogWarning(
-                                    $"'{name}' of table of contents '{path}' is the number {text}, which is used as '{text}': write it as text, quoted.",
-                                    code: WarningCodes.Build.UnquotedTocValue);
+                                if (warn)
+                                {
+                                    Logger.LogWarning(
+                                        $"'{name}' of table of contents '{path}' is the number {text}, which is used as '{text}': write it as text, quoted.",
+                                        code: WarningCodes.Build.UnquotedTocValue);
+                                }
                                 break;
                             case JsonValueKind.String or null:
                                 break;
                             default:
                                 item.Remove(name);
-                                ignored.Add(name);
+                                if (warn)
+                                {
+                                    ignored.Add(name);
+                                }
                                 break;
                         }
                     }
                     foreach (var (_, value) in item)
                     {
-                        ReadOptions(value);
+                        ReadOptions(value, warn: false);
                     }
                     break;
                 case JsonArray items:
                     foreach (var value in items)
                     {
-                        ReadOptions(value);
+                        ReadOptions(value, warn: false);
                     }
                     break;
             }
@@ -276,6 +284,10 @@ static class PdfBuilder
         var axes = Descendants(outline).Prepend(outline).Select(node => node.axis).OfType<Axis>().ToList();
         var warned = false;
         var valueOnAnAxis = value is not null && axes.Any(axis => HasValue(axis, value));
+        // The ids of the values of the axes that have the value, which its pages are told: the value says nothing about
+        // a group of another id there, such as one of an entry written by hand without an axis.
+        var axisValues = value is null || axes.Count == 0 ? null
+            : axes.Where(axis => HasValue(axis, value)).SelectMany(axis => axis.values ?? []).Select(v => v.id).OfType<string>().ToHashSet();
         if (value is not null && (axes.Count > 0 ? !valueOnAnAxis : groups.Count > 0 && !groups.Any(group => group.version == value)))
         {
             Logger.LogWarning($"'pdfAxisValue' of '{outline.Label}' is '{value}', which is not a value of an axis of its API.");
@@ -370,7 +382,7 @@ static class PdfBuilder
         {
             var valueApplies = ValueApplies(axis);
             return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
-                (!valueApplies || group.version is null || group.version == value) &&
+                (!valueApplies || group.version is null || group.version == value || axisValues?.Contains(group.version) is false) &&
                 (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
         }
     }
@@ -415,24 +427,28 @@ static class PdfBuilder
     /// <summary>
     /// What a page of a PDF with <c>pdfFramework</c> or <c>pdfAxisValue</c> did with the selection, once loaded:
     /// <c>unapplied</c> when its template did not apply it, which only the <c>modern</c> template does and marks on
-    /// <c>window.docfxAppliesTo</c>; <c>error:</c> and the message when the template failed to apply it;
-    /// <c>unavailable</c> when its API does not exist in the selection; else empty.
+    /// <c>window.docfxAppliesTo</c>, and <c>untemplated</c> when the page has no script of the <c>modern</c> template
+    /// at all, which sets <c>window.docfx</c> as it starts; <c>error:</c> and the message when the template failed to
+    /// apply it; <c>unavailable</c> when its API does not exist in the selection; else empty.
     /// </summary>
     internal const string PrintSelectionStateScript =
         "() => window.docfxAppliesTo && window.docfxAppliesTo.error ? 'error:' + window.docfxAppliesTo.error" +
-        " : !window.docfxAppliesTo || !window.docfxAppliesTo.applied ? 'unapplied'" +
-        " : document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : ''";
+        " : window.docfxAppliesTo && window.docfxAppliesTo.applied" +
+        " ? (document.body && document.body.hasAttribute('data-applies-to-unavailable') ? 'unavailable' : '')" +
+        " : window.docfx ? 'unapplied' : 'untemplated'";
 
     internal enum PrintSelectionProblem { None, Unavailable, Failed, TimedOut, NotApplied }
 
     /// <summary>
     /// What to warn about a page by its <see cref="PrintSelectionStateScript"/> state. A page that timed out may not
-    /// have run the script of its template yet, so not having applied the selection says nothing of the template then.
+    /// have run the script of its template yet, so not having applied the selection says nothing of the template then;
+    /// a page without the <c>modern</c> template's script, which runs before the page is loaded, does not apply it either way.
     /// </summary>
     internal static PrintSelectionProblem GetPrintSelectionProblem(string state, bool timedOut) => state switch
     {
         "unavailable" => PrintSelectionProblem.Unavailable,
         _ when state.StartsWith("error:", StringComparison.Ordinal) => PrintSelectionProblem.Failed,
+        "untemplated" => PrintSelectionProblem.NotApplied,
         "unapplied" => timedOut ? PrintSelectionProblem.TimedOut : PrintSelectionProblem.NotApplied,
         _ => PrintSelectionProblem.None,
     };
@@ -765,9 +781,15 @@ static class PdfBuilder
                         {
                             // Playwright waits for a script tag without a timeout: a page whose own script keeps it
                             // busy would hold the PDF up for good. Its headings are then not linked.
+                            var anchoring = page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                            // Given up on, the call can still fail once the page is reused or closed, which says
+                            // nothing of the PDF.
+                            _ = anchoring.ContinueWith(
+                                static task => _ = task.Exception, CancellationToken.None,
+                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                             try
                             {
-                                await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript }).WaitAsync(scriptTimeout, cancellationToken);
+                                await anchoring.WaitAsync(scriptTimeout, cancellationToken);
                             }
                             catch (TimeoutException)
                             {
@@ -786,6 +808,8 @@ static class PdfBuilder
                 {
                     var state = await page.EvaluateAsync<string>(PrintSelectionStateScript);
                     var problem = GetPrintSelectionProblem(state, timedOut);
+                    // a hand-written page, which has no template, applies nothing, nor is it expected to
+                    var built = builtPages.Contains(Uri.UnescapeDataString(pagePath));
                     if (problem is PrintSelectionProblem.Unavailable)
                     {
                         Logger.LogWarning(
@@ -797,12 +821,12 @@ static class PdfBuilder
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' failed to apply its 'pdfFramework' or 'pdfAxisValue', so it may show what the selection lacks: {state["error:".Length..]}");
                     }
-                    else if (problem is PrintSelectionProblem.TimedOut)
+                    else if (problem is PrintSelectionProblem.TimedOut && built)
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' timed out before it applied its 'pdfFramework' or 'pdfAxisValue', so it may show what the selection lacks.");
                     }
-                    else if (problem is PrintSelectionProblem.NotApplied && builtPages.Contains(Uri.UnescapeDataString(pagePath)) && unappliedOutlines.TryAdd(outline, true))
+                    else if (problem is PrintSelectionProblem.NotApplied && built && unappliedOutlines.TryAdd(outline, true))
                     {
                         Logger.LogWarning(
                             $"'{pagePath}' in '{outline.Label}' does not apply its 'pdfFramework' or 'pdfAxisValue', which only the 'modern' template does: " +

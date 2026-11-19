@@ -129,6 +129,21 @@ public class PdfFrameworkTest
     }
 
     [Fact]
+    public void AValueSaysNothingAboutAnEntryOfOtherValuesWithoutAnAxis()
+    {
+        // an entry without an axis, written by hand with values that are no axis's, next to the API of an axis
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc
+            .Replace("{ \"name\": \"EF\", ", "{ \"name\": \"Old\", \"href\": \"old.html\", \"appliesTo\": [ { \"version\": \"old1\", \"frameworks\": [ \"net8.0\" ] } ] }, { \"name\": \"EF\", ")
+            .Replace("{value}", "ef3"));
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        // kept, as its page prints whole: it is told the values of the axis of `ef3`, which `old1` is not one of
+        Assert.Equal("Old, EF, Everywhere, Drivers, OnlyD1, OnlyD2", string.Join(", ", Names(outline.items)));
+        Assert.Contains("\"axisValues\":[\"ef3\",\"ef8\"]", PdfBuilder.GetAppliesToScript(outline));
+    }
+
+    [Fact]
     public void AHeadingWithAnEmptyHrefGoesWithItsItems()
     {
         var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
@@ -270,6 +285,9 @@ public class PdfFrameworkTest
     [InlineData("unapplied", false, "NotApplied")]
     // a page that timed out may not have run the script of its template yet, which says nothing of the template
     [InlineData("unapplied", true, "TimedOut")]
+    // a page without the script of the modern template, such as of another template, which a timeout does not change
+    [InlineData("untemplated", false, "NotApplied")]
+    [InlineData("untemplated", true, "NotApplied")]
     [InlineData("", false, "None")]
     [InlineData("", true, "None")]
     public void APageThatDidNotApplyTheSelectionWarnsWhy(string state, bool timedOut, string expected)
@@ -307,6 +325,12 @@ public class PdfFrameworkTest
         Assert.Contains(warnings, w => w.Contains("'pdfFramework' of table of contents 'api/toc.json'"));
         Assert.Contains(warnings, w => w.Contains("'pdfAxisValue' of table of contents 'api/toc.json'"));
         Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+
+        // the options of an item below the root, which have no effect, are read without a warning
+        var count = listener.GetItemsByLogLevel(LogLevel.Warning).Count();
+        var nested = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "items": [ { "name": "A", "pdfAxisValue": 8, "pdfFramework": [ "net8.0" ] } ] }"""u8.ToArray(), "nested/toc.json");
+        Assert.Equal("A", string.Join(", ", Names(nested?.items)));
+        Assert.Equal(count, listener.GetItemsByLogLevel(LogLevel.Warning).Count());
     }
 
     [Fact]

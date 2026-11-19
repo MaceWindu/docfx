@@ -1031,9 +1031,10 @@ items:
 
         Assert.Equal("3.1", model.Metadata["pdfAxisValue"]);
         Assert.Equal("net8.0", model.Metadata["pdfFramework"]);
-        Assert.Equal("10", model.Items[0].Metadata["pdfAxisValue"]);
-        Assert.Equal(2, listener.Items.Count);
-        Assert.Contains(listener.Items, item => item.Message.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.1 unquoted"));
+        // only the root's are options of its PDF: one below it has no effect, which a warning would not say
+        Assert.IsNotType<string>(model.Items[0].Metadata["pdfAxisValue"]);
+        var warning = Assert.Single(listener.Items);
+        Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.1 unquoted", warning.Message);
     }
 
     [Theory]
