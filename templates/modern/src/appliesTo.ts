@@ -835,13 +835,22 @@ function variantsAfter(contents: Element): Element[] {
 export function memberElements(heading: Element): Element[] {
   const elements = [heading]
   for (let e = heading.nextElementSibling; e; e = e.nextElementSibling) {
-    const ends = heading.tagName === 'DT' ? e.tagName !== 'DD' : /^H[1-3]$/.test(e.tagName) || e.hasAttribute('data-overload')
+    const ends = heading.tagName === 'DT'
+      ? e.tagName !== 'DD'
+      : /^H[1-3]$/.test(e.tagName) || e.hasAttribute('data-overload') || isSeeAlsoContents(e)
     if (ends) {
       break
     }
     elements.push(e)
   }
   return elements
+}
+
+const isSeeAlso = (h: Element) => h.tagName === 'H2' && /^seealso(_variant\d+)?$/.test(h.id)
+
+/** The see-also links of a page whose variants have links of their own, which come in a content of their own for each. */
+function isSeeAlsoContents(e: Element): boolean {
+  return e.classList.contains('api-contents') && Array.from(e.querySelectorAll('h2')).some(isSeeAlso)
 }
 
 /**

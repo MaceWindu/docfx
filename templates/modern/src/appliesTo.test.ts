@@ -513,6 +513,32 @@ test('the elements of a member', () => {
   assert.deepStrictEqual(ids('Lib_Mode_Strict'), ['DT#Lib_Mode_Strict', 'DD'])
 })
 
+test('the see-also of a page that differs between frameworks is not part of the last member', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1>
+    <div class="facts"></div>
+    <h3 id="Lib_Shared_Do" data-applies-to="net8.0">Do</h3>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><div class="summary">Only on .NET 8.</div></div>
+    </div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="seealso">See Also</h2><div class="seealso"><div id="span">Span</div></div></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2><div class="seealso"><div id="array">Array</div></div></div>
+    </div>
+  </article>`)
+  const ids = memberElements(document.getElementById('Lib_Shared_Do') as unknown as Element).map(e => e.tagName + (e.id ? '#' + e.id : ''))
+  assert.deepStrictEqual(ids, ['H3#Lib_Shared_Do', 'DIV'])
+
+  applySelection({ framework: 'netstandard2.0' })
+  assert.ok(document.getElementById('Lib_Shared_Do').classList.contains('applies-to-unavailable'))
+  // the see-also for the framework is shown, and not dimmed as the member before it is
+  assert.ok(document.getElementById('span').closest('[hidden]'))
+  assert.ok(!document.getElementById('array').closest('[hidden]'))
+  assert.strictEqual(document.getElementById('array').closest('.applies-to-unavailable'), null)
+  assert.strictEqual(document.getElementById('seealso_variant1').closest('.applies-to-unavailable'), null)
+})
+
 test('a link to content hidden for the selection goes to the content shown', () => {
   installDom(page)
   applySelection({ framework: 'netstandard2.0' })
