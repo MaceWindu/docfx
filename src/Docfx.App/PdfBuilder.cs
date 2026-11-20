@@ -126,11 +126,12 @@ static class PdfBuilder
         JsonNode? parsed;
         try
         {
-            parsed = JsonNode.Parse(json);
+            // A key twice, which a table of contents written by hand can have, would otherwise throw when it is read.
+            parsed = JsonNode.Parse(json, documentOptions: new() { AllowDuplicateProperties = false });
         }
         catch (JsonException ex)
         {
-            Logger.LogError($"Table of contents '{path}' is not JSON, so whether it has a PDF is not known, and none is printed of it: {ex.Message}");
+            Logger.LogError($"Table of contents '{path}' cannot be read as JSON, so whether it has a PDF is not known, and none is printed of it: {ex.Message}");
             return null;
         }
 
@@ -582,7 +583,7 @@ static class PdfBuilder
                 await outlineContext.AddInitScriptAsync(script);
                 if (timeout is not null)
                 {
-                    outlineContext.SetDefaultTimeout(int.Parse(timeout));
+                    outlineContext.SetDefaultTimeout(timeout.Value);
                 }
                 outlineContexts[toc] = (outlineContext, new());
             }
@@ -726,6 +727,8 @@ static class PdfBuilder
             var headings = new List<HeadingInfo>();
             string[] leftOut = [];
             var timedOut = false;
+            // whether a page that timed out loading still answers what it is asked
+            var responsive = true;
 
             try
             {
@@ -779,21 +782,7 @@ static class PdfBuilder
                         Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
                         if (!anchored)
                         {
-                            // Playwright waits for a script tag without a timeout: a page whose own script keeps it
-                            // busy would hold the PDF up for good. Its headings are then not linked.
-                            var anchoring = page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
-                            // Given up on, the call can still fail once the page is reused or closed, which says
-                            // nothing of the PDF.
-                            _ = anchoring.ContinueWith(
-                                static task => _ = task.Exception, CancellationToken.None,
-                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                            try
-                            {
-                                await anchoring.WaitAsync(scriptTimeout, cancellationToken);
-                            }
-                            catch (TimeoutException)
-                            {
-                            }
+                            await Ask(() => page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript }));
                         }
                     }
                 }
@@ -806,7 +795,8 @@ static class PdfBuilder
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage)
                     && checkedPages.TryAdd((outline, pagePath), true))
                 {
-                    var state = await page.EvaluateAsync<string>(PrintSelectionStateScript);
+                    // a page that does not answer is left out, with a warning of its own
+                    var state = await Ask(() => page.EvaluateAsync<string>(PrintSelectionStateScript)) ?? "";
                     var problem = GetPrintSelectionProblem(state, timedOut);
                     // a hand-written page, which has no template, applies nothing, nor is it expected to
                     var built = builtPages.Contains(Uri.UnescapeDataString(pagePath));
@@ -838,7 +828,7 @@ static class PdfBuilder
                 // to a page the PDF leaves out does.
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage))
                 {
-                    leftOut = await page.EvaluateAsync<string[]>(LeftOutIdsScript);
+                    leftOut = await Ask(() => page.EvaluateAsync<string[]>(LeftOutIdsScript)) ?? [];
                 }
 
                 // Extract headings from the page if needed
@@ -853,17 +843,31 @@ static class PdfBuilder
                     PrintBackground = outline.pdfPrintBackground,
                 }));
 
+                if (!responsive)
+                {
+                    Logger.LogWarning($"'{url.AbsolutePath}' in '{outline.Label}' does not respond after it timed out loading, and is left out of the PDF.");
+                    return (null, new List<HeadingInfo>(), []);
+                }
                 return (bytes, headings, leftOut);
             }
             finally
             {
-                pool.Add(page);
+                if (responsive)
+                {
+                    pool.Add(page);
+                }
+                else
+                {
+                    // asked anything more, it would not answer either, so it is not reused
+                    Interlocked.Decrement(ref openPages);
+                    Observe(page.CloseAsync());
+                }
                 pageLimiter.Release();
             }
 
             // After a page timed out loading, what it is asked next is given up on after the timeout too: Playwright
-            // waits for the result of a script and the PDF of a page without a timeout, and a page whose own script
-            // keeps it busy would hold the PDF up for good. Given up on once, it is asked nothing more.
+            // waits for a script tag, the result of a script and the PDF of a page without a timeout, and a page
+            // whose own script keeps it busy would hold the PDF up for good. Given up on once, it is asked nothing more.
             async Task<T?> Ask<T>(Func<Task<T>> call) where T : class
             {
                 if (!timedOut)
@@ -888,8 +892,9 @@ static class PdfBuilder
             try
             {
                 // One call per page: a call per heading costs a round trip to the browser each, which adds up on
-                // the thousands of headings of an API PDF. Content the page does not show, such as the members a PDF
-                // of one framework leaves out, or the content of an API for another framework, is not printed either.
+                // the thousands of headings of an API PDF. Content the page hides, such as a tab that is not
+                // selected, the members a PDF of one framework leaves out, or the content of an API for another
+                // framework, is not printed, so its headings are left out.
                 var elements = await page.EvaluateAsync<string[][]>(
                     "selector => Array.from(document.querySelectorAll(selector)).filter(e => !e.closest('[hidden]')).map(e => [e.tagName, e.getAttribute('id') || '', e.innerText])",
                     selector);
