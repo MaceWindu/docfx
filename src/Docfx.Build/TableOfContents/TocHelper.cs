@@ -90,8 +90,9 @@ public static class TocHelper
 
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
-    /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false` are read as booleans.
-    /// What it holds is used as the text the value spells, with a warning to quote it: `docfx metadata` quotes such
+    /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false`, also as `True`,
+    /// `TRUE`, `False` and `FALSE`, are read as booleans.
+    /// What it holds is used as text, `3.1` or `true`, with a warning to quote it: `docfx metadata` quotes such
     /// ids itself.
     /// </summary>
     private static void KeepIdsAsText(TocItemViewModel item, string file)
@@ -125,11 +126,12 @@ public static class TocHelper
                         code: WarningCodes.Build.UnquotedTocValue);
                     return text;
                 case bool flag:
-                    // YAML reads only these two spellings as a boolean
+                    // YAML reads three spellings of each as a boolean and keeps none of them, so all are named
                     var word = flag ? "true" : "false";
+                    var spellings = flag ? "true, True or TRUE" : "false, False or FALSE";
                     Logger.LogWarning(
-                        $"'{key}' of table of contents '{file}' holds {word} unquoted, which YAML reads as a boolean, so it is used as '{word}': " +
-                        "quote it, \"" + word + "\", to keep it as written.",
+                        $"'{key}' of table of contents '{file}' holds {spellings} unquoted, which YAML reads as a boolean, so it is used as '{word}': " +
+                        "quote it to keep it as written.",
                         file: file,
                         code: WarningCodes.Build.UnquotedTocValue);
                     return word;

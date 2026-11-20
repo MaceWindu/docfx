@@ -5,8 +5,8 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
-  Axis, Selection, Toc, TocEntry, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
+  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
+  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework
 } from './appliesTo'
 import { installDom } from './fakeDom'
@@ -142,13 +142,17 @@ test('axis keys', () => {
   assert.strictEqual(axisKey({ name: 'EF Core', values: [] }), 'ef-core')
   assert.strictEqual(axisKey({ name: ' Driver! ', values: [] }), 'driver')
   // the frameworks have the key 'framework', a link to tabs 'tabs', a search result 'q'
-  assert.strictEqual(axisKey({ name: 'Framework', values: [] }), 'framework-axis')
-  assert.strictEqual(axisKey({ name: 'Tabs', values: [] }), 'tabs-axis')
-  assert.strictEqual(axisKey({ name: 'Q', values: [] }), 'q-axis')
+  assert.strictEqual(axisKey({ name: 'Framework', values: [] }), 'framework_axis')
+  assert.strictEqual(axisKey({ name: 'Tabs', values: [] }), 'tabs_axis')
+  assert.strictEqual(axisKey({ name: 'Q', values: [] }), 'q_axis')
+  // which no other name has: a name gives no underscore
+  assert.strictEqual(axisKey({ name: 'Framework Axis', values: [] }), 'framework-axis')
+  assert.strictEqual(axisKey({ name: 'Framework_Axis', values: [] }), 'framework-axis')
+  assert.strictEqual(axisKey({ name: 'Axis', values: [] }), 'axis')
   // the letters of any script, and a key for a name without any
   assert.strictEqual(axisKey({ name: 'Версия EF', values: [] }), 'версия-ef')
   assert.strictEqual(axisKey({ name: '数据库驱动', values: [] }), '数据库驱动')
-  assert.strictEqual(axisKey({ name: '?!', values: [] }), 'axis')
+  assert.strictEqual(axisKey({ name: '?!', values: [] }), '_axis')
 })
 
 test('valid frameworks', () => {
@@ -316,6 +320,13 @@ test('parts of the docs with an axis of the same name offer the values of all of
   const { storage } = installDom(site, 'https://example.org/docs/api/Guide.html?ef-core=ef10')
   keepLinkSelection(choices)
   assert.strictEqual(storage.get('docfx.axis./docs/.ef-core'), 'ef10')
+
+  // names that share a key, such as in another letter case, are one axis too: they would share what is kept
+  const efCore: Axis = { name: 'EF core', values: [{ id: 'ef10', label: 'EF Core 10' }] }
+  const cased: Toc = { items: [mergedToc().items[0], { name: 'EF 10', axis: efCore, items: [] }, { name: 'Guide', href: 'guide.html' }] }
+  const casedChoices = getChoices(cased, findPath(cased.items, tocUrl, { pathname: '/docs/guide.html' }))
+  assert.strictEqual(casedChoices.axes.filter(a => axisKey(a) === 'ef-core').length, 1)
+  assert.deepStrictEqual(casedChoices.axis.values.map(v => v.id), ['ef3', 'ef9', 'ef10'])
 })
 
 test('the table of contents shows what exists in the selection', () => {
@@ -398,6 +409,22 @@ test('a namespace the selection leaves out is the heading of the namespaces in i
   const guideOnly: TocEntry = { ...lib, items: [lib.items[0], lib.items[2]] }
   assert.strictEqual(entryDisplay(guideOnly, { framework: 'netstandard2.0' }, frameworks, none), 'none')
   assert.deepStrictEqual(shownEntries([guideOnly], { framework: 'netstandard2.0' }, frameworks, none), [])
+
+  // the heading has no link to its page, which has nothing for the selection; shown whole, it has
+  assert.strictEqual(entryHref(lib, entryDisplay(lib, { framework: 'netstandard2.0' }, frameworks, none) as 'heading'), undefined)
+  assert.strictEqual(entryHref(lib, 'group'), 'Lib.html')
+  assert.strictEqual(entryHref(lib.items[0], 'leaf'), 'Lib.Span.html')
+})
+
+test('an entry written with an empty appliesTo says nothing of its frameworks', () => {
+  installDom(site, 'https://example.org/docs/api/A.html')
+  // as an entry without `appliesTo`, such as an article: shown for any selection, and not the API of a heading
+  const empty: TocEntry = { name: 'Notes', href: 'notes.html', appliesTo: [] }
+  assert.strictEqual(isEntryShown(empty, { framework: 'netstandard2.0' }), true)
+  assert.strictEqual(entryDisplay(empty, { framework: 'netstandard2.0' }, frameworks, () => false), 'leaf')
+  const ns: TocEntry = { name: 'Lib', href: 'Lib.html', appliesTo: [{ frameworks: ['net8.0'] }], items: [empty] }
+  assert.strictEqual(entryDisplay(ns, { framework: 'netstandard2.0' }, frameworks, () => false), 'none')
+  assert.deepStrictEqual(shownEntries([{ name: 'Root', items: [empty] }], { framework: 'netstandard2.0' }, frameworks, () => false).map(e => e.name), ['Notes'])
 })
 
 const page = `${site}
@@ -726,6 +753,39 @@ test('the copies of an API have ids of their own', () => {
   applySelection({ framework: 'netstandard2.0' })
   assert.strictEqual(shownTarget('parameters-2').id, 'parameters-2_variant1')
   assert.strictEqual(shownTarget('example').id, 'example_variant1')
+})
+
+test('the headings of the page are named as without copies, those of the copies after them', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h2>Methods</h2>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h4>Parameters</h4></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h4>Parameters</h4><h4>Returns</h4></div>
+    </div>
+    <h4>Parameters</h4>
+    <h4 class="no-anchor">Remarks</h4>
+  </article>`)
+  // as AnchorJS names a heading without an id: after its text, with a number after a name the page has
+  const calls: string[][] = []
+  const add = (headings: Element[]) => {
+    calls.push(headings.map(h => h.textContent))
+    for (const heading of headings.filter(h => !h.id)) {
+      const name = heading.textContent.toLowerCase()
+      let id = name
+      for (let n = 1; document.getElementById(id); n++) {
+        id = `${name}-${n}`
+      }
+      heading.id = id
+    }
+  }
+  addHeadingAnchors(add)
+
+  // the page's own first, the copies' after distinguishCopies named them after those
+  assert.deepStrictEqual(calls, [['Methods', 'Parameters', 'Parameters'], ['Parameters', 'Returns']])
+  const ids = (selector: string) => document.querySelectorAll(selector).map(e => e.id)
+  // in the order of the page: the API's own content, its copy, the heading after them, one without an anchor
+  assert.deepStrictEqual(ids('article h2, article h4'), ['methods', 'parameters', 'parameters_variant1', 'returns', 'parameters-1', ''])
 })
 
 test('a dropdown keeps what the reader picked', () => {

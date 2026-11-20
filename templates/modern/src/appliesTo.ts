@@ -222,12 +222,12 @@ const reservedKeys = ['framework', 'tabs', 'q']
 
 /**
  * The key of an axis in storage and in the query string: its name in lower case, its letters and digits in any
- * script, e.g. `ef-core` or `версия`; `axis` for a name without any; with `-axis` after a key the template reads
- * itself, e.g. `framework-axis` or `tabs-axis`.
+ * script, e.g. `ef-core` or `версия`; `_axis` for a name without any; with `_axis` after a key the template reads
+ * itself, e.g. `framework_axis` or `tabs_axis`. A name never gives an underscore, so no other name has those keys.
  */
 export function axisKey(axis: Axis): string {
   const key = axis.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
-  return reservedKeys.includes(key) ? `${key}-axis` : key || 'axis'
+  return reservedKeys.includes(key) ? `${key}_axis` : key || '_axis'
 }
 
 /**
@@ -327,9 +327,10 @@ function summarize(toc: Toc): TocSummary {
     const frameworks: string[] = []
     const axes: Axis[] = []
     // Parts of a merged table of contents can each have an axis of the same name, which is one choice of the reader:
-    // with the values of all of them, so that a value only another part has can be picked and kept too.
+    // with the values of all of them, so that a value only another part has can be picked and kept too. Names that
+    // differ only in what their key leaves out, such as letter case, share the key, so they are one axis too.
     const add = (axis: Axis) => {
-      const index = axes.findIndex(a => a.name === axis.name)
+      const index = axes.findIndex(a => axisKey(a) === axisKey(axis))
       if (index < 0) {
         axes.push(axis)
         return
@@ -363,7 +364,7 @@ function summarize(toc: Toc): TocSummary {
 export function getChoices(toc: Toc, path: TocEntry[] = []): Choices {
   const { frameworks, axes } = summarize(toc)
   const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis ||
-    (axes.length === 1 && !path.some(entry => entry.appliesTo) ? axes[0] : undefined)
+    (axes.length === 1 && !path.some(entry => hasData(entry)) ? axes[0] : undefined)
   return { frameworks, axis, key: axis ? axisKey(axis) : undefined, axes }
 }
 
@@ -392,9 +393,17 @@ export function entrySelection(entry: TocEntry, selection: Selection, frameworks
   return entry.axis ? { framework: selection.framework, value: getSelection(entry.axis, frameworks).value } : selection
 }
 
+/**
+ * Whether a table of contents entry says what it applies to: `docfx metadata` writes no `appliesTo` for an entry
+ * that is not an API, and a hand-written `appliesTo: []` says nothing either, so its entry is shown.
+ */
+function hasData(entry: TocEntry): boolean {
+  return (entry.appliesTo?.length ?? 0) > 0
+}
+
 /** Whether a table of contents entry exists in what the reader picked. */
 export function isEntryShown(entry: TocEntry, selection: Selection): boolean {
-  return !entry.appliesTo || !(selection.framework || selection.value) || isAvailable(unitsOf(entry.appliesTo), selection)
+  return !hasData(entry) || !(selection.framework || selection.value) || isAvailable(unitsOf(entry.appliesTo), selection)
 }
 
 /**
@@ -419,7 +428,7 @@ export function shownEntries(items: TocEntry[], selection: Selection, frameworks
 function hasShownApi(items: TocEntry[], selection: Selection, frameworks: string[]): boolean {
   return (items || []).some(entry => {
     const own = entrySelection(entry, selection, frameworks)
-    return (entry.appliesTo && isEntryShown(entry, own)) || hasShownApi(entry.items, own, frameworks)
+    return (hasData(entry) && isEntryShown(entry, own)) || hasShownApi(entry.items, own, frameworks)
   })
 }
 
@@ -886,6 +895,28 @@ export function distinguishCopies() {
       })
     })
   })
+}
+
+/**
+ * Gives the headings of the article their anchors with `add`, AnchorJS's: those of the page first, so that they are
+ * named as on a page without copies, then those of the hidden copies of an API for other frameworks, which are named
+ * after the page's own. Filtered here rather than by `:not([data-search-ignore] *)`, which browsers before 2021 do not
+ * read, and which would leave a page without anchors there.
+ */
+export function addHeadingAnchors(add: (headings: Element[]) => void) {
+  const headings = Array.from(document.querySelectorAll('article h2:not(.no-anchor), article h3:not(.no-anchor), article h4:not(.no-anchor)'))
+  const inCopy = (heading: Element) => heading.closest('[data-search-ignore]') !== null
+  add(headings.filter(heading => !inCopy(heading)))
+  distinguishCopies()
+  add(headings.filter(inCopy))
+}
+
+/**
+ * The link of a table of contents entry shown as `display`: none for the heading of entries that exist in the
+ * selection when the entry itself does not, as its page has nothing for the selection.
+ */
+export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'): string | undefined {
+  return display === 'heading' ? undefined : entry.href
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */

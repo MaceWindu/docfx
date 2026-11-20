@@ -4,7 +4,7 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
-import { Selection, Toc, TocEntry, entryDisplay, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
+import { Selection, Toc, TocEntry, entryDisplay, entryHref, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
 
 export type TocNode = TocEntry & {
   expanded?: boolean
@@ -119,7 +119,7 @@ export async function renderToc(): Promise<TocNode[]> {
 
   function renderTocNodes(nodes: TocNode[], selection: Selection): TemplateResult {
     const result = nodes.map(node => {
-      const { href, name, items, expanded } = node
+      const { name, items, expanded } = node
       if (!name) {
         return null
       }
@@ -139,9 +139,9 @@ export async function renderToc(): Promise<TocNode[]> {
         return null
       }
 
-      // the heading of entries that exist in the selection, when the entry itself does not, has no link to its page
-      const dom = href && display !== 'heading'
-        ? html`<a class='${classMap({ 'nav-link': !activeNodes.includes(node) })}' href=${href}>${breakWordLit(name)}</a>`
+      const link = entryHref(node, display)
+      const dom = link
+        ? html`<a class='${classMap({ 'nav-link': !activeNodes.includes(node) })}' href=${link}>${breakWordLit(name)}</a>`
         : (isLeaf
             ? html`<span class='text-body-tertiary name-only'>${breakWordLit(name)}</a>`
             : html`<a class='${classMap({ 'nav-link': !activeNodes.includes(node) })}' href='#' @click=${toggleExpand}>${breakWordLit(name)}</a>`)

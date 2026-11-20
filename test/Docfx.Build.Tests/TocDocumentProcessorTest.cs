@@ -967,7 +967,42 @@ items:
         Assert.All(listener.Items, item => Assert.Equal(LogLevel.Warning, item.LogLevel));
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds 3.1 unquoted"));
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'appliesTo' of table of contents 'toc.yml' holds 10 unquoted"));
-        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false unquoted, which YAML reads as a boolean"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false, False or FALSE unquoted, which YAML reads as a boolean"));
+    }
+
+    [Fact]
+    public void AFrameworkOrAxisValueThatYamlReadsAsABooleanInAnyLetterCaseWarnsWithEverySpelling()
+    {
+        var content = """
+            - name: EF Core
+              axis:
+                name: EF Core
+                values:
+                - id: TRUE
+                  label: EF Core on
+                - id: False
+                  label: EF Core off
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        // YAML keeps no spelling, so the warning names every one it reads
+        var axisValues = (IList)((IDictionary)model.Items[0].Metadata["axis"])["values"];
+        Assert.Equal("true", ((IDictionary)axisValues[0])["id"]);
+        Assert.Equal("false", ((IDictionary)axisValues[1])["id"]);
+        Assert.Equal(2, listener.Items.Count);
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds true, True or TRUE unquoted, which YAML reads as a boolean, so it is used as 'true'"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false, False or FALSE unquoted"));
     }
 
     [Theory]
