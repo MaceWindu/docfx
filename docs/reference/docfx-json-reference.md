@@ -498,7 +498,7 @@ The target frameworks to document together, or `"*"` for every framework a proje
 }
 ```
 
-It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets any of the frameworks. A project that targets a single framework is matched as with `targetFramework`, by the attributes the .NET SDK generates and then its preprocessor symbols; one that says neither is not documented, with a `TargetFrameworkNotFound` warning. With `"*"`, such a project is named as its symbols spell its framework where they agree with the attributes (`net8.0-windows`), else as the attributes name it, and an alias in `TargetFrameworks` by the framework it stands for.
+It cannot be combined with [`targetFramework`](#targetframework), which takes precedence, and more than one framework is only supported by the `mref` output format. A project is documented only for the listed frameworks it targets, with a `TargetFrameworkNotFound` warning for the others. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets any of the frameworks. A project is matched as with `targetFramework`, by what MSBuild says; one MSBuild cannot evaluate is not documented, with a `TargetFrameworkNotFound` warning. With `"*"`, a framework is named as the project writes it (`net8.0-windows`), and an alias in `TargetFrameworks` by the framework it stands for; a project's `net8.0-windows` is another project's `net8.0-windows7.0` when MSBuild evaluates it to that version. Frameworks are written in lower case, however the projects and the list spell them.
 
 Documentation that one framework has and another lacks is not a difference: some framework reference assemblies ship without documentation, so text inherited from them is often missing for older frameworks. The framework that has it provides it, down to the description of a parameter or return value. Nor is documentation that differs only in whitespace, such as line breaks and indentation, or a declaration that lists the same implemented interfaces in another order.
 
@@ -748,7 +748,7 @@ On API pages built with [`axes`](#axes), show only the values of the axis an API
 
 ### `_frameworkNames`
 
-The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0`, `.NET 8` for `net8.0`, or `.NET 8 for Windows 10.0.19041.0` for `net8.0-windows10.0.19041.0`.
+The names to show for target frameworks on API pages built with [`targetFrameworks`](#targetframeworks), by framework in any case, in place of the name derived from it, such as `.NET Standard 2.0` for `netstandard2.0`, `.NET 8` for `net8.0`, or `.NET 8 for Windows 10.0.19041.0` for `net8.0-windows10.0.19041.0`.
 
 ```json
 {

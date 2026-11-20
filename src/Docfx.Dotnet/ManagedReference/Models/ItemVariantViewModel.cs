@@ -48,6 +48,15 @@ public class ItemVariantViewModel
     [UniqueIdentityReference]
     public string Overridden { get; set; }
 
+    /// <summary>
+    /// Whether the API overrides nothing in these frameworks while it does in the others: an unset
+    /// <see cref="Overridden"/> means the same as the rest of the item.
+    /// </summary>
+    [YamlMember(Alias = "noOverridden")]
+    [JsonProperty("noOverridden")]
+    [JsonPropertyName("noOverridden")]
+    public bool? NoOverridden { get; set; }
+
     [YamlMember(Alias = "exceptions")]
     [JsonProperty("exceptions")]
     [JsonPropertyName("exceptions")]

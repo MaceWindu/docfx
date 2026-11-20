@@ -28,8 +28,12 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
-        var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
-        if (config.TargetFramework is not null && !hasProjectInput)
+        // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
+        var invalid = new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", config.DefaultFramework) }
+            .Concat((config.TargetFrameworks ?? []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
+            .Where(option => option.Framework is { } framework && !TargetFrameworkHelper.IsValid(framework))
+            .ToList();
+        foreach (var (option, framework) in invalid)
         {
             // so it selects nothing here, whatever its value
             Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
@@ -38,11 +42,13 @@ partial class DotnetApiCatalog
         {
             // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
             Logger.LogError(
-                $"'targetFramework' is '{invalid}', {reason}.",
+                $"'{option}' holds '{framework}', whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'.",
                 code: ErrorCodes.Metadata.InvalidTargetFramework);
+        }
 
-            // with nothing else to say about it
-            return null;
+        if (invalid.Count > 0)
+        {
+            return ([], null);
         }
 
         var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
@@ -93,6 +99,7 @@ partial class DotnetApiCatalog
         // With an axis and `targetFramework`, each project is documented at that framework, or its default one,
         // and the values of the axis are merged.
         var frameworks = targetFrameworks is null && config.Axis is null ? null : new Dictionary<Compilation, string>();
+        var projectPaths = new Dictionary<Compilation, string>();
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -108,7 +115,7 @@ partial class DotnetApiCatalog
         });
 
         using var workspace = MSBuildWorkspace.Create(msbuildProperties);
-        var projectFrameworks = config.TargetFramework is null ? null : new ProjectFrameworks(msbuildProperties);
+        var projectFrameworks = config.TargetFramework is null && frameworks is null ? null : new ProjectFrameworks(msbuildProperties);
         workspace.RegisterWorkspaceFailedHandler(e =>
         {
             Logger.LogWarning($"{e.Diagnostic}");
@@ -215,16 +222,16 @@ partial class DotnetApiCatalog
             }
         }
 
-        // A single-target project is read from its symbols without its platform version, or is named as
-        // `targetFrameworks` lists it: it is the framework another project names with the version it targets.
+        // A project that names its framework without the platform version, `net8.0-windows`, targets the framework
+        // another project names with the version, `net8.0-windows7.0`, if MSBuild evaluates it to that version.
         if (frameworks is { Count: > 1 })
         {
             var named = frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var (compilation, unit) in frameworks.ToList())
             {
                 var (value, framework) = TargetFrameworkAxis.SplitUnit(unit);
-                var symbols = compilation.SyntaxTrees.FirstOrDefault()?.Options.PreprocessorSymbolNames ?? [];
-                if (TargetFrameworkHelper.WithPlatformVersionOf(framework, symbols, named) is var versioned && versioned != framework)
+                if (projectPaths.TryGetValue(compilation, out var projectPath)
+                    && await TargetFrameworkHelper.WithPlatformVersionOf(framework, projectPath, named, projectFrameworks!) is var versioned && versioned != framework)
                 {
                     frameworks[compilation] = value is null ? versioned : TargetFrameworkAxis.GetUnit(value, versioned);
                 }
@@ -261,14 +268,7 @@ partial class DotnetApiCatalog
                         throw new DocfxException($"dotnet restore failed for '{path}' with exit code {process.ExitCode}.");
                     }
                 }
-                project = await workspace.OpenProjectAsync(path, msbuildLogger);
-            }
-
-            // With `targetFramework` or `targetFrameworks`, the analyzers reported are those of the frameworks
-            // documented, below; a project that is never documented reports those of the one loaded, as without them.
-            if (isNewlyLoaded && ((config.TargetFramework is null && targetFrameworks is null) || !project.SupportsCompilation))
-            {
-                ReportAnalyzers(project);
+                project = await workspace.OpenProjectAsync(path, msbuildLogger, projectFrameworks);
             }
 
             // Every framework of a file is loaded in its language, so the check holds for the one selected too,
@@ -304,6 +304,12 @@ partial class DotnetApiCatalog
 
             if (frameworks is null)
             {
+                // the analyzers of the framework documented
+                if (isNewlyLoaded)
+                {
+                    ReportAnalyzers(project);
+                }
+
                 return await project.GetCompilationAsync() is { } single ? [single] : [];
             }
 
@@ -324,24 +330,11 @@ partial class DotnetApiCatalog
                 return [];
             }
 
-            // An analyzer every framework references is one cause, reported once. A single-target project is
-            // compiled, and so reported, while it is selected.
-            var reportedAnalyzers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var analyzersReportedFor = new HashSet<ProjectId>();
-            void ReportAnalyzersOf(Project selected)
-            {
-                if (analyzersReportedFor.Add(selected.Id))
-                {
-                    ReportAnalyzersOnce(selected, reportedAnalyzers);
-                }
-            }
-
             // With `targetFramework`, the project selected above, which is at its default framework if it does
-            // not target that one; a single-target project is named from its compilation, below.
+            // not target that one.
             List<(Project Project, string? Framework)> selection = targetFrameworks is null
-                ? [(project, TargetFrameworkHelper.GetTargetFrameworkFromName(project) is null ? null : TargetFrameworkHelper.GetFrameworkLabel(project, null))]
-                : await TargetFrameworkHelper.SelectProjects(
-                    workspace.CurrentSolution, project, targetFrameworks, fromSolution, isNewlyLoaded ? ReportAnalyzersOf : null);
+                ? [(project, await TargetFrameworkHelper.GetFrameworkLabel(project, projectFrameworks!))]
+                : await TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, projectFrameworks!, fromSolution);
 
             // As with `targetFramework`, a solution none of whose projects targets a framework of the list is worth a
             // warning; a project `src` lists too is reported by itself, so it counts only when it matches.
@@ -352,12 +345,20 @@ partial class DotnetApiCatalog
                 solutionProjectsReported += !listedProjects.Contains(path) && reportedProjects.Add(path) ? 1 : 0;
             }
 
+            // An analyzer every framework references is one cause, reported once.
+            var reportedAnalyzers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var compilations = new List<Compilation>();
             foreach (var (selected, selectedFramework) in selection)
             {
-                if (targetFrameworks is not null && isNewlyLoaded)
+                // Which framework to say it applies to is not known, which MSBuild has reported.
+                if (selectedFramework is null)
                 {
-                    ReportAnalyzersOf(selected);
+                    continue;
+                }
+
+                if (isNewlyLoaded)
+                {
+                    ReportAnalyzersOnce(selected, reportedAnalyzers);
                 }
 
                 if (await selected.GetCompilationAsync() is not { } compilation)
@@ -365,20 +366,15 @@ partial class DotnetApiCatalog
                     continue;
                 }
 
-                if ((selectedFramework ?? TargetFrameworkHelper.GetFrameworkLabel(selected, compilation.Assembly)) is not { } framework)
-                {
-                    Logger.LogWarning(
-                        $"The target framework of project '{selected.FilePath}' cannot be determined, so it is not documented.",
-                        code: WarningCodes.Metadata.TargetFrameworkNotFound);
-                    continue;
-                }
-
+                // One spelling per framework, whichever project names it how: pages compare them as they are.
+                var framework = selectedFramework.ToLowerInvariant();
                 if (axisValue is not null)
                 {
                     framework = TargetFrameworkAxis.GetUnit(axisValue, framework);
                 }
 
                 frameworks![compilation] = framework;
+                projectPaths[compilation] = selected.FilePath!;
                 compilations.Add(compilation);
             }
 

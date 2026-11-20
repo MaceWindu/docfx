@@ -44,6 +44,11 @@ public class ApiVariantBuildOutput
     [JsonPropertyName("overridden")]
     public ApiNames Overridden { get; set; }
 
+    [YamlMember(Alias = "noOverridden")]
+    [JsonProperty("noOverridden")]
+    [JsonPropertyName("noOverridden")]
+    public bool? NoOverridden { get; set; }
+
     [YamlMember(Alias = "exceptions")]
     [JsonProperty("exceptions")]
     [JsonPropertyName("exceptions")]
@@ -85,6 +90,7 @@ public class ApiVariantBuildOutput
             Examples = model.Examples,
             Syntax = ApiSyntaxBuildOutput.FromModel(model.Syntax, supportedLanguages),
             Overridden = ApiNames.FromUid(model.Overridden),
+            NoOverridden = model.NoOverridden,
             Exceptions = model.Exceptions?.Select(ApiExceptionInfoBuildOutput.FromModel).ToList(),
             SeeAlsos = model.SeeAlsos?.Select(ApiLinkInfoBuildOutput.FromModel).ToList(),
             Inheritance = model.Inheritance?.Select(uid => new ApiReferenceBuildOutput { Uid = uid }).ToList(),
