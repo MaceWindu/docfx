@@ -5,7 +5,7 @@ import AnchorJs from 'anchor-js'
 import { render, html, TemplateResult } from 'lit-html'
 import { breakWordLit, meta, isExternalHref, loc, options } from './helper'
 import { themePicker } from './theme'
-import { appliesToPicker, distinguishCopies, isHiddenBySelection, loadChoices, onSelectionChange } from './appliesTo'
+import { addHeadingAnchors, appliesToPicker, isHiddenBySelection, loadChoices, onSelectionChange } from './appliesTo'
 import { TocNode } from './toc'
 
 export type NavItem = {
@@ -127,12 +127,7 @@ async function renderAnchors() {
     icon: '#'
   }, anchorsOptions)
 
-  // The hidden copies of an API for other frameworks are named after the headings of the page, so that those are
-  // named as on a page without copies.
-  const headings = ['h2', 'h3', 'h4'].map(h => `article ${h}:not(.no-anchor)`)
-  anchors.add(headings.map(h => `${h}:not([data-search-ignore] *)`).join(', '))
-  distinguishCopies()
-  anchors.add(headings.map(h => h.replace('article ', 'article [data-search-ignore] ')).join(', '))
+  addHeadingAnchors(headings => anchors.add(headings))
 
   /* eslint-disable no-self-assign */
   if (location.hash) {
