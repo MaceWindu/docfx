@@ -275,6 +275,11 @@ public class PdfFrameworkTest
         // nor does one that is not JSON at all
         Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, """u8.ToArray(), "broken/toc.json"));
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'broken/toc.json'"));
+        // nor one with a key twice, at its root or in an entry, which reading it would otherwise throw on
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdf": true, "items": [] }"""u8.ToArray(), "twice/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'twice/toc.json'"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": "net8.0", "items": [ { "name": "A", "name": "B" } ] }"""u8.ToArray(), "twice-entry/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'twice-entry/toc.json'"));
         // the error count is global, and later tests check it
         Logger.ResetCount();
     }
