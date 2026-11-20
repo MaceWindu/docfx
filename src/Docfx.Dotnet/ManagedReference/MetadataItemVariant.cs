@@ -15,4 +15,9 @@ internal class MetadataItemVariant
     /// Holds the fields that differ. Every other field is left unset.
     /// </summary>
     public MetadataItem Content { get; init; }
+
+    /// <summary>
+    /// Whether the API overrides nothing in these frameworks, while it does in the framework that provides its content.
+    /// </summary>
+    public bool NoOverridden { get; init; }
 }

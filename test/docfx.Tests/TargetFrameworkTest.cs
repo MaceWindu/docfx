@@ -1162,7 +1162,7 @@ public class TargetFrameworkTest : TestBase
     [Fact]
     public async Task TargetFrameworksKeepsThePlatformOfASingleTargetProject()
     {
-        // The multi-targeted project names its frameworks, the single-target one has only its symbols to tell.
+        // The multi-targeted project and the single-target one are named as they write it.
         var multi = CreatePlatformProject("<TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>");
         var single = CreateProject(
             "Desktop",
@@ -1181,8 +1181,7 @@ public class TargetFrameworkTest : TestBase
     [Fact]
     public async Task TargetFrameworksNamesAPlatformVersionAlikeForSingleTargetAndMultiTargetedProjects()
     {
-        // The multi-targeted project names the platform version, the single-target one has only its symbols to tell.
-        // windows8.0 needs no Windows SDK package.
+        // Both write the platform version. windows8.0 needs no Windows SDK package.
         var multi = CreatePlatformProject("<TargetFrameworks>net8.0;net8.0-windows8.0</TargetFrameworks>");
         var single = CreateProject(
             "Desktop",
@@ -1199,11 +1198,12 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
-    public async Task TargetFrameworksOnAProjectWithoutFrameworkSymbolsReadsItsAttribute()
+    public async Task TargetFrameworksOnAProjectWithoutFrameworkSymbolsAndAttributes()
     {
+        // MSBuild says which framework the project targets
         var legacy = CreateProject(
             "Legacy",
-            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines>",
+            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>",
             "namespace Legacy { public class Widget { } }");
 
         using var listener = new TestListenerScope();
@@ -1217,20 +1217,19 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
-    public async Task TargetFrameworksOnAProjectThatSaysNotWhichFrameworkItTargetsWarns()
+    public async Task TargetFrameworksNamesAFrameworkInOneCaseWhateverProjectsAndTheListWriteIt()
     {
-        var legacy = CreateProject(
-            "Legacy",
-            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>",
-            "namespace Legacy { public class Widget { } }");
+        // The list writes `NET8.0`, the single-target project `Net8.0`, the multi-targeted one `net8.0`.
+        var single = CreateProject("Single", "<TargetFramework>Net8.0</TargetFramework>", "namespace Lib { public class Widget { } }");
 
         using var listener = new TestListenerScope();
 
-        await Exec(new() { Src = Src(CreateMultiTargetedProject(), legacy), TargetFrameworks = ["netstandard2.0", "net8.0"] });
+        await Exec(new() { Src = Src(single, CreateMultiTargetedProject()), TargetFrameworks = ["NETSTANDARD2.0", "NET8.0"] });
 
-        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
-        Assert.Contains("Legacy.csproj' cannot be determined", warning.Message);
-        Assert.False(File.Exists(Path.Combine(_outputFolder, "Legacy.Widget.yml")));
+        AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.Equal(["net8.0"], AppliesTo("Lib.Widget.yml"));
+        Assert.Equal(["netstandard2.0", "net8.0"], AppliesTo("Lib.Shared.yml"));
+        Assert.Equal(["netstandard2.0", "net8.0"], AppliesTo("Lib.yml"));
     }
 
     [Fact]

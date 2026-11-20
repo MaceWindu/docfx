@@ -1,0 +1,9 @@
+{{!Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license.}}
+{{#overridden}}
+<h6>{{__global.overrides}}</h6>
+<div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
+{{/overridden}}
+{{#noOverridden}}
+<h6>{{__global.overrides}}</h6>
+<div class="api-variant-none">&mdash;</div>
+{{/noOverridden}}

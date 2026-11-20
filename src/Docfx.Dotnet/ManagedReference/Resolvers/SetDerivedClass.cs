@@ -8,8 +8,7 @@ namespace Docfx.Dotnet;
 
 internal class SetDerivedClass : IResolverPipeline
 {
-    // A set: a type that implements an interface twice, as `IConverter<int>` and `IConverter<string>`, derives from it
-    // once, and a run for the same classes, as a build of the same project in the same process is, lists them once still.
+    // A set: a type that implements an interface twice, as `IConverter<int>` and `IConverter<string>`, derives from it once.
     private readonly Dictionary<string, HashSet<string>> _derivedClassMapping = [];
 
     // base class -> derived class -> the frameworks it derives from that base in

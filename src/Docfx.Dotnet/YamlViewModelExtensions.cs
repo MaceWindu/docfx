@@ -437,6 +437,7 @@ internal static class YamlViewModelExtensions
             Examples = content.Examples,
             Syntax = content.Syntax.ToSyntaxDetailViewModel(),
             Overridden = content.Overridden,
+            NoOverridden = variant.NoOverridden ? true : null,
             Exceptions = content.Exceptions,
             SeeAlsos = content.SeeAlsos,
             Inheritance = content.Inheritance,

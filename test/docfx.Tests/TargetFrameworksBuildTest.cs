@@ -120,6 +120,15 @@ public class TargetFrameworksBuildTest : TestBase
                 }
             #endif
 
+                public class Described
+                {
+            #if NET8_0
+                    public override string ToString() => "";
+            #else
+                    public new virtual string ToString() => "";
+            #endif
+                }
+
                 public enum Mode
                 {
                     /// <summary>Plain everywhere.</summary>
@@ -203,6 +212,20 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Matches("SometimesSource</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
         Assert.Matches("AlwaysSource</a>\\s*</div>", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"", true)]
+    [InlineData("\"default\", \"modern\"", false)]
+    public async Task AVariantThatOverridesNothingSaysSoWhereTheTemplateShowsOverrides(string template, bool showsOverrides)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+        var page = await Page(site, "Lib.Described.html");
+
+        // the modern template shows no member a member overrides, so a variant shows none either
+        Assert.Equal(showsOverrides, Regex.IsMatch(page, "class=\"api-variant\" data-applies-to=\"netstandard2.0\">[\\s\\S]*?<div class=\"api-variant-none\">&mdash;</div>"));
+        Assert.Equal(showsOverrides, page.Contains("<h6>Overrides</h6>"));
     }
 
     [Theory]
@@ -483,6 +506,22 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains("data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
         var differs = await Page(site, "Lib.Differs.html");
         Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", differs);
+
+        // an interface still lists the types that implement it, without their marks
+        var source = await Page(site, "Lib.ISource.html");
+        Assert.Matches("SometimesSource</a>\\s*</div>", source);
+        Assert.Matches("AlwaysSource</a>\\s*</div>", source);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task FrameworkNamesMatchAFrameworkInAnyCase(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"", extraBuild: "\"globalMetadata\": { \"_frameworkNames\": { \"NetStandard2.0\": \"Any .NET\" } },");
+
+        Assert.Contains($"{Net8}, Any .NET", await Page(site, "Lib.Shared.html"));
     }
 
     [Theory]

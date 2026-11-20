@@ -63,10 +63,7 @@
   </dl>
   {{/syntax.typeParameters.0}}
   {{/syntax}}
-  {{#overridden}}
-  <h6>{{__global.overrides}}</h6>
-  <div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
-  {{/overridden}}
+  {{>partials/apiVariants.overrides}}
   {{#inheritance.0}}
   <div class="inheritance">
     <h5>{{__global.inheritance}}</h5>

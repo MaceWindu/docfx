@@ -110,7 +110,10 @@ function getAppliesToGroups(vm, options) {
 }
 
 function getFrameworkLabel(framework, names) {
-  if (names && Object.prototype.hasOwnProperty.call(names, framework)) return names[framework];
+  // the frameworks are written in lower case, a key of `_frameworkNames` as the site writes it
+  for (var key in names || {}) {
+    if (Object.prototype.hasOwnProperty.call(names, key) && key.toLowerCase() === framework.toLowerCase()) return names[key];
+  }
 
   var match = /^netstandard(\d+\.\d+)$/.exec(framework);
   if (match) return '.NET Standard ' + match[1];
@@ -160,6 +163,8 @@ function handleAppliesTo(vm, parent, options) {
     variant.seealso = variant.seealso || [];
     common.processSeeAlso(variant);
     variant.overridden = variant.overridden || "";
+    // Overriding nothing where the API overrides is a difference too, which the declaration of the variant shows.
+    variant.noOverridden = !!variant.noOverridden;
     // a part without a description must not show the description of the page, the summary of the API
     variant.exceptions.forEach(withDescription);
     if (variant.syntax) {

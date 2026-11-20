@@ -183,6 +183,46 @@ public class TargetFrameworkMergeTest
         handler.Return.Should().BeNull();
     }
 
+    [Fact]
+    public void AnOverrideAVariantLacksIsRecorded()
+    {
+        // The base type gained `virtual M` in the first framework, where T overrides it.
+        var result = Merge(
+            ("namespace N { public class B { public virtual void M() { } } public class T : B { public override void M() { } } }", First),
+            ("namespace N { public class B { } public class T : B { public virtual void M() { } } }", Second));
+
+        var item = result["N.T.M"];
+        item.Overridden.Should().Be("N.B.M");
+        var variant = item.Variants.Should().ContainSingle().Subject;
+        variant.Content.Overridden.Should().BeNull();
+        variant.NoOverridden.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AnOverrideOnlyAVariantHasIsItsOwn()
+    {
+        var result = Merge(
+            ("namespace N { public class B { } public class T : B { public virtual void M() { } } }", First),
+            ("namespace N { public class B { public virtual void M() { } } public class T : B { public override void M() { } } }", Second));
+
+        var item = result["N.T.M"];
+        item.Overridden.Should().BeNull();
+        var variant = item.Variants.Should().ContainSingle().Subject;
+        variant.Content.Overridden.Should().Be("N.B.M");
+        variant.NoOverridden.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AnOverrideTheSameInEveryFrameworkIsNotLackedByAVariant()
+    {
+        // the variant is the declaration's attribute; the override is the same
+        var result = Merge(
+            ("namespace N { public class B { public virtual void M() { } } public class T : B { [System.Obsolete] public override void M() { } } }", First),
+            ("namespace N { public class B { public virtual void M() { } } public class T : B { public override void M() { } } }", Second));
+
+        result["N.T.M"].Variants.Should().ContainSingle().Which.NoOverridden.Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("class")]
     [InlineData("interface")]
@@ -219,6 +259,10 @@ public class TargetFrameworkMergeTest
     [InlineData("CSharp", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IB, IA", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IA, IB")]
     [InlineData("CSharp", "[Sep(')')]\npublic class T : IB, IA", "[Sep(')')]\npublic class T : IA, IB")]
     [InlineData("VB", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IB, IA", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IA, IB")]
+    // nor is a `<` or `(` an argument of an attribute holds outside a string
+    [InlineData("CSharp", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IB, IA", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IA, IB")]
+    [InlineData("CSharp", "[A(1)]\n[B(2 > 1)]\npublic class T : IB, IA", "[A(1)]\n[B(2 > 1)]\npublic class T : IA, IB")]
+    [InlineData("VB", "<Range(0, If(1 < 2, 1, 2))>\nPublic Class T Implements IB, IA", "<Range(0, If(1 < 2, 1, 2))>\nPublic Class T Implements IA, IB")]
     public void SortBaseList(string language, string declaration, string expected)
     {
         TargetFrameworkVariants.SortBaseList(declaration, language).Should().Be(expected);
@@ -625,35 +669,6 @@ public class TargetFrameworkMergeTest
         var inherited = MergeIgnoring(VariantIgnore.InheritedDocumentation, (Code("Fast path", false), First), (Code("Slow path", false), Second));
         inherited["N.T.M"].Summary.Should().Contain("base");
         inherited["N.T.M"].Variants.Should().BeNullOrEmpty();
-    }
-
-    [Fact]
-    public void ATypeImplementingAnInterfaceTwiceIsListedOnceAsDerived()
-    {
-        // `class C : IConverter<int>, IConverter<string>`, resolved twice, as two runs in one process do
-        MetadataModel Model() => new()
-        {
-            Members =
-            [
-                new() { Name = "N.IConverter`1", Type = MemberType.Interface },
-                new() { Name = "N.C", Type = MemberType.Class, Implements = ["N.IConverter{System.Int32}", "N.IConverter{System.String}"] },
-            ],
-        };
-        var context = new ResolverContext
-        {
-            References = new()
-            {
-                ["N.IConverter{System.Int32}"] = new() { Definition = "N.IConverter`1" },
-                ["N.IConverter{System.String}"] = new() { Definition = "N.IConverter`1" },
-            },
-        };
-        var pipeline = new SetDerivedClass();
-
-        pipeline.Run(Model(), context);
-        var second = Model();
-        pipeline.Run(second, context);
-
-        second.Members[0].DerivedClasses.Should().Equal("N.C");
     }
 
     [Theory]

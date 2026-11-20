@@ -175,20 +175,26 @@ A project that targets a single framework is matched by the `TargetFramework` MS
 
 If a project listed in `src` does not target the requested framework, or MSBuild cannot evaluate it, docfx logs a `TargetFrameworkNotFound` warning and documents the framework the project selects by default. For the projects of a solution that is logged as information, and the warning is logged only when no project of the solution targets the framework; see [`targetFramework`](../reference/docfx-json-reference.md#targetframework).
 
+The `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json-reference.md#properties) documents another framework too, and loads only that one, which is faster. MSBuild applies a global property to every project it loads, though, including the projects the documented ones reference. A project that references a `netstandard2.0` library then loads that library for `net8.0` as well, which no longer matches the reference MSBuild resolved for it: docfx logs `Found project reference without a matching metadata reference` and `Unresolved metadata reference removed from project`, and drops the reference, so links to the library's types are lost. A library that cannot build for that framework fails to load. To keep a referenced project at its own framework, add `TreatAsLocalProperty="TargetFramework"` to its `<Project>` element.
+
+`properties` and `targetFramework` have no effect on assemblies: when the input is `.dll` files, list the ones built for the framework to document.
+
 #### Documenting several frameworks together
 
 [`targetFrameworks`](../reference/docfx-json-reference.md#targetframeworks) documents several frameworks of a project, or all of them with `"*"`, as one set of pages:
 
 ```json
 {
-  "metadata": {
-    "src": [{
-      "files": ["src/MyLib/MyLib.csproj"],
-      "src": "../"
-    }],
-    "dest": "api",
-    "targetFrameworks": ["net8.0", "netstandard2.0"]
-  },
+  "metadata": [
+    {
+      "src": [{
+        "files": ["src/MyLib/MyLib.csproj"],
+        "src": "../"
+      }],
+      "dest": "api",
+      "targetFrameworks": ["net8.0", "netstandard2.0"]
+    }
+  ]
 }
 ```
 

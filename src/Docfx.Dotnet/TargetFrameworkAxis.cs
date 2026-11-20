@@ -47,8 +47,9 @@ internal sealed class TargetFrameworkAxis
             return Invalid("Only one axis is supported.");
         }
 
+        // The schema forbids a null, which docfx does not check the configuration against.
         var axis = axes[0];
-        if (string.IsNullOrWhiteSpace(axis.Name) || axis.Values is not { Count: > 0 })
+        if (axis is null || string.IsNullOrWhiteSpace(axis.Name) || axis.Values is not { Count: > 0 })
         {
             return Invalid("An axis needs a 'name' and at least one value.");
         }
@@ -57,7 +58,8 @@ internal sealed class TargetFrameworkAxis
         foreach (var value in axis.Values)
         {
             // Pages list units separated by spaces, e.g. `data-applies-to="ef9:net8.0 ef9:netstandard2.0"`.
-            if (string.IsNullOrWhiteSpace(value.Id) || value.Id.Contains(Separator) || value.Id.Any(char.IsWhiteSpace) || value.Files is not { Count: > 0 })
+            if (value is null || string.IsNullOrWhiteSpace(value.Id) || value.Id.Contains(Separator) || value.Id.Any(char.IsWhiteSpace)
+                || value.Files is not { Count: > 0 } || value.Files.Any(string.IsNullOrWhiteSpace))
             {
                 return Invalid($"Every value of axis '{axis.Name}' needs an 'id' without '{Separator}' or whitespace and at least one pattern in 'files'.");
             }

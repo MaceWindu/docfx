@@ -185,14 +185,16 @@ internal static partial class TargetFrameworkVariants
         // Shared with the ignore every framework has, not the one widened for this framework, which a framework
         // recorded with its own text would match: whatever order they are merged in, a framework is never shown
         // another one's text.
+        // An override the other framework lacks leaves `Overridden` unset, which reads as "the same".
+        var noOverridden = primary.Overridden is not null && other.Overridden is null;
         primary.Variants ??= [];
-        if (primary.Variants.FirstOrDefault(variant => HasSameContent(variant.Content, content, sharedIgnore, baseLists)) is { } existing)
+        if (primary.Variants.FirstOrDefault(variant => variant.NoOverridden == noOverridden && HasSameContent(variant.Content, content, sharedIgnore, baseLists)) is { } existing)
         {
             existing.Frameworks.Add(framework);
         }
         else
         {
-            primary.Variants.Add(new() { Frameworks = [framework], Content = content });
+            primary.Variants.Add(new() { Frameworks = [framework], Content = content, NoOverridden = noOverridden });
         }
     }
 
@@ -339,7 +341,15 @@ internal static partial class TargetFrameworkVariants
         int start = -1, end = declaration.Length;
         var commas = new List<int>();
 
-        for (var i = 0; i < declaration.Length; i++)
+        // The attribute lines come first, and an argument of theirs can hold a `<` or `(` that is no bracket, as
+        // `[Range(0, 1 < 2 ? 1 : 2)]` does: the base list is on a line after them.
+        var first = 0;
+        for (var line = AttributeLineRegex().Match(declaration); line.Success && line.Index == first; line = line.NextMatch())
+        {
+            first = line.Index + line.Length;
+        }
+
+        for (var i = first; i < declaration.Length; i++)
         {
             switch (declaration[i])
             {
