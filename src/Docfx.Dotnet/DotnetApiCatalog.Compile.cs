@@ -28,6 +28,15 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
+        // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
+        if (config.TargetFramework is { } invalid && !TargetFrameworkHelper.IsValid(invalid))
+        {
+            Logger.LogError(
+                $"'targetFramework' is '{invalid}', whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'.",
+                code: ErrorCodes.Metadata.InvalidTargetFramework);
+            return [];
+        }
+
         var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
         if (config.TargetFramework is not null && !hasProjectInput)
         {
@@ -74,6 +83,7 @@ partial class DotnetApiCatalog
         });
 
         using var workspace = MSBuildWorkspace.Create(msbuildProperties);
+        var projectFrameworks = config.TargetFramework is null ? null : new ProjectFrameworks(msbuildProperties);
         workspace.RegisterWorkspaceFailedHandler(e =>
         {
             Logger.LogWarning($"{e.Diagnostic}");
@@ -99,9 +109,11 @@ partial class DotnetApiCatalog
                 solutionProjectCount = 0;
                 solutionProjectMatches = 0;
                 solutionProjectsReported = 0;
+                var filtered = GetSolutionFilterProjects(solution);
                 foreach (var project in SolutionFile.Parse(solution).ProjectsInOrder)
                 {
                     if (project.ProjectType is SolutionProjectType.KnownToBeMSBuildFormat &&
+                        (filtered is null || filtered.Contains(Path.GetFullPath(project.AbsolutePath))) &&
                         await LoadCompilationFromProject(project.AbsolutePath, fromSolution: true) is { } compilation)
                     {
                         projectCompilations.Add(compilation);
@@ -204,20 +216,18 @@ partial class DotnetApiCatalog
                         throw new DocfxException($"dotnet restore failed for '{path}' with exit code {process.ExitCode}.");
                     }
                 }
-                project = await workspace.OpenProjectAsync(path, msbuildLogger);
-            }
-
-            // With `targetFramework`, the analyzers reported are those of the framework selected, below; a project
-            // that is never documented reports those of the one loaded, as without the option.
-            if (isNewlyLoaded && (config.TargetFramework is null || !project.SupportsCompilation))
-            {
-                ReportAnalyzers(project);
+                project = await workspace.OpenProjectAsync(path, msbuildLogger, projectFrameworks);
             }
 
             // Every framework of a file is loaded in its language, so the check holds for the one selected too,
             // and a project that is never documented is not reported or counted for `targetFramework`.
             if (!project.SupportsCompilation)
             {
+                if (isNewlyLoaded)
+                {
+                    ReportAnalyzers(project);
+                }
+
                 Logger.LogInfo($"Skip unsupported project {project.FilePath}.");
                 return null;
             }
@@ -231,13 +241,19 @@ partial class DotnetApiCatalog
                 var listedToo = fromSolution && listedProjects.Contains(path);
                 var report = !listedToo && reportedProjects.Add(path);
                 (project, var matched) = await TargetFrameworkHelper.SelectProject(
-                    workspace.CurrentSolution, project, targetFramework, fromSolution, report, isNewlyLoaded ? ReportAnalyzers : null);
+                    workspace.CurrentSolution, project, targetFramework, projectFrameworks!, fromSolution, report);
                 if (fromSolution && (!listedToo || matched))
                 {
                     solutionProjectCount++;
                     solutionProjectMatches += matched ? 1 : 0;
                     solutionProjectsReported += report ? 1 : 0;
                 }
+            }
+
+            // the analyzers of the framework documented
+            if (isNewlyLoaded)
+            {
+                ReportAnalyzers(project);
             }
 
             return await project.GetCompilationAsync();

@@ -155,7 +155,7 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Theory]
-    // net8.0-windows is net8.0-windows7.0: the platform version is not compared
+    // net8.0-windows is net8.0-windows7.0, MSBuild says
     [InlineData("net8.0-windows", "Platform.OnlyWindows.yml")]
     [InlineData("net8.0-windows7.0", "Platform.OnlyWindows.yml")]
     [InlineData("net8.0", "Platform.OnlyPortable.yml")]
@@ -209,14 +209,14 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Theory]
-    // the SDK generates a TargetFrameworkAttribute, which says it
+    // MSBuild says which framework a project targets, whatever its symbols and attributes say
     [InlineData("net8.0", false)]
     [InlineData("net9.0", true)]
-    public async Task TargetFrameworkOnAProjectWithoutFrameworkSymbolsReadsItsAttribute(string targetFramework, bool expectWarning)
+    public async Task TargetFrameworkOnAProjectWithoutFrameworkSymbolsAndAttributes(string targetFramework, bool expectWarning)
     {
         var project = CreateProject(
             "Legacy",
-            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines>",
+            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>",
             "namespace Legacy { public class Widget { } }");
 
         using var listener = new TestListenerScope();
@@ -235,21 +235,45 @@ public class TargetFrameworkTest : TestBase
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Legacy.Widget.yml")));
     }
 
-    [Fact]
-    public async Task TargetFrameworkOnAProjectThatSaysNotWhichFrameworkItTargetsWarns()
+    [Theory]
+    // without `GenerateAssemblyInfo` the SDK generates no TargetPlatformAttribute, and with
+    // `DisableImplicitFrameworkDefines` no symbols; windows8.0 needs no Windows SDK package
+    [InlineData("net8.0-windows8.0", false)]
+    [InlineData("net8.0-windows", false)]
+    [InlineData("net8.0", true)]
+    public async Task TargetFrameworkWithAPlatformOfASingleTargetProjectWithoutAttributesAndSymbols(string targetFramework, bool expectWarning)
     {
-        var project = CreateProject(
-            "Legacy",
-            "<TargetFramework>net8.0</TargetFramework><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>",
-            "namespace Legacy { public class Widget { } }");
+        var project = CreatePlatformProject(
+            "<TargetFramework>net8.0-windows8.0</TargetFramework><GenerateAssemblyInfo>false</GenerateAssemblyInfo><DisableImplicitFrameworkDefines>true</DisableImplicitFrameworkDefines>");
 
         using var listener = new TestListenerScope();
 
-        await Exec(new() { Src = Src(project), TargetFramework = "net8.0" });
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
 
-        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
-        Assert.Contains("is not known", warning.Message);
-        Assert.True(File.Exists(Path.Combine(_outputFolder, "Legacy.Widget.yml")));
+        if (expectWarning)
+        {
+            AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        // no `WINDOWS` symbol either
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyPortable.yml")));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWhosePlatformVersionIsNotAVersionIsAnError()
+    {
+        var project = CreatePlatformProject("<TargetFramework>net8.0-windows8.0</TargetFramework>");
+
+        using var listener = new TestListenerScope();
+
+        // a letter O for the zero, which would otherwise select every version of the platform
+        await Exec(new() { Src = Src(project), TargetFramework = "net8.0-windows8.O" });
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.InvalidTargetFramework);
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
     }
 
     [Theory]
@@ -275,10 +299,13 @@ public class TargetFrameworkTest : TestBase
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Single.Widget.yml")));
     }
 
-    [Fact]
-    public async Task TargetFrameworkOnASingleTargetProjectWithOwnSymbolsShapedLikeAPlatform()
+    [Theory]
+    [InlineData("net8.0", false)]
+    // `SQLITE` and `SQLITE3` have the form of a platform and its version, which the project does not target
+    [InlineData("net8.0-sqlite3.0", true)]
+    [InlineData("net8.0-sqlite", true)]
+    public async Task TargetFrameworkOnASingleTargetProjectWithOwnSymbolsShapedLikeAPlatform(string targetFramework, bool expectWarning)
     {
-        // `SQLITE` and `SQLITE3` have the form of a platform and its version, `net8.0-sqlite3.0`; the attributes say net8.0.
         var project = CreateProject(
             "Single",
             "<TargetFramework>net8.0</TargetFramework><DefineConstants>$(DefineConstants);SQLITE;SQLITE3</DefineConstants>",
@@ -286,9 +313,17 @@ public class TargetFrameworkTest : TestBase
 
         using var listener = new TestListenerScope();
 
-        await Exec(new() { Src = Src(project), TargetFramework = "net8.0" });
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
 
-        AssertWarnings(listener);
+        if (expectWarning)
+        {
+            var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+            Assert.Contains("documenting 'net8.0' instead", warning.Message);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Single.Widget.yml")));
     }
 
@@ -311,6 +346,8 @@ public class TargetFrameworkTest : TestBase
         AssertWarnings(listener);
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNetStandard.yml")));
         Assert.False(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+        // the filter leaves the analyzer out
+        Assert.False(File.Exists(Path.Combine(_outputFolder, "Analyzer.Rule.yml")));
     }
 
     [Fact]
@@ -555,7 +592,6 @@ public class TargetFrameworkTest : TestBase
         if (!OperatingSystem.IsWindows())
             return;
 
-        // Visual Basic defines `NET8_0=-1`, which Roslyn reads as the symbol `NET8_0` as well.
         var project = CreateProject(
             "VbLib",
             "<TargetFramework>net8.0</TargetFramework><RootNamespace></RootNamespace>",
@@ -583,7 +619,7 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Theory]
-    // the version comes from the `TargetPlatformAttribute("Windows8.0")` the SDK generates; windows8.0 needs no Windows SDK package
+    // windows8.0 needs no Windows SDK package
     [InlineData("net8.0-windows8.0", false)]
     [InlineData("net8.0-windows8", false)]
     [InlineData("net8.0-windows", false)]
