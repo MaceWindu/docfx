@@ -41,11 +41,19 @@ internal static partial class TargetFrameworkHelper
             .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
             .ToList();
 
+        // Why MSBuild cannot say what a framework stands for, reported with the project it leaves unmatched.
+        var failures = new List<string>();
+
         if (candidates.Count <= 1)
         {
-            // MSBuild says why it cannot tell, once.
-            if (await frameworks.GetName(project) is not { } name)
+            var (name, failure) = await frameworks.GetName(project);
+            if (name is null)
             {
+                if (failure is not null)
+                {
+                    Report(failure);
+                }
+
                 return (project, false);
             }
 
@@ -54,6 +62,7 @@ internal static partial class TargetFrameworkHelper
                 return (project, true);
             }
 
+            failures.ForEach(Report);
             Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{name}' instead.");
             return (project, false);
         }
@@ -74,6 +83,7 @@ internal static partial class TargetFrameworkHelper
         }
 
         var available = string.Join(", ", candidates.Select(GetTargetFrameworkFromName).Where(tfm => tfm is not null).Select(tfm => $"'{tfm}'"));
+        failures.ForEach(Report);
         Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{GetTargetFrameworkFromName(project)}' instead. It targets {available}.");
         return (project, false);
 
@@ -88,10 +98,23 @@ internal static partial class TargetFrameworkHelper
             // does: MSBuild does.
             var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
                 && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
-            var moniker = IsFrameworkName(name) && !leavesOutVersion ? name
-                : candidate.FilePath is { } path ? (await frameworks.Evaluate(path, name))?.Moniker
-                : null;
-            return moniker is not null && MatchesFramework(moniker, targetFramework);
+            if (IsFrameworkName(name) && !leavesOutVersion)
+            {
+                return MatchesFramework(name, targetFramework);
+            }
+
+            if (candidate.FilePath is null)
+            {
+                return false;
+            }
+
+            var evaluation = await frameworks.Evaluate(candidate.FilePath, name);
+            if (evaluation.Failure is { } failure)
+            {
+                failures.Add(failure);
+            }
+
+            return evaluation.Framework is { } framework && MatchesFramework(framework.Moniker, targetFramework);
         }
 
         void Report(string message)
@@ -113,20 +136,41 @@ internal static partial class TargetFrameworkHelper
     }
 
     /// <summary>
-    /// Whether <paramref name="targetFramework"/> can name a framework: one whose platform version is not a
-    /// version, such as <c>net8.0-windows10.0.19041.O</c>, cannot.
+    /// Says why <paramref name="targetFramework"/> cannot name a single framework: a list such as
+    /// <c>net8.0;netstandard2.0</c>, a dash without a platform, as in <c>net8.0-</c>, or a platform version that is
+    /// not a version, such as <c>net8.0-windows10.0.19041.O</c>.
     /// </summary>
-    internal static bool IsValid(string targetFramework)
+    /// <returns><see langword="null"/> when it can.</returns>
+    /// <seealso cref="IsValid"/>
+    internal static string? GetInvalidReason(string targetFramework)
     {
+        if (targetFramework.IndexOfAny([';', ',']) >= 0)
+        {
+            return "a list of frameworks, while it selects a single one";
+        }
+
         var dash = targetFramework.IndexOf('-');
         if (dash < 0)
         {
-            return true;
+            return null;
         }
 
-        var digits = new string(targetFramework[(dash + 1)..].SkipWhile(char.IsLetter).ToArray());
-        return digits.Length == 0 || ParseVersion(digits) is not null;
+        var platform = targetFramework[(dash + 1)..];
+        var digits = new string(platform.SkipWhile(char.IsLetter).ToArray());
+        if (digits.Length == platform.Length)
+        {
+            return "a framework with a dash but no platform after it, such as the 'windows' of 'net8.0-windows'";
+        }
+
+        return digits.Length == 0 || ParseVersion(digits) is not null
+            ? null
+            : "a framework whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'";
     }
+
+    /// <summary>
+    /// Whether <paramref name="targetFramework"/> can name a single framework; see <see cref="GetInvalidReason"/>.
+    /// </summary>
+    internal static bool IsValid(string targetFramework) => GetInvalidReason(targetFramework) is null;
 
     /// <summary>
     /// Reads the framework from the <c>(tfm)</c> suffix Roslyn appends to the name of a project

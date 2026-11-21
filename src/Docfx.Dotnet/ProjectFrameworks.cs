@@ -20,6 +20,12 @@ namespace Docfx.Dotnet;
 internal sealed record ProjectFramework(string Name, string Moniker);
 
 /// <summary>
+/// What <c>dotnet msbuild</c> evaluates a project to: its <paramref name="Framework"/>, or the
+/// <paramref name="Failure"/> that says why it cannot, for the caller to report.
+/// </summary>
+internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Failure);
+
+/// <summary>
 /// What MSBuild says the target frameworks of the projects a workspace loads are.
 /// </summary>
 /// <remarks>
@@ -27,24 +33,25 @@ internal sealed record ProjectFramework(string Name, string Moniker);
 /// <c>Foo(net8.0)</c>, and reports the framework of every project it loads to the progress it is given, a
 /// project that targets a single framework included. Neither says what an alias in <c>TargetFrameworks</c>
 /// stands for, nor the platform version a framework such as <c>net8.0-windows</c> leaves out: for those, the
-/// project is evaluated by <c>dotnet msbuild</c>, with the SDK and the global properties the workspace uses.
+/// project is evaluated by <c>dotnet msbuild</c>, with the SDK a <c>global.json</c> of the project selects and the
+/// MSBuild properties of the metadata item.
 /// </remarks>
 internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 {
     private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
 
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _loaded = new(FilePathComparer.OSPlatformSensitiveStringComparer);
-    private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectFramework?>> _evaluated = new();
-    private readonly Func<string, string?, Task<ProjectFramework?>> _evaluate;
+    private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new();
+    private readonly Func<string, string?, Task<ProjectEvaluation>> _evaluate;
 
-    /// <param name="properties">The global properties the workspace loads projects with.</param>
+    /// <param name="properties">The MSBuild properties the workspace loads projects with.</param>
     public ProjectFrameworks(IReadOnlyDictionary<string, string> properties)
     {
         _evaluate = (path, targetFramework) => EvaluateWithMSBuild(path, targetFramework, properties);
     }
 
     /// <param name="evaluate">Evaluates a project, for a framework when it is given, as MSBuild does.</param>
-    internal ProjectFrameworks(Func<string, string?, Task<ProjectFramework?>> evaluate)
+    internal ProjectFrameworks(Func<string, string?, Task<ProjectEvaluation>> evaluate)
     {
         _evaluate = evaluate;
     }
@@ -62,34 +69,40 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     /// <summary>
     /// Gets the framework of a project as the project names it: <c>net8.0-windows</c>, or an alias.
     /// </summary>
-    /// <returns><see langword="null"/> when MSBuild cannot say, which <see cref="Evaluate"/> has reported.</returns>
-    public async Task<string?> GetName(Project project)
+    /// <returns>A <c>Name</c> of <see langword="null"/> when MSBuild cannot say, and the <c>Failure</c> that says why.</returns>
+    public async Task<(string? Name, string? Failure)> GetName(Project project)
     {
-        if (TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
-        {
-            return name;
-        }
-
-        // A project that targets a single framework is loaded for that one alone.
+        // A project that targets a single framework is loaded for that one alone, and has no framework in its name:
+        // the `(Legacy)` of a `Foo(Legacy).csproj` is part of its file name.
         if (project.FilePath is { } path && _loaded.TryGetValue(path, out var loaded) && loaded.Count == 1)
         {
-            return loaded.Keys.First();
+            return (loaded.Keys.First(), null);
+        }
+
+        if (TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
+        {
+            return (name, null);
         }
 
         // which the workspace reports for SDK-style projects only
-        return project.FilePath is null ? null : (await Evaluate(project.FilePath, null))?.Name;
+        if (project.FilePath is null)
+        {
+            return (null, $"The workspace names no file for project '{project.Name}', so which framework it targets is not known.");
+        }
+
+        var evaluation = await Evaluate(project.FilePath, null);
+        return (evaluation.Framework?.Name, evaluation.Failure);
     }
 
     /// <summary>
     /// Evaluates a project, for <paramref name="targetFramework"/> when it is given, once.
     /// </summary>
-    /// <returns><see langword="null"/>, reported, when MSBuild cannot evaluate it.</returns>
-    public Task<ProjectFramework?> Evaluate(string path, string? targetFramework)
+    public Task<ProjectEvaluation> Evaluate(string path, string? targetFramework)
     {
         return _evaluated.GetOrAdd((path, targetFramework), key => _evaluate(key.Path, key.TargetFramework));
     }
 
-    private static async Task<ProjectFramework?> EvaluateWithMSBuild(string path, string? targetFramework, IReadOnlyDictionary<string, string> properties)
+    private static async Task<ProjectEvaluation> EvaluateWithMSBuild(string path, string? targetFramework, IReadOnlyDictionary<string, string> properties)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -146,20 +159,17 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             var values = JsonDocument.Parse(output).RootElement.GetProperty("Properties");
             string Get(string property) => values.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
             return Create(Get("TargetFramework"), Get("TargetFrameworkMoniker"), Get("TargetPlatformIdentifier"), Get("TargetPlatformVersion"))
-                ?? Failed($"it names no target framework");
+                is { } evaluated ? new(evaluated, null) : Failed("it names no target framework");
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
             return Failed(output.Trim());
         }
 
-        ProjectFramework? Failed(string reason)
+        ProjectEvaluation Failed(string reason)
         {
             var framework = targetFramework is null ? "" : $" for '{targetFramework}'";
-            Logger.LogWarning(
-                $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}",
-                code: WarningCodes.Metadata.TargetFrameworkNotFound);
-            return null;
+            return new(null, $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}");
         }
     }
 

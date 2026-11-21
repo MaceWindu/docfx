@@ -29,10 +29,10 @@ partial class DotnetApiCatalog
         msbuildProperties.TryAdd("Configuration", "Release");
 
         // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
-        if (config.TargetFramework is { } invalid && !TargetFrameworkHelper.IsValid(invalid))
+        if (config.TargetFramework is { } invalid && TargetFrameworkHelper.GetInvalidReason(invalid) is { } reason)
         {
             Logger.LogError(
-                $"'targetFramework' is '{invalid}', whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'.",
+                $"'targetFramework' is '{invalid}', {reason}.",
                 code: ErrorCodes.Metadata.InvalidTargetFramework);
             return [];
         }
