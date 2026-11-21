@@ -92,9 +92,18 @@ static class PdfBuilder
         [System.Text.Json.Serialization.JsonIgnore]
         public string? tocPath { get; set; }
 
-        /// <summary>The PDF in a warning: its file name, or else the table of contents it is printed from.</summary>
+        /// <summary>
+        /// The PDF in a warning: the table of contents it is printed from, with its file name, which is relative to the
+        /// folder of the table of contents, so that the PDFs of two folders named alike can be told apart.
+        /// </summary>
         [System.Text.Json.Serialization.JsonIgnore]
-        public string Label => pdfFileName ?? tocPath ?? name;
+        public string Label => (pdfFileName, tocPath) switch
+        {
+            ({ } file, { } toc) => $"{file} ({toc})",
+            (null, { } toc) => toc,
+            ({ } file, null) => file,
+            _ => name,
+        };
     }
 
     internal class AppliesTo
@@ -129,6 +138,11 @@ static class PdfBuilder
             // A key twice, which a table of contents written by hand can have, has its last value, as when the
             // outline was deserialized as it is; a JsonObject would throw on it when it is read.
             using var document = JsonDocument.Parse(json);
+            // Most tables of contents, such as the large ones of an API, have no PDF, and are read no further.
+            if (!HasPdf(document.RootElement))
+            {
+                return null;
+            }
             parsed = ToNode(document.RootElement);
         }
         catch (JsonException ex)
@@ -137,8 +151,7 @@ static class PdfBuilder
             return null;
         }
 
-        if (parsed is not JsonObject root ||
-            !root.TryGetPropertyValue("pdf", out var pdf) || pdf is null || pdf.GetValueKind() is JsonValueKind.False)
+        if (parsed is not JsonObject root)
         {
             return null;
         }
@@ -177,6 +190,24 @@ static class PdfBuilder
         {
             Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {ex.Message}");
             return null;
+        }
+
+        static bool HasPdf(JsonElement root)
+        {
+            if (root.ValueKind is not JsonValueKind.Object)
+            {
+                return false;
+            }
+            // a key written twice has its last value
+            var pdf = JsonValueKind.Undefined;
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.NameEquals("pdf"))
+                {
+                    pdf = property.Value.ValueKind;
+                }
+            }
+            return pdf is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.False);
         }
 
         static JsonNode? ToNode(JsonElement element)
@@ -384,10 +415,10 @@ static class PdfBuilder
                 }
 
                 // A heading that only groups other items goes when they all do; an empty href is no page, as the
-                // pages of the PDF read it.
+                // pages of the PDF read it. An item without a name is none of the entries the site shows either.
                 var groupsOthers = string.IsNullOrEmpty(item.href) && item.items is { Length: > 0 };
                 Visit(item, itemAxis);
-                if (!groupsOthers || item.items is { Length: > 0 })
+                if (!groupsOthers || item.items!.Any(child => !string.IsNullOrEmpty(child.name)))
                 {
                     kept.Add(item);
                 }
@@ -407,10 +438,12 @@ static class PdfBuilder
         // applies to nothing, as on its pages, which are told the values of no axis then.
         bool ValueApplies(Axis? axis) => value is not null && (axis is null ? axes.Count == 0 || valueOnAnAxis : HasValue(axis, value));
 
+        // As on the site, an API exists in a framework, with the axis value of its group: a group that names no
+        // framework says nothing it exists in.
         bool IsAvailable(Outline node, Axis? axis)
         {
             var valueApplies = ValueApplies(axis);
-            return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group =>
+            return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group => group.frameworks is { Length: > 0 } &&
                 (!valueApplies || group.version is null || group.version == value || axisValues?.Contains(group.version) is false) &&
                 (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
         }
@@ -1319,8 +1352,6 @@ static class PdfBuilder
         {
             return action switch
             {
-                // a link to a destination the page has none of goes nowhere
-                GoToAction { Destination: null } => new UriAction(""),
                 GoToAction link => new GoToAction(new(pageNumbers[node] - 1 + link.Destination.PageNumber, link.Destination.Type, link.Destination.Coordinates)),
                 UriAction url => HandleUriAction(url),
                 _ => action,

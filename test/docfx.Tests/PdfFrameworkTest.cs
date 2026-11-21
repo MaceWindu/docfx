@@ -425,6 +425,45 @@ public class PdfFrameworkTest
         PdfBuilder.LeaveOutUnavailable(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(Json("net8", null)), "api/toc.json"));
 
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("'pdfFramework' of 'api/toc.json'"));
+
+        // a file name is relative to the folder of its table of contents, which tells two of the same name apart
+        var named = Json("net8", null).Replace("\"pdf\": true,", "\"pdf\": true, \"pdfFileName\": \"api.pdf\",");
+        PdfBuilder.LeaveOutUnavailable(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(named), "v2/toc.json"));
+
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains("'pdfFramework' of 'api.pdf (v2/toc.json)'"));
+    }
+
+    [Fact]
+    public void AGroupThatNamesNoFrameworkSaysNothingItsApiExistsIn()
+    {
+        // written by hand: on the site, an entry whose `appliesTo` names no framework is shown for no selection
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            { "pdf": true, "pdfAxisValue": "ef8", "items": [
+              { "name": "NoFrameworks", "href": "a.html", "appliesTo": [ { "version": "ef8" } ] },
+              { "name": "EmptyFrameworks", "href": "b.html", "appliesTo": [ { "version": "ef8", "frameworks": [] } ] },
+              { "name": "FromEF8", "href": "c.html", "appliesTo": [ { "version": "ef8", "frameworks": [ "net8.0" ] } ] }
+            ] }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("FromEF8", string.Join(", ", Names(outline.items)));
+    }
+
+    [Fact]
+    public void AHeadingWhoseKeptItemsHaveNoNameGoesToo()
+    {
+        // written by hand: the site's table of contents shows no entry without a name, so no heading of only such entries
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            { "pdf": true, "pdfFramework": "net8.0", "items": [
+              { "name": "Unnamed", "items": [ { "href": "a.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ] } ] },
+              { "name": "Named", "items": [ { "name": "C", "href": "c.html", "appliesTo": [ { "frameworks": [ "net8.0" ] } ] } ] }
+            ] }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("Named, C", string.Join(", ", Names(outline.items)));
     }
 
     private static PdfBuilder.Outline Parse(string framework, string value) =>

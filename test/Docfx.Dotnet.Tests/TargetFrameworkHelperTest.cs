@@ -656,7 +656,6 @@ public class TargetFrameworkHelperTest
         TargetFrameworkHelper.IsSameFramework(left, right).Should().Be(expected);
     }
 
-
     [Fact]
     public async Task SelectProjectOfASingleTargetProjectWithParenthesesInItsNameReadsTheFrameworkTheWorkspaceLoaded()
     {

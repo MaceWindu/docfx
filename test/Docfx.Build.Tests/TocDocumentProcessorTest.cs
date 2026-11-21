@@ -1044,6 +1044,35 @@ items:
     }
 
     [Theory]
+    [InlineData("pdfFramework", "true", "true, True or TRUE")]
+    [InlineData("pdfAxisValue", "False", "false, False or FALSE")]
+    public void APdfFrameworkOrAxisValueThatYamlReadsAsABooleanIsUsedAsTextAndWarns(string key, string written, string spellings)
+    {
+        var content = $"""
+            pdf: true
+            {key}: {written}
+            items:
+            - name: EF Core 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.Equal(written.ToLowerInvariant(), model.Metadata[key]);
+        var warning = Assert.Single(listener.Items);
+        Assert.StartsWith($"'{key}' of table of contents 'toc.yml' holds {spellings} unquoted, which YAML reads as a boolean", warning.Message);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("# comment only\n")]
     [InlineData("null\n")]
