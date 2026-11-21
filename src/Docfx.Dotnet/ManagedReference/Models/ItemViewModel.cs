@@ -253,6 +253,18 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [JsonPropertyName(Constants.PropertyName.Assemblies)]
     public List<string> AssemblyNameList { get; set; }
 
+    [YamlMember(Alias = Constants.PropertyName.AppliesTo)]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty(Constants.PropertyName.AppliesTo)]
+    [JsonPropertyName(Constants.PropertyName.AppliesTo)]
+    public List<AppliesToViewModel> AppliesTo { get; set; }
+
+    [YamlMember(Alias = "variants")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("variants")]
+    [JsonPropertyName("variants")]
+    public List<ItemVariantViewModel> Variants { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.Namespace)]
     [JsonProperty(Constants.PropertyName.Namespace)]
     [JsonPropertyName(Constants.PropertyName.Namespace)]
@@ -330,6 +342,16 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> DerivedClasses { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="DerivedClasses"/> derives from this item in, for those that do so
+    /// in only some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "derivedClassesAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("derivedClassesAppliesTo")]
+    [JsonPropertyName("derivedClassesAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> DerivedClassesAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.Implements)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children
     [JsonProperty(Constants.PropertyName.Implements)]
@@ -337,12 +359,32 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> Implements { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="Implements"/> is implemented in, for those implemented in only
+    /// some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "implementsAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("implementsAppliesTo")]
+    [JsonPropertyName("implementsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ImplementsAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.InheritedMembers)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children
     [JsonProperty(Constants.PropertyName.InheritedMembers)]
     [JsonPropertyName(Constants.PropertyName.InheritedMembers)]
     [UniqueIdentityReference]
     public List<string> InheritedMembers { get; set; }
+
+    /// <summary>
+    /// The target frameworks each of <see cref="InheritedMembers"/> is inherited in, for those inherited in only
+    /// some of the frameworks of this item.
+    /// </summary>
+    [YamlMember(Alias = "inheritedMembersAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("inheritedMembersAppliesTo")]
+    [JsonPropertyName("inheritedMembersAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> InheritedMembersAppliesTo { get; set; }
 
     [YamlMember(Alias = Constants.PropertyName.ExtensionMethods)]
     [MergeOption(MergeOption.Ignore)] // todo : merge more children

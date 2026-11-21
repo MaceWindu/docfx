@@ -51,6 +51,22 @@ public class JsonSchemaTest : TestBase
     }
 
     [Theory]
+    [InlineData("[\"v1/**\"]", true)]
+    // `axes` rejects a value without a pattern, which matches no project
+    [InlineData("[]", false)]
+    public void JsonSchemaTest_Docfx_Json_AxisValueFiles(string files, bool expected)
+    {
+        var json = $$"""
+            { "metadata": [{ "src": [{ "files": ["**/*.csproj"] }], "dest": "api",
+              "axes": [{ "name": "Version", "values": [{ "id": "v1", "files": {{files}} }] }] }] }
+            """;
+
+        var result = JsonSchemaUtility.ValidateJsonSchema(JsonDocument.Parse(json).RootElement, Constants.JsonSchemas.Docfx);
+
+        result.IsValid.Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("src/Docfx.Dotnet/Resources/defaultfilterconfig.yml")]
     [InlineData("test/Docfx.Dotnet.Tests/TestData/filterconfig.yml")]
     [InlineData("test/Docfx.Dotnet.Tests/TestData/filterconfig_attribute.yml")]

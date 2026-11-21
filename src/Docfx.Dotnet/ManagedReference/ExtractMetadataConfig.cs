@@ -45,6 +45,20 @@ internal class ExtractMetadataConfig
 
     public string TargetFramework { get; init; }
 
+    public List<string> TargetFrameworks { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="TargetFrameworks"/> is every framework because <c>axes</c> is set, not because
+    /// <c>targetFrameworks</c> is, so that messages name the option the entry sets.
+    /// </summary>
+    public bool TargetFrameworksFromAxes { get; init; }
+
+    public string DefaultFramework { get; init; }
+
+    public VariantIgnore VariantIgnore { get; init; }
+
+    public TargetFrameworkAxis Axis { get; init; }
+
     public bool AllowCompilationErrors { get; init; }
 
     public static bool UseClrTypeNames { get; set; }

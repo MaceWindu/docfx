@@ -50,6 +50,11 @@ public class ManagedReferenceDocumentProcessor : ReferenceDocumentProcessorBase
         "extensionMethods",
         "conceptual",
         "platform",
+        Constants.PropertyName.AppliesTo,
+        "variants",
+        "inheritedMembersAppliesTo",
+        "implementsAppliesTo",
+        "derivedClassesAppliesTo",
         "attributes",
         Constants.PropertyName.AdditionalNotes
     ];

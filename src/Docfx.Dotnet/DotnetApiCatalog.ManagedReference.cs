@@ -12,27 +12,77 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static void CreateManagedReference(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, ExtractMetadataConfig config, DotnetApiOptions options)
+    private static void CreateManagedReference(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, ExtractMetadataConfig config, DotnetApiOptions options, Dictionary<Compilation, string>? frameworks = null)
     {
         var projectMetadataList = new List<MetadataItem>();
         var filter = new SymbolFilter(config, options);
-        var extensionMethods = assemblies.SelectMany(assembly => assembly.Item1.FindExtensionMethods(filter)).ToArray();
-        var allAssemblies = new HashSet<IAssemblySymbol>(assemblies.Select(a => a.Item1), SymbolEqualityComparer.Default);
 
-        foreach (var (assembly, compilation) in assemblies)
+        // Symbols of different compilations cannot be used together, and each framework is a compilation
+        // of its own, so extension methods and the documented assemblies are worked out per framework.
+        // The first group provides the content of an API that several share, so the default value of an
+        // axis goes first, then its other values in their order, then the default framework and those nearest to it, or else the frameworks in
+        // the order `targetFrameworks` lists them: the projects are loaded in the order of `src`, so a
+        // project that targets only a later framework would otherwise put it first. `"*"` keeps the order.
+        var frameworkOrder = frameworks is null ? []
+            : config.DefaultFramework is { } defaultFramework
+                ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))
+            : config.TargetFrameworks is { } listed && !listed.Contains(TargetFrameworkHelper.AllTargetFrameworks) ? listed
+            : [];
+        List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
+            ? [assemblies]
+            : assemblies
+                .GroupBy(a => frameworks[a.compilation], StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => config.Axis is { } axis && TargetFrameworkAxis.SplitUnit(group.Key).Value != axis.Default ? 1 : 0)
+                // then the other values in the order the axis lists them, not the order `src` loads them in
+                .ThenBy(group => config.Axis?.IndexOf(TargetFrameworkAxis.SplitUnit(group.Key).Value) ?? 0)
+                .ThenBy(group => FrameworkRank(TargetFrameworkAxis.SplitUnit(group.Key).Framework))
+                .Select(group => group.ToList())
+                .ToList();
+
+        int FrameworkRank(string framework)
         {
-            Logger.LogInfo($"Processing {assembly.Name}");
-            var projectMetadata = assembly.Accept(new SymbolVisitorAdapter(
-                compilation, new(compilation, config.MemberLayout, allAssemblies), config, filter, extensionMethods));
-
-            if (projectMetadata != null)
-                projectMetadataList.Add(projectMetadata);
+            var index = frameworkOrder.FindIndex(f => TargetFrameworkHelper.IsSameFramework(f, framework));
+            return index < 0 ? int.MaxValue : index;
         }
+
+        foreach (var group in frameworkGroups)
+        {
+            var extensionMethods = group.SelectMany(assembly => assembly.symbol.FindExtensionMethods(filter)).ToArray();
+            var allAssemblies = new HashSet<IAssemblySymbol>(group.Select(a => a.symbol), SymbolEqualityComparer.Default);
+
+            foreach (var (assembly, compilation) in group)
+            {
+                Logger.LogInfo($"Processing {assembly.Name}");
+                var projectMetadata = assembly.Accept(new SymbolVisitorAdapter(
+                    compilation, new(compilation, config.MemberLayout, allAssemblies), config, filter, extensionMethods));
+
+                if (projectMetadata != null)
+                {
+                    if (frameworks is not null)
+                    {
+                        TagAppliesTo(projectMetadata, frameworks[compilation]);
+                    }
+
+                    projectMetadataList.Add(projectMetadata);
+                }
+            }
+        }
+
+        // the frameworks in the order of the merge, which a namespace that only holds others lists its frameworks in
+        var mergeOrder = frameworks is null ? null : frameworkGroups.Select(group => frameworks[group[0].compilation]).ToList();
 
         Logger.LogInfo($"Creating output...");
         var allMembers = new Dictionary<string, MetadataItem>();
         var allReferences = new Dictionary<string, ReferenceItem>();
-        MergeMembers(allMembers, projectMetadataList);
+        if (frameworks is null)
+        {
+            MergeMembers(allMembers, projectMetadataList);
+        }
+        else
+        {
+            MergeTargetFrameworks(allMembers, projectMetadataList, config.VariantIgnore);
+        }
+
         MergeReferences(allReferences, projectMetadataList);
 
         if (allMembers.Count == 0)
@@ -59,7 +109,7 @@ partial class DotnetApiCatalog
         Dictionary<string, MetadataItem> allMembers, Dictionary<string, ReferenceItem> allReferences)
         {
             var outputFileNames = new Dictionary<string, int>(FilePathComparer.OSPlatformSensitiveStringComparer);
-            var model = YamlMetadataResolver.ResolveMetadata(allMembers, allReferences, config.NamespaceLayout);
+            var model = YamlMetadataResolver.ResolveMetadata(allMembers, allReferences, config.NamespaceLayout, mergeOrder);
 
             // generate toc.yml
             model.TocYamlViewModel.Type = MemberType.Toc;
@@ -67,7 +117,7 @@ partial class DotnetApiCatalog
             var tocViewModel = new TocItemViewModel
             {
                 Metadata = new() { ["memberLayout"] = config.MemberLayout },
-                Items = model.TocYamlViewModel.ToTocViewModel(),
+                Items = model.TocYamlViewModel.ToTocViewModel(axis: config.Axis),
             };
             string tocFilePath = Path.Combine(config.OutputFolder, "toc.yml");
 
@@ -181,6 +231,112 @@ partial class DotnetApiCatalog
             }
 
             Logger.Log(LogLevel.Warning, $"Ignore duplicated member {node.Type}:{node.Name} from {node.Source?.Path} as it already exists in {existingNode.Source?.Path}.");
+            return false;
+        }
+    }
+
+    internal static void TagAppliesTo(MetadataItem item, string framework)
+    {
+        item.AppliesTo = [framework];
+        if (item.InheritedMembers is { Count: > 0 } inherited)
+        {
+            item.InheritedMembersAppliesTo = [];
+            foreach (var uid in inherited)
+            {
+                item.InheritedMembersAppliesTo.TryAdd(uid, [framework]);
+            }
+        }
+
+        if (item.Implements is { Count: > 0 } implemented)
+        {
+            item.ImplementsAppliesTo = [];
+            foreach (var uid in implemented)
+            {
+                item.ImplementsAppliesTo.TryAdd(uid, [framework]);
+            }
+        }
+
+        foreach (var child in item.Items ?? [])
+        {
+            TagAppliesTo(child, framework);
+        }
+    }
+
+    /// <summary>
+    /// Merges the same APIs compiled for several frameworks into one item per UID, recording the frameworks
+    /// each one exists in. Items must be given primary framework first: the first occurrence of a UID
+    /// provides its content.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="MergeMembers"/>, a repeated UID is expected here for every kind of member, and the
+    /// children of every kind are unioned, as a struct or interface can gain members in one framework too.
+    /// </remarks>
+    internal static void MergeTargetFrameworks(Dictionary<string, MetadataItem> result, List<MetadataItem> items, VariantIgnore ignore = VariantIgnore.None)
+    {
+        foreach (var item in items)
+        {
+            MergeNode(item);
+        }
+
+        bool MergeNode(MetadataItem node)
+        {
+            if (node.Type is MemberType.Assembly)
+            {
+                foreach (var item in node.Items ?? [])
+                {
+                    MergeNode(item);
+                }
+                return false;
+            }
+
+            if (!result.TryGetValue(node.Name, out var existingNode))
+            {
+                result.Add(node.Name, node);
+                foreach (var item in node.Items ?? [])
+                {
+                    MergeNode(item);
+                }
+                return true;
+            }
+
+            var framework = node.AppliesTo[0];
+            var isSameFramework = existingNode.AppliesTo.Contains(framework, StringComparer.OrdinalIgnoreCase);
+            if (isSameFramework && node.Type is not (MemberType.Namespace or MemberType.Class))
+            {
+                Logger.Log(LogLevel.Warning, $"Ignore duplicated member {node.Type}:{node.Name} from {node.Source?.Path} as it already exists in {existingNode.Source?.Path}.");
+                return false;
+            }
+
+            if (!isSameFramework)
+            {
+                existingNode.AppliesTo.Add(framework);
+                TargetFrameworkVariants.Merge(existingNode, node, framework, ignore);
+
+                if (node.Type != existingNode.Type)
+                {
+                    Logger.LogWarning(
+                        $"{node.Name} is a {node.Type} in '{framework}' but a {existingNode.Type} in '{existingNode.AppliesTo[0]}'. It is documented as a {existingNode.Type}.",
+                        code: WarningCodes.Metadata.ApiKindDiffersBetweenFrameworks);
+                }
+            }
+
+            // A member only this framework has goes after the one it follows here, so that the order is that
+            // of the source: an overload only .NET 8 has is listed with its siblings, and an enum keeps its
+            // declaring order. The types of a namespace are appended, as without `targetFrameworks`.
+            var inSourceOrder = existingNode.Type is not MemberType.Namespace;
+            var insertAt = 0;
+            foreach (var item in node.Items ?? [])
+            {
+                if (MergeNode(item))
+                {
+                    existingNode.Items ??= [];
+                    existingNode.Items.Insert(inSourceOrder ? insertAt++ : existingNode.Items.Count, item);
+                }
+                else if (inSourceOrder && existingNode.Items?.FindIndex(i => i.Name == item.Name) is int index and >= 0)
+                {
+                    insertAt = index + 1;
+                }
+            }
             return false;
         }
     }

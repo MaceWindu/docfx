@@ -179,6 +179,33 @@ The `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json
 
 `properties` and `targetFramework` have no effect on assemblies: when the input is `.dll` files, list the ones built for the framework to document.
 
+#### Documenting several frameworks together
+
+[`targetFrameworks`](../reference/docfx-json-reference.md#targetframeworks) documents several frameworks of a project, or all of them with `"*"`, as one set of pages:
+
+```json
+{
+  "metadata": [
+    {
+      "src": [{
+        "files": ["src/MyLib/MyLib.csproj"],
+        "src": "../"
+      }],
+      "dest": "api",
+      "targetFrameworks": ["net8.0", "netstandard2.0"]
+    }
+  ]
+}
+```
+
+Each API gets one page, which says which frameworks it applies to, for example `Applies to: .NET 8, .NET Standard 2.0`. A member that exists in fewer frameworks than its type is marked with them, and so are an inherited member that is inherited in fewer frameworks, an interface the type implements in fewer frameworks (and in the `default` template, on the page of a method or property group, an interface member a member implements in fewer frameworks), and a derived class that derives from it in fewer frameworks. The page of an interface lists the types that implement it, marked the same way. Where an API differs in another framework, such as a different return type or summary, the page shows what differs, labelled with that framework. The first framework listed, or [`defaultFramework`](../reference/docfx-json-reference.md#defaultframework), provides the rest of the page.
+
+Documentation that one framework has and another lacks, or that differs only in whitespace, is not shown as a difference. Inherited documentation is the common case: the reference assemblies of older frameworks often have none. [`variantIgnore`](../reference/docfx-json-reference.md#variantignore) leaves out attribute or documentation differences altogether.
+
+Projects that build the same assembly against different versions of a dependency, one project per version, can be documented as one set of pages too, with [`axes`](../reference/docfx-json-reference.md#axes).
+
+Every framework is compiled, so the time and memory metadata generation takes grow with their number. Only the `mref` output format supports more than one framework, and projects merged this way must be in the same metadata item. An API is identified by its UID, so a type a project defines only for some frameworks, such as a polyfill, gets one page that links to it from every framework, including those where the type comes from the framework itself. The labels of frameworks can be changed with the `_frameworkNames` template option.
+
 ## Generate from source code
 
 When the file extension is `.cs` or `.vb`, docfx uses the latest supported .NET Core SDK installed on the machine to build the source code using `Microsoft.NET.Sdk`. Additional references can be specified in the `references` config:

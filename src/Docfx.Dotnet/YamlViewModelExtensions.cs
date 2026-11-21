@@ -41,6 +41,7 @@ internal static class YamlViewModelExtensions
         {
             Name = item.Name,
             DisplayNames = item.DisplayNames,
+            AppliesTo = item.AppliesTo,
             Items = null
         };
         if (item.Items == null)
@@ -79,6 +80,7 @@ internal static class YamlViewModelExtensions
             Name = item.Name,
             DisplayNames = item.DisplayNames,
             Type = item.Type,
+            AppliesTo = item.AppliesTo,
             Items = null
         };
         if (item.Type == MemberType.Toc || item.Type == MemberType.Namespace)
@@ -113,7 +115,7 @@ internal static class YamlViewModelExtensions
         return shrinkedItem;
     }
 
-    public static List<TocItemViewModel> ToTocViewModel(this MetadataItem item, string parentNamespace = "")
+    public static List<TocItemViewModel> ToTocViewModel(this MetadataItem item, string parentNamespace = "", TargetFrameworkAxis axis = null)
     {
         if (item == null)
         {
@@ -127,7 +129,7 @@ internal static class YamlViewModelExtensions
                 return item.Items
                     .OrderBy(x => x.Type == MemberType.Namespace ? 0 : 1)
                     .ThenBy(x => x.Name, SymbolStringComparer.Instance)
-                    .Select(x => x.ToTocItemViewModel(parentNamespace))
+                    .Select(x => x.ToTocItemViewModel(parentNamespace, axis))
                     .ToList();
 
             default:
@@ -135,7 +137,7 @@ internal static class YamlViewModelExtensions
         }
     }
 
-    public static TocItemViewModel ToTocItemViewModel(this MetadataItem item, string parentNamespace)
+    public static TocItemViewModel ToTocItemViewModel(this MetadataItem item, string parentNamespace, TargetFrameworkAxis axis = null)
     {
         var result = new TocItemViewModel
         {
@@ -143,6 +145,11 @@ internal static class YamlViewModelExtensions
             Name = item.DisplayNames.GetLanguageProperty(SyntaxLanguage.Default),
             Type = item.Type.ToString(),
         };
+
+        if (ToAppliesToViewModel(item.AppliesTo, axis) is { } appliesTo)
+        {
+            result.Metadata[Constants.PropertyName.AppliesTo] = appliesTo;
+        }
 
         if (item.Type is MemberType.Namespace)
         {
@@ -153,7 +160,7 @@ internal static class YamlViewModelExtensions
 
         if (item.Items != null)
         {
-            result.Items = item.ToTocViewModel(parentNamespace);
+            result.Items = item.ToTocViewModel(parentNamespace, axis);
         }
         return result;
     }
@@ -237,6 +244,94 @@ internal static class YamlViewModelExtensions
         return result;
     }
 
+    /// <summary>
+    /// Groups units by the value of the axis, in the order the axis declares its values, keeping the
+    /// order of the frameworks within each.
+    /// </summary>
+    internal static List<AppliesToViewModel> ToAppliesToViewModel(List<string> units, TargetFrameworkAxis axis)
+    {
+        if (units is null)
+        {
+            return null;
+        }
+
+        return units
+            .Select(TargetFrameworkAxis.SplitUnit)
+            .GroupBy(unit => unit.Value)
+            .OrderBy(group => axis?.IndexOf(group.Key) ?? 0)
+            .Select(group => new AppliesToViewModel
+            {
+                Version = group.Key,
+                Label = group.Key is null ? null : axis?.GetLabel(group.Key) ?? group.Key,
+                Frameworks = group.Select(unit => unit.Framework).ToList(),
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// The frameworks of the inherited members inherited in only some of the frameworks of <paramref name="model"/>,
+    /// in the order of its own; a member inherited in all of them is not listed, as it needs no mark.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToInheritedMembersAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        return ToPartialAppliesTo(model.InheritedMembers, model.InheritedMembersAppliesTo, model.AppliesTo, axis);
+    }
+
+    /// <summary>
+    /// The frameworks of the interfaces <paramref name="model"/> implements in only some of its frameworks, in the
+    /// order of its own; an interface it implements in all of them is not listed.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToImplementsAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        return ToPartialAppliesTo(model.Implements, model.ImplementsAppliesTo, model.AppliesTo, axis);
+    }
+
+    private static Dictionary<string, List<AppliesToViewModel>> ToPartialAppliesTo(List<string> uids, Dictionary<string, List<string>> appliesToByUid, List<string> frameworks, TargetFrameworkAxis axis)
+    {
+        if (appliesToByUid is null || frameworks is null)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, List<AppliesToViewModel>>();
+        foreach (var uid in uids ?? [])
+        {
+            if (appliesToByUid.TryGetValue(uid, out var units) && units.Count < frameworks.Count)
+            {
+                result[uid] = ToAppliesToViewModel(frameworks.Where(f => units.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList(), axis);
+            }
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
+    /// <summary>
+    /// The frameworks of the derived classes that derive from <paramref name="model"/> in only some of its
+    /// frameworks, in the order of its own; a class that derives from it in all of them is not listed.
+    /// </summary>
+    private static Dictionary<string, List<AppliesToViewModel>> ToDerivedClassesAppliesTo(MetadataItem model, TargetFrameworkAxis axis)
+    {
+        if (model.DerivedClassesAppliesTo is not { } derivedIn || model.AppliesTo is not { } frameworks)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, List<AppliesToViewModel>>();
+        foreach (var uid in model.DerivedClasses ?? [])
+        {
+            if (derivedIn.TryGetValue(uid, out var units))
+            {
+                var shared = frameworks.Where(f => units.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
+                if (shared.Count < frameworks.Count)
+                {
+                    result[uid] = ToAppliesToViewModel(shared, axis);
+                }
+            }
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
     public static ItemViewModel ToItemViewModel(this MetadataItem model, ExtractMetadataConfig config)
     {
         if (model == null)
@@ -261,6 +356,8 @@ internal static class YamlViewModelExtensions
             Source = model.Source,
             Documentation = model.Documentation,
             AssemblyNameList = model.AssemblyNameList,
+            AppliesTo = ToAppliesToViewModel(model.AppliesTo, config.Axis),
+            Variants = model.Variants?.Select(v => ToItemVariantViewModel(v, config.Axis)).ToList(),
             NamespaceName = model.NamespaceName,
             Summary = model.Summary,
             Remarks = model.Remarks,
@@ -271,9 +368,12 @@ internal static class YamlViewModelExtensions
             Exceptions = model.Exceptions,
             SeeAlsos = model.SeeAlsos,
             DerivedClasses = model.DerivedClasses,
+            DerivedClassesAppliesTo = ToDerivedClassesAppliesTo(model, config.Axis),
             Inheritance = model.Inheritance,
             Implements = model.Implements,
+            ImplementsAppliesTo = ToImplementsAppliesTo(model, config.Axis),
             InheritedMembers = model.InheritedMembers,
+            InheritedMembersAppliesTo = ToInheritedMembersAppliesTo(model, config.Axis),
             ExtensionMethods = model.ExtensionMethods,
             Attributes = model.Attributes,
         };
@@ -324,6 +424,25 @@ internal static class YamlViewModelExtensions
         }
 
         return result;
+    }
+
+    private static ItemVariantViewModel ToItemVariantViewModel(MetadataItemVariant variant, TargetFrameworkAxis axis)
+    {
+        var content = variant.Content;
+        return new ItemVariantViewModel
+        {
+            AppliesTo = ToAppliesToViewModel(variant.Frameworks, axis),
+            Summary = content.Summary,
+            Remarks = content.Remarks,
+            Examples = content.Examples,
+            Syntax = content.Syntax.ToSyntaxDetailViewModel(),
+            Overridden = content.Overridden,
+            NoOverridden = variant.NoOverridden ? true : null,
+            Exceptions = content.Exceptions,
+            SeeAlsos = content.SeeAlsos,
+            Inheritance = content.Inheritance,
+            Attributes = content.Attributes,
+        };
     }
 
     public static SyntaxDetailViewModel ToSyntaxDetailViewModel(this SyntaxDetail model)

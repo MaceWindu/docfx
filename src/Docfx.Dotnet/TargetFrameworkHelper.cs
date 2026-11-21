@@ -19,12 +19,234 @@ namespace Docfx.Dotnet;
 /// </remarks>
 internal static partial class TargetFrameworkHelper
 {
+    internal const string AllTargetFrameworks = "*";
+
     // `net8.0` is `NET8_0`, `net462` is `NET462`: the frameworks whose names say which framework they are.
     [GeneratedRegex(@"^(NETSTANDARD\d+_\d+|NETCOREAPP\d+_\d+|NET\d+_\d+|NET\d{2,3})$")]
     private static partial Regex TargetFrameworkSymbolRegex();
 
     [GeneratedRegex(@"^\.(NETCoreApp|NETStandard|NETFramework),Version=v(\d+)\.(\d+)(?:\.(\d+))?", RegexOptions.IgnoreCase)]
     private static partial Regex FrameworkNameRegex();
+
+    [GeneratedRegex(@"^(netstandard|netcoreapp|net)(\d+(?:\.\d+)*)(?:-([a-z]*))?", RegexOptions.IgnoreCase)]
+    private static partial Regex TargetFrameworkMonikerRegex();
+
+    private enum FrameworkFamily { Standard, Core, Framework }
+
+    // The lowest .NET Framework version implementing each .NET Standard version that it implements at all.
+    private static readonly (Version Standard, Version Framework)[] StandardOnFramework =
+    [
+        (new(1, 1), new(4, 5)),
+        (new(1, 2), new(4, 5, 1)),
+        (new(1, 3), new(4, 6)),
+        (new(2, 0), new(4, 6, 1)),
+    ];
+
+    /// <summary>
+    /// Orders <paramref name="frameworks"/> by how well each one stands in for <paramref name="target"/>:
+    /// the target itself, then the frameworks a project targeting it could reference, nearest first, then
+    /// the others in the order given.
+    /// </summary>
+    /// <remarks>
+    /// A simplified form of the NuGet compatibility rules, which covers the frameworks a library targets.
+    /// NuGet.Frameworks is not used because MSBuildWorkspace loads the copy that comes with the SDK.
+    /// </remarks>
+    internal static List<string> OrderByNearest(string target, IEnumerable<string> frameworks)
+    {
+        var parsedTarget = ParseMoniker(target);
+        return frameworks
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select((framework, index) => (framework, index, parsed: ParseMoniker(framework)))
+            .OrderBy(f => IsSameFramework(f.framework, target) ? 0
+                : parsedTarget is not { } t || f.parsed is not { } p || !CanReference(t, p) ? 3
+                : p.Family == t.Family ? 1
+                : 2)
+            .ThenByDescending(f => f.parsed is { } p && parsedTarget is { } t && CanReference(t, p) ? p.Version : null)
+            .ThenBy(f => f.index)
+            .Select(f => f.framework)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Whether two framework names name the same framework, either way round with the platform version one
+    /// leaves out: <c>net8.0-windows</c> is the project loaded as <c>net8.0-windows10.0.19041.0</c>, and
+    /// <c>net8.0-windows7.0</c> the one loaded as <c>net8.0-windows</c>.
+    /// </summary>
+    internal static bool IsSameFramework(string left, string right)
+    {
+        return string.Equals(left, right, StringComparison.OrdinalIgnoreCase) || MatchesFramework(left, right) || MatchesFramework(right, left);
+    }
+
+    private static (FrameworkFamily Family, Version Version, string? Platform)? ParseMoniker(string moniker)
+    {
+        var match = TargetFrameworkMonikerRegex().Match(moniker);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var digits = match.Groups[2].Value;
+        var platform = match.Groups[3].Success ? match.Groups[3].Value.ToLowerInvariant() : null;
+        return match.Groups[1].Value.ToLowerInvariant() switch
+        {
+            "netstandard" when Version.TryParse(digits, out var version) => (FrameworkFamily.Standard, version, platform),
+            "netcoreapp" when Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            "net" when digits.Contains('.') && Version.TryParse(digits, out var version) => (FrameworkFamily.Core, version, platform),
+            // `net462` is .NET Framework 4.6.2, one digit per part.
+            "net" when !digits.Contains('.') && digits.Length is 2 or 3 => (FrameworkFamily.Framework, Version.Parse(string.Join('.', digits.ToCharArray())), platform),
+            _ => null,
+        };
+    }
+
+    private static bool CanReference((FrameworkFamily Family, Version Version, string? Platform) target, (FrameworkFamily Family, Version Version, string? Platform) framework)
+    {
+        if (framework.Platform is not null && framework.Platform != target.Platform)
+        {
+            return false;
+        }
+
+        return (target.Family, framework.Family) switch
+        {
+            _ when target.Family == framework.Family => framework.Version <= target.Version,
+            (FrameworkFamily.Core, FrameworkFamily.Standard) => framework.Version <= (target.Version >= new Version(3, 0) ? new Version(2, 1) : target.Version >= new Version(2, 0) ? new Version(2, 0) : new Version(1, 6)),
+            (FrameworkFamily.Framework, FrameworkFamily.Standard) => StandardOnFramework.Any(s => framework.Version <= s.Standard && target.Version >= s.Framework),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Returns the projects, among those loaded from the same file as <paramref name="project"/>, for each
+    /// of <paramref name="targetFrameworks"/> in that order, with the framework each one targets.
+    /// </summary>
+    /// <returns>
+    /// The projects found, which is none when the file targets none of the frameworks: unlike a single
+    /// framework, a list states what to include, so nothing else is documented in place of a missing one.
+    /// A framework is <see langword="null"/> for a project MSBuild cannot evaluate, which it has reported.
+    /// </returns>
+    public static async Task<List<(Project Project, string? Framework)>> SelectProjects(
+        Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, ProjectFrameworks frameworks, bool fromSolution = false)
+    {
+        var candidates = GetProjectsFromSameFile(solution, project);
+
+        if (targetFrameworks.Contains(AllTargetFrameworks))
+        {
+            // The project the workspace opened goes first, so that the framework a project is documented
+            // at by default comes first among its own. Which framework provides the content is decided per
+            // entry, by the order the frameworks first appear across its projects, so with several projects
+            // that list their frameworks in different orders, `defaultFramework` is what chooses it.
+            var all = new List<(Project, string?)>();
+            foreach (var candidate in candidates.OrderBy(p => p.Id == project.Id ? 0 : 1))
+            {
+                all.Add((candidate, await GetFrameworkLabel(candidate, frameworks)));
+            }
+
+            return all;
+        }
+
+        var names = new Dictionary<ProjectId, string?>();
+        foreach (var candidate in candidates)
+        {
+            names[candidate.Id] = await frameworks.GetName(candidate);
+        }
+
+        if (candidates.Count <= 1 && names[project.Id] is null)
+        {
+            // which framework to say it applies to is not known, which MSBuild has reported
+            return [(project, null)];
+        }
+
+        var selected = new List<(Project, string?)>();
+        var missing = new List<string>();
+        foreach (var targetFramework in targetFrameworks)
+        {
+            var available = candidates.Where(p => !selected.Any(s => s.Item1.Id == p.Id) && names[p.Id] is not null).ToList();
+            // An exact name wins over one that differs only in the platform version, as with `targetFramework`.
+            var match = available.FirstOrDefault(p => string.Equals(names[p.Id], targetFramework, StringComparison.OrdinalIgnoreCase));
+            foreach (var candidate in available)
+            {
+                if (match is not null)
+                {
+                    break;
+                }
+
+                if (await TargetsFramework(candidate, names[candidate.Id]!, targetFramework, frameworks))
+                {
+                    match = candidate;
+                }
+            }
+
+            if (match is not null)
+            {
+                // named as the list names it, unless the project's name is a framework rather than an alias
+                selected.Add((match, names[match.Id] is { } name && IsFrameworkName(name) ? name : targetFramework));
+            }
+            else
+            {
+                missing.Add(targetFramework);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            var message = $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.";
+            // as with `targetFramework`, the projects of a solution commonly target other frameworks
+            if (fromSolution)
+            {
+                Logger.LogInfo(message);
+            }
+            else
+            {
+                Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
+            }
+        }
+
+        return selected;
+    }
+
+    private static List<Project> GetProjectsFromSameFile(Solution solution, Project project)
+    {
+        return solution.Projects
+            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Names the framework of a project as <c>targetFrameworks: "*"</c> lists it: as the project names it, or, for
+    /// an alias in <c>TargetFrameworks</c>, as the framework it stands for.
+    /// </summary>
+    /// <returns><see langword="null"/> for a project MSBuild cannot evaluate, which it has reported.</returns>
+    internal static async Task<string?> GetFrameworkLabel(Project project, ProjectFrameworks frameworks)
+    {
+        if (await frameworks.GetName(project) is not { } name)
+        {
+            return null;
+        }
+
+        return IsFrameworkName(name) || project.FilePath is not { } path ? name
+            : (await frameworks.Evaluate(path, name))?.Moniker ?? name;
+    }
+
+    /// <summary>
+    /// Names a framework that leaves out its platform version, <c>net8.0-windows</c>, as the one of
+    /// <paramref name="frameworks"/> that gives the version MSBuild evaluates it to, so that both are one framework:
+    /// <c>net8.0-windows7.0</c>, if another project is named that.
+    /// </summary>
+    internal static async Task<string> WithPlatformVersionOf(string framework, string projectPath, IEnumerable<string> frameworks, ProjectFrameworks projectFrameworks)
+    {
+        if (GetTargetFrameworkPlatform(framework) is null || GetTargetFrameworkPlatformVersion(framework) is not null)
+        {
+            return framework;
+        }
+
+        // only a framework another project names with a version is worth evaluating the project for
+        var versioned = frameworks.Where(other => GetTargetFrameworkPlatformVersion(other) is not null && MatchesFramework(other, framework)).ToList();
+        if (versioned.Count == 0 || await projectFrameworks.Evaluate(projectPath, framework) is not { } evaluated)
+        {
+            return framework;
+        }
+
+        return versioned.FirstOrDefault(other => GetTargetFrameworkPlatformVersion(other) == GetTargetFrameworkPlatformVersion(evaluated.Moniker)) ?? framework;
+    }
 
     /// <summary>
     /// Returns the project, among those loaded from the same file as <paramref name="project"/>, that
@@ -37,9 +259,7 @@ internal static partial class TargetFrameworkHelper
     public static async Task<(Project project, bool matched)> SelectProject(
         Solution solution, Project project, string targetFramework, ProjectFrameworks frameworks, bool fromSolution = false, bool report = true)
     {
-        var candidates = solution.Projects
-            .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
-            .ToList();
+        var candidates = GetProjectsFromSameFile(solution, project);
 
         if (candidates.Count <= 1)
         {
@@ -49,7 +269,7 @@ internal static partial class TargetFrameworkHelper
                 return (project, false);
             }
 
-            if (await Targets(project, name))
+            if (await TargetsFramework(project, name, targetFramework, frameworks))
             {
                 return (project, true);
             }
@@ -67,7 +287,7 @@ internal static partial class TargetFrameworkHelper
 
         foreach (var candidate in candidates)
         {
-            if (GetTargetFrameworkFromName(candidate) is { } name && await Targets(candidate, name))
+            if (GetTargetFrameworkFromName(candidate) is { } name && await TargetsFramework(candidate, name, targetFramework, frameworks))
             {
                 return (candidate, true);
             }
@@ -76,23 +296,6 @@ internal static partial class TargetFrameworkHelper
         var available = string.Join(", ", candidates.Select(GetTargetFrameworkFromName).Where(tfm => tfm is not null).Select(tfm => $"'{tfm}'"));
         Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{GetTargetFrameworkFromName(project)}' instead. It targets {available}.");
         return (project, false);
-
-        async Task<bool> Targets(Project candidate, string name)
-        {
-            if (string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            // An alias does not say which framework it stands for, nor `net8.0-windows` the platform version it
-            // does: MSBuild does.
-            var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
-                && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
-            var moniker = IsFrameworkName(name) && !leavesOutVersion ? name
-                : candidate.FilePath is { } path ? (await frameworks.Evaluate(path, name))?.Moniker
-                : null;
-            return moniker is not null && MatchesFramework(moniker, targetFramework);
-        }
 
         void Report(string message)
         {
@@ -110,6 +313,24 @@ internal static partial class TargetFrameworkHelper
                 Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
             }
         }
+    }
+
+    // Whether a project MSBuild loaded for the framework it names `name` targets `targetFramework`.
+    private static async Task<bool> TargetsFramework(Project project, string name, string targetFramework, ProjectFrameworks frameworks)
+    {
+        if (string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // An alias does not say which framework it stands for, nor `net8.0-windows` the platform version it
+        // does: MSBuild does.
+        var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
+            && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
+        var moniker = IsFrameworkName(name) && !leavesOutVersion ? name
+            : project.FilePath is { } path ? (await frameworks.Evaluate(path, name))?.Moniker
+            : null;
+        return moniker is not null && MatchesFramework(moniker, targetFramework);
     }
 
     /// <summary>
