@@ -4,7 +4,7 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
-import { Selection, Toc, TocEntry, entryDisplay, entryHref, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries, withSelectionCache } from './appliesTo'
+import { Selection, Toc, TocEntry, articleEntries, entryDisplay, entryHref, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, withSelectionCache } from './appliesTo'
 
 export type TocNode = TocEntry & {
   expanded?: boolean
@@ -61,8 +61,7 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 
   if (selectedNodes.length > 0) {
-    const keep = picker ? (node: TocEntry) => activeNodes.includes(node) : () => true
-    const renderNext = () => withSelectionCache(() => renderNextArticle(shownEntries(items, selection(), frameworks(), keep), selectedNodes[0]))
+    const renderNext = () => withSelectionCache(() => renderNextArticle(articleEntries(toc, activeNodes), selectedNodes[0]))
     renderNext()
     if (picker) {
       onSelectionChange(renderNext)
@@ -200,6 +199,11 @@ function renderNextArticle(tocNodes: TocEntry[], node: TocEntry) {
   const i = tocNodes.findIndex(n => n === node)
   const prev = tocNodes[i - 1]
   const next = tocNodes[i + 1]
+
+  // nothing to link, and nothing linked before another pick: the element stays as the page has it
+  if (!prev && !next && !nextArticle.hasChildNodes()) {
+    return
+  }
 
   const prevButton = prev ? html`<div class="prev"><span><i class='bi bi-chevron-left'></i> ${loc('prevArticle')}</span> <a href="${prev.href}" rel="prev">${breakWordLit(prev.name)}</a></div>` : null
   const nextButton = next ? html`<div class="next"><span>${loc('nextArticle')} <i class='bi bi-chevron-right'></i></span> <a href="${next.href}" rel="next">${breakWordLit(next.name)}</a></div>` : null

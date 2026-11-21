@@ -120,6 +120,12 @@ export class FakeElement {
     }
   }
 
+  prepend(node: FakeElement) {
+    node.remove()
+    this.childNodes.unshift(node)
+    node.parentElement = this
+  }
+
   after(node: FakeElement) {
     node.remove()
     const parent = this.parentElement

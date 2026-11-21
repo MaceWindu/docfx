@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
-  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
+  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, articleEntries, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
   getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework, withSelectionCache
 } from './appliesTo'
@@ -517,42 +517,84 @@ test('the page shows the content for the selection', () => {
 })
 
 test('one dimension picked keeps what differs in the other on the page', () => {
+  // Driver 1 differs between net8.0 and netstandard2.0; Driver 2 is the same on both, and its summary is the API's own
   const { document } = installDom(`${site}
   <article>
-    <h1 id="Lib_Reader" data-applies-to="d1:net8.0 d1:netstandard2.0 d2:net8.0">Reader</h1>
+    <h1 id="Lib_Reader" data-applies-to="d1:net8.0 d1:netstandard2.0 d2:net8.0 d2:netstandard2.0">Reader</h1>
     <div class="facts"></div>
     <div class="api-contents">
       <div class="api-content" data-applies-to="d1:net8.0"><p id="own">own</p></div>
       <div class="api-content" data-applies-to="d1:netstandard2.0" hidden><p id="copy1">copy1</p></div>
-      <div class="api-content" data-applies-to="d2:net8.0" hidden><p id="copy2">copy2</p></div>
+      <div class="api-content" data-applies-to="d2:net8.0 d2:netstandard2.0" hidden><p id="copy2">copy2</p></div>
     </div>
     <h5 class="api-variants-heading">In other frameworks</h5>
-    <div class="api-variant" id="variant1" data-applies-to="d1:netstandard2.0"></div>
-    <div class="api-variant" id="variant2" data-applies-to="d2:net8.0"></div>
+    <div class="api-variant" id="variant1" data-applies-to="d1:netstandard2.0"><h6 class="api-variant-label">Driver 1</h6><div id="diff1">summary</div></div>
+    <div class="api-variant" id="variant2" data-applies-to="d2:net8.0 d2:netstandard2.0"><h6 class="api-variant-label">Driver 2</h6><div id="diff2">declaration</div></div>
   </article>`)
   const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
   const heading = () => document.querySelector<HTMLElement>('.api-variants-heading').hidden
-  const all = ['own', 'copy1', 'copy2', 'variant1', 'variant2']
+  const all = ['own', 'copy1', 'copy2', 'variant1', 'variant2', 'diff1', 'diff2']
+  const contents = () => document.querySelector('.api-contents').children.map(e => e.children[0].id)
 
   applySelection({ value: 'd1' })
-  assert.deepStrictEqual(hidden(...all), [false, true, true, false, true])
+  assert.deepStrictEqual(hidden(...all), [false, true, true, false, true, false, true])
   assert.ok(!heading())
 
   applySelection({ framework: 'net8.0' })
-  assert.deepStrictEqual(hidden(...all), [false, true, true, true, false])
+  assert.deepStrictEqual(hidden(...all), [false, true, true, true, false, true, false])
 
-  // Driver 2 is shown in place of the API's own content, so not under "In other frameworks" too
+  // Driver 1 on .NET Standard 2.0 is shown in place of the API's own content, which what Driver 2's entry lists differs
+  // from: the entry shows Driver 2 whole instead, below its label
+  applySelection({ framework: 'netstandard2.0' })
+  assert.deepStrictEqual(hidden(...all), [true, false, false, true, false, true, true])
+  assert.strictEqual(document.getElementById('copy2').closest('.api-variant').id, 'variant2')
+  assert.strictEqual(document.getElementById('variant2').children[1].children[0].id, 'copy2')
+  assert.ok(!heading())
+
+  // Driver 2 is shown in place of the API's own content, so not under "In other frameworks" too; its copy is back
   applySelection({ value: 'd2' })
-  assert.deepStrictEqual(hidden(...all), [true, true, false, true, true])
+  assert.deepStrictEqual(hidden(...all), [true, true, false, true, true, true, true])
+  assert.deepStrictEqual(contents(), ['own', 'copy1', 'copy2'])
   assert.ok(heading())
 
   applySelection({ value: 'd1', framework: 'net8.0' })
-  assert.deepStrictEqual(hidden(...all), [false, true, true, true, true])
+  assert.deepStrictEqual(hidden(...all), [false, true, true, true, true, true, true])
   assert.ok(heading())
 
+  applySelection({ framework: 'netstandard2.0' })
   applySelection({})
-  assert.deepStrictEqual(hidden(...all), [false, true, true, false, false])
+  assert.deepStrictEqual(hidden(...all), [false, true, true, false, false, false, false])
+  assert.deepStrictEqual(contents(), ['own', 'copy1', 'copy2'])
+  assert.strictEqual(document.getElementById('copy2').closest('.api-variant'), null)
   assert.ok(!heading())
+})
+
+test('a variant shown in place shows the others whole, and a link goes to the one in place', () => {
+  // Driver 1 on .NET 10 differs from the API's own content, which is Driver 1 on .NET 8; Driver 2 is on .NET Standard 2.0
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Reader" data-applies-to="d1:net8.0 d2:netstandard2.0 d1:net10.0">Reader</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d1:net8.0"><p id="text">own</p></div>
+      <div class="api-content" data-applies-to="d2:netstandard2.0" hidden><p id="text_variant1">Driver 2</p></div>
+      <div class="api-content" data-applies-to="d1:net10.0" hidden><p id="text_variant2">Driver 1 on .NET 10</p></div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="d2:netstandard2.0"><h6 class="api-variant-label">Driver 2</h6><div id="diff1">summary</div></div>
+    <div class="api-variant" id="variant2" data-applies-to="d1:net10.0"><h6 class="api-variant-label">Driver 1</h6><div id="diff2">declaration</div></div>
+  </article>`)
+  const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
+
+  applySelection({ framework: 'net10.0' })
+  // Driver 1 on .NET 10 in place, Driver 2 whole in its entry, which comes before it on the page
+  assert.deepStrictEqual(hidden('text', 'text_variant1', 'text_variant2', 'variant1', 'diff1', 'variant2'), [true, false, false, false, true, true])
+  assert.strictEqual(document.getElementById('text_variant1').closest('.api-variant').id, 'variant1')
+  assert.strictEqual(shownTarget('text').id, 'text_variant2')
+
+  applySelection({})
+  assert.deepStrictEqual(document.querySelector('.api-contents').children.map(e => e.children[0].id), ['text', 'text_variant1', 'text_variant2'])
+  assert.deepStrictEqual(hidden('text', 'text_variant1', 'text_variant2', 'variant1', 'diff1', 'variant2'), [false, true, true, false, false, false])
 })
 
 test('the id a fragment points to', () => {
@@ -787,6 +829,25 @@ test('the copies of an API have ids of their own', () => {
   assert.strictEqual(shownTarget('example').id, 'example_variant1')
 })
 
+test('the tabs of a copy control the panels of the copy', () => {
+  const tabs = '<div class="tabGroup"><ul role="tablist"><li><a href="#tabpanel_x_a" role="tab" aria-controls="tabpanel_x_a">A</a></li></ul><section id="tabpanel_x_a" role="tabpanel">A</section></div>'
+  const { document } = installDom(`${site}
+  <article>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0">${tabs}</div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden>${tabs}</div>
+    </div>
+  </article>`)
+  distinguishCopies()
+  const tab = (framework: string) => document.querySelector(`[data-applies-to="${framework}"] a`)
+
+  assert.strictEqual(tab('netstandard2.0').getAttribute('aria-controls'), 'tabpanel_x_a_variant1')
+  assert.strictEqual(tab('netstandard2.0').getAttribute('href'), '#tabpanel_x_a_variant1')
+  assert.ok(document.getElementById('tabpanel_x_a_variant1'))
+  assert.strictEqual(tab('net8.0').getAttribute('aria-controls'), 'tabpanel_x_a')
+  assert.strictEqual(tab('net8.0').getAttribute('href'), '#tabpanel_x_a')
+})
+
 test('the headings of the page are named as without copies, those of the copies after them', () => {
   const { document } = installDom(`${site}
   <article>
@@ -837,6 +898,50 @@ test('a dropdown keeps what the reader picked', () => {
   select('framework', undefined)
   assert.ok(!storage.has('docfx.axis./docs/.framework'))
   assert.strictEqual(changes, 3)
+})
+
+test('a dropdown keeps what the reader picked for the page where local storage is null', () => {
+  installDom(site, 'https://example.org/docs/api/A.html?framework=net8.0')
+  // as in a browser set to keep no site data
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: null })
+
+  assert.strictEqual(getSelection(ef, frameworks).framework, 'net8.0')
+  select('framework', 'netstandard2.0')
+  // the address no longer names .NET 8, and the pick is not lost
+  assert.strictEqual(globalThis.window.location.search, '')
+  assert.deepStrictEqual(getSelection(ef, frameworks), { framework: 'netstandard2.0', value: undefined })
+  select('ef-core', 'ef3')
+  assert.deepStrictEqual(getSelection(ef, frameworks), { framework: 'netstandard2.0', value: 'ef3' })
+  // "All"
+  select('framework', undefined)
+  select('ef-core', undefined)
+  assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: undefined })
+})
+
+test('Next article reads a table of contents as before without the picker', () => {
+  // `appliesTo` and `axis` of other shapes, which the picker cannot read
+  const toc = {
+    items: [
+      { name: 'Vertical', href: 'vertical.html', axis: 'vertical', appliesTo: 'Windows only' },
+      { name: 'Group', axis: { name: 1 }, items: [{ name: 'Inner', href: 'inner.html', appliesTo: [{ frameworks: 'net8.0' }] }] }
+    ]
+  } as unknown as Toc
+  installDom(site, 'https://example.org/docs/api/A.html')
+  assert.deepStrictEqual(articleEntries(toc, []).map(e => e.name), ['Vertical', 'Inner'])
+
+  // with the picker, the entries the table of contents shows for the selection
+  const { storage } = installDom(`${site}<meta name="docfx:appliestopicker" content="true">`, 'https://example.org/docs/api/A.html')
+  storage.set('docfx.axis./docs/.framework', 'netstandard2.0')
+  const apis: Toc = {
+    items: [
+      { name: 'Shared', href: 'Shared.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] },
+      { name: 'OnlyNet8', href: 'OnlyNet8.html', appliesTo: [{ frameworks: ['net8.0'] }] },
+      { name: 'Guide', href: 'guide.html' }
+    ]
+  }
+  assert.deepStrictEqual(articleEntries(apis, []).map(e => e.name), ['Shared', 'Guide'])
+  // the page being read stays
+  assert.deepStrictEqual(articleEntries(apis, [apis.items[1]]).map(e => e.name), ['Shared', 'OnlyNet8', 'Guide'])
 })
 
 const pickerSite = `${site}

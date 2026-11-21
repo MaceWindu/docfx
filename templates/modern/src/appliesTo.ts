@@ -320,10 +320,31 @@ export function withSelectionCache<T>(render: () => T): T {
   }
 }
 
+// What the reader picked where `localStorage` is null, such as in a browser set to keep no site data: for the page.
+const picks = new Map<string, string>()
+
+function keptPick(key: string): string | null {
+  return localStorage ? localStorage.getItem(storageKey(key)) : (picks.get(key) ?? null)
+}
+
+function keepPick(key: string, value: string | undefined) {
+  if (localStorage) {
+    if (value) {
+      localStorage.setItem(storageKey(key), value)
+    } else {
+      localStorage.removeItem(storageKey(key))
+    }
+  } else if (value) {
+    picks.set(key, value)
+  } else {
+    picks.delete(key)
+  }
+}
+
 function readSelection(axis?: Axis, frameworks?: string[]): Selection {
   const query = new URLSearchParams(window.location.search)
   const read = (key: string, valid: (value: string) => string | undefined) =>
-    [query.get(key), localStorage?.getItem(storageKey(key))].map(value => value ? valid(value) : undefined).find(value => value)
+    [query.get(key), keptPick(key)].map(value => value ? valid(value) : undefined).find(value => value)
   return {
     framework: read('framework', f => validFramework(f, frameworks)),
     value: axis ? read(axisKey(axis), v => axis.values.some(a => a.id === v) ? v : undefined) : undefined
@@ -343,13 +364,13 @@ export function keepLinkSelection(choices: Choices) {
   const query = new URLSearchParams(window.location.search)
   const selection = getSelection(choices.axis, choices.frameworks)
   if (selection.framework && query.get('framework')?.toLowerCase() === selection.framework.toLowerCase()) {
-    localStorage?.setItem(storageKey('framework'), selection.framework)
+    keepPick('framework', selection.framework)
   }
   const axes = [choices.axis, ...(choices.axes || [])].filter(a => a)
   for (const key of new Set(axes.map(axisKey))) {
     const value = query.get(key)
     if (value && axes.some(a => axisKey(a) === key && a.values.some(v => v.id === value))) {
-      localStorage?.setItem(storageKey(key), value)
+      keepPick(key, value)
     }
   }
 }
@@ -360,13 +381,12 @@ function isFollowedLink(): boolean {
   return !entry || (entry.type !== 'reload' && entry.type !== 'back_forward')
 }
 
-/** Keeps what the reader picked in a dropdown, `undefined` for "All", and shows the page for it. */
+/**
+ * Keeps what the reader picked in a dropdown, `undefined` for "All", and shows the page for it; where `localStorage`
+ * is null, for this page only.
+ */
 export function select(key: string, value: string | undefined) {
-  if (value) {
-    localStorage?.setItem(storageKey(key), value)
-  } else {
-    localStorage?.removeItem(storageKey(key))
-  }
+  keepPick(key, value)
   // the query string would override the choice on this page
   const url = new URL(window.location.href)
   if (url.searchParams.has(key)) {
@@ -481,6 +501,20 @@ export function shownEntries(items: TocEntry[], selection: Selection, frameworks
     }
     return [...(entry.href ? [entry] : []), ...shownEntries(entry.items, own, frameworks, keep)]
   })
+}
+
+/**
+ * The entries with a link that "Next article" goes through, in order: with the picker, those the table of contents
+ * shows for the selection, the page being read and its parents, `path`, kept; without it, every one, read as without
+ * framework data, so that a table of contents that uses `appliesTo` or `axis` for something else works as before.
+ */
+export function articleEntries(toc: Toc, path: TocEntry[]): TocEntry[] {
+  if (!isPickerEnabled()) {
+    const flatten = (items: TocEntry[]): TocEntry[] => (items || []).flatMap(item => [...(item.href ? [item] : []), ...flatten(item.items)])
+    return flatten(toc.items)
+  }
+  const { frameworks } = getChoices(toc, path)
+  return shownEntries(toc.items, getSelection(toc.axis, frameworks), frameworks, entry => path.includes(entry))
 }
 
 /**
@@ -645,10 +679,11 @@ export function shownTarget(id: string): Element | null {
   if (!target || !container || !target.closest('[hidden]')) {
     return target
   }
-  const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content'))
+  const blocks = blocksOf(container)
   const base = withoutCopySuffix(id, blocks.indexOf(target.closest('.api-content')))
   for (const [index, block] of blocks.entries()) {
-    if (!(block as HTMLElement).hidden) {
+    // the content shown in place, rather than a copy an entry of "In other frameworks" shows whole
+    if (!block.hidden && block.parentElement === container) {
       const same = Array.from(block.querySelectorAll('[id]')).find(e => withoutCopySuffix(e.id, index) === base)
       if (same) {
         return same
@@ -741,21 +776,31 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
 export function applySelection(selection: Selection, axis?: Axis) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
+  putBackWholeCopies()
 
   // the variants under "In other frameworks" that follow the content of an API, and those of them still shown
   const listed = new Set<Element>()
   const kept = new Set<Element>()
+  const whole: { entry: HTMLElement, block: HTMLElement, previous: HTMLElement }[] = []
   document.querySelectorAll('.api-contents').forEach(container => {
-    const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content')) as HTMLElement[]
+    const blocks = blocksOf(container)
     const shown = any ? chooseGroups(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : blocks.map((_, i) => i)
     const inPlace = shown.length > 0 ? shown[0] : 0
     blocks.forEach((block, i) => { block.hidden = i !== inPlace })
     // the copy of each variant follows the API's own content, in the order "In other frameworks" lists them
-    const variants = variantsAfter(container)
+    const variants = variantsAfter(container) as HTMLElement[]
     variants.forEach(v => listed.add(v))
-    shown.filter(i => i > 0 && i !== inPlace).forEach(i => variants[i - 1] && kept.add(variants[i - 1]))
+    for (const i of shown.filter(i => i > 0 && i !== inPlace && variants[i - 1])) {
+      kept.add(variants[i - 1])
+      // An entry lists what its variant differs in from the API's own content, which a variant shown in place hides:
+      // the entry shows its variant whole instead.
+      if (inPlace !== 0) {
+        whole.push({ entry: variants[i - 1], block: blocks[i], previous: blocks[i - 1] })
+      }
+    }
   })
   document.querySelectorAll<HTMLElement>('.api-variant').forEach(e => { e.hidden = listed.has(e) ? !kept.has(e) : any })
+  whole.forEach(showWholeCopy)
   document.querySelectorAll<HTMLElement>('.api-variants-heading').forEach(heading => {
     const variants: HTMLElement[] = []
     for (let e = heading.nextElementSibling; e?.classList.contains('api-variant'); e = e.nextElementSibling) {
@@ -888,6 +933,48 @@ function unavailableBadge(label: string, inList: boolean): HTMLElement {
   return badge
 }
 
+/**
+ * The content of an API, then the hidden copy of each variant, as the page has them: a copy that an entry of "In
+ * other frameworks" shows whole is in that entry, until it is put back.
+ */
+const blocksByContainer = new WeakMap<Element, HTMLElement[]>()
+
+function blocksOf(container: Element): HTMLElement[] {
+  if (!blocksByContainer.has(container)) {
+    blocksByContainer.set(container, Array.from(container.children).filter(e => e.classList.contains('api-content')) as HTMLElement[])
+  }
+  return blocksByContainer.get(container)
+}
+
+// The copies the entries of "In other frameworks" show whole, and what of the entry each hides, in the order the
+// copies are on the page.
+let wholeCopies: { block: HTMLElement, previous: HTMLElement, hidden: HTMLElement[] }[] = []
+
+/** Shows the copy of a variant in its entry of "In other frameworks", below its label, in place of what it lists. */
+function showWholeCopy({ entry, block, previous }: { entry: HTMLElement, block: HTMLElement, previous: HTMLElement }) {
+  const children = Array.from(entry.children) as HTMLElement[]
+  const label = children.find(e => e.classList.contains('api-variant-label'))
+  const hidden = children.filter(e => e !== label && !e.hidden)
+  hidden.forEach(e => { e.hidden = true })
+  if (label) {
+    label.after(block)
+  } else {
+    entry.prepend(block)
+  }
+  block.hidden = false
+  wholeCopies.push({ block, previous, hidden })
+}
+
+function putBackWholeCopies() {
+  // a copy goes back after the one before it, which is back already
+  for (const { block, previous, hidden } of wholeCopies) {
+    previous.after(block)
+    block.hidden = true
+    hidden.forEach(e => { e.hidden = false })
+  }
+  wholeCopies = []
+}
+
 /** The elements of "In other frameworks" after the content of an API, one for each variant. */
 function variantsAfter(contents: Element): Element[] {
   const heading = contents.nextElementSibling
@@ -934,12 +1021,24 @@ function isSeeAlsoContents(e: Element): boolean {
  */
 export function distinguishCopies() {
   document.querySelectorAll('.api-contents').forEach(container => {
-    const blocks = Array.from(container.children).filter(e => e.classList.contains('api-content'))
+    const blocks = blocksOf(container)
     blocks.slice(1).forEach((copy, i) => {
       const suffix = `_variant${i + 1}`
+      const renamed = new Map<string, string>()
       copy.querySelectorAll('[id]').forEach(e => {
         if (document.getElementById(e.id) !== e) {
+          renamed.set(e.id, e.id + suffix)
           e.id += suffix
+        }
+      })
+      // the tabs of a copy, such as those of its remarks, control the panels of the copy
+      copy.querySelectorAll('[aria-controls]').forEach(tab => {
+        const panel = renamed.get(tab.getAttribute('aria-controls'))
+        if (panel) {
+          tab.setAttribute('aria-controls', panel)
+          if (tab.getAttribute('href')?.startsWith('#')) {
+            tab.setAttribute('href', `#${panel}`)
+          }
         }
       })
       const seen = new Map<string, number>()
