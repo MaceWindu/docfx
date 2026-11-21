@@ -31,19 +31,12 @@ partial class DotnetApiCatalog
         // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
         var invalid = new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", config.DefaultFramework) }
             .Concat((config.TargetFrameworks ?? []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
-            .Where(option => option.Framework is { } framework && !TargetFrameworkHelper.IsValid(framework))
+            .Select(option => (option.Option, option.Framework, Reason: option.Framework is { } framework ? TargetFrameworkHelper.GetInvalidReason(framework) : null))
+            .Where(option => option.Reason is not null)
             .ToList();
-        foreach (var (option, framework) in invalid)
+        foreach (var (option, framework, reason) in invalid)
         {
-            // so it selects nothing here, whatever its value
-            Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
-        }
-        else if (config.TargetFramework is { } invalid && TargetFrameworkHelper.GetInvalidReason(invalid) is { } reason)
-        {
-            // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
-            Logger.LogError(
-                $"'{option}' holds '{framework}', whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'.",
-                code: ErrorCodes.Metadata.InvalidTargetFramework);
+            Logger.LogError($"'{option}' holds '{framework}', {reason}.", code: ErrorCodes.Metadata.InvalidTargetFramework);
         }
 
         if (invalid.Count > 0)
@@ -331,10 +324,22 @@ partial class DotnetApiCatalog
             }
 
             // With `targetFramework`, the project selected above, which is at its default framework if it does
-            // not target that one.
-            List<(Project Project, string? Framework)> selection = targetFrameworks is null
-                ? [(project, await TargetFrameworkHelper.GetFrameworkLabel(project, projectFrameworks!))]
-                : await TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, projectFrameworks!, fromSolution);
+            // not target that one. A project `src` lists is reported by itself, also when a listed solution holds it.
+            var reportFailures = !(fromSolution && listedProjects.Contains(path));
+            List<(Project Project, string? Framework)> selection;
+            if (targetFrameworks is null)
+            {
+                var failures = new List<string>();
+                selection = [(project, await TargetFrameworkHelper.GetFrameworkLabel(project, projectFrameworks!, failures))];
+                if (reportFailures)
+                {
+                    failures.ForEach(failure => projectFrameworks!.ReportFailure(failure, fromSolution));
+                }
+            }
+            else
+            {
+                selection = await TargetFrameworkHelper.SelectProjects(workspace.CurrentSolution, project, targetFrameworks, projectFrameworks!, fromSolution, reportFailures);
+            }
 
             // As with `targetFramework`, a solution none of whose projects targets a framework of the list is worth a
             // warning; a project `src` lists too is reported by itself, so it counts only when it matches.

@@ -721,6 +721,61 @@ public class TargetFrameworkMergeTest
         placeholder.AppliesTo.Should().Equal(Second, First, Third);
     }
 
+    [Fact]
+    public void ACrossReferenceInTheTextOfAnotherFrameworkIsAReferenceOfThePage()
+    {
+        // The summary of `T` comes from the second framework, which `T` lacks in the first, and so does the variant
+        // of the summary of `M`, which differs.
+        var units = new[]
+        {
+            ("""
+             namespace N
+             {
+                 public class Helper { }
+                 public class Other { }
+                 public class T
+                 {
+                     /// <summary>Own.</summary>
+                     public void M() { }
+                 }
+             }
+             """, First),
+            ("""
+             namespace N
+             {
+                 public class Helper { }
+                 public class Other { }
+                 /// <summary>Uses <see cref="Helper"/>.</summary>
+                 public class T
+                 {
+                     /// <summary>Uses <see cref="Other"/>.</summary>
+                     public void M() { }
+                 }
+             }
+             """, Second),
+        };
+        var items = units.Select(unit =>
+        {
+            var compilation = CompilationHelper.CreateCompilationFromCSharpCode(unit.Item1, new Dictionary<string, string>(), "Lib");
+            var item = compilation.Assembly.GenerateMetadataItem(compilation, new())!;
+            DotnetApiCatalog.TagAppliesTo(item, unit.Item2);
+            return item;
+        }).ToList();
+        var result = new Dictionary<string, MetadataItem>();
+        DotnetApiCatalog.MergeTargetFrameworks(result, items);
+        var references = new Dictionary<string, ReferenceItem>();
+        foreach (var reference in items.SelectMany(i => i.References ?? []))
+        {
+            references.TryAdd(reference.Key, reference.Value);
+        }
+
+        var model = YamlMetadataResolver.ResolveMetadata(result, references, NamespaceLayout.Flattened, [First, Second]);
+
+        result["N.T.M"].Variants.Should().ContainSingle();
+        var page = model.Members.Single(m => m.Name == "N.T");
+        page.References.Keys.Should().Contain(["N.Helper", "N.Other"]);
+    }
+
     private static Dictionary<string, MetadataItem> Merge(params (string Code, string Framework)[] units)
     {
         return MergeIgnoring(VariantIgnore.None, units);

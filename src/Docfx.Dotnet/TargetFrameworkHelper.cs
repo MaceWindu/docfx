@@ -121,12 +121,19 @@ internal static partial class TargetFrameworkHelper
     /// <returns>
     /// The projects found, which is none when the file targets none of the frameworks: unlike a single
     /// framework, a list states what to include, so nothing else is documented in place of a missing one.
-    /// A framework is <see langword="null"/> for a project MSBuild cannot evaluate, which it has reported.
+    /// A framework is <see langword="null"/> for a project MSBuild cannot evaluate, which is reported.
     /// </returns>
+    /// <param name="report">
+    /// Whether to report why MSBuild cannot evaluate a project, which a project <c>src</c> lists does by itself
+    /// when a listed solution holds it too.
+    /// </param>
     public static async Task<List<(Project Project, string? Framework)>> SelectProjects(
-        Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, ProjectFrameworks frameworks, bool fromSolution = false)
+        Solution solution, Project project, IReadOnlyCollection<string> targetFrameworks, ProjectFrameworks frameworks, bool fromSolution = false, bool report = true)
     {
         var candidates = GetProjectsFromSameFile(solution, project);
+
+        // Why MSBuild cannot say what a framework stands for, reported as a framework the project lacks is.
+        var failures = new List<string>();
 
         if (targetFrameworks.Contains(AllTargetFrameworks))
         {
@@ -137,21 +144,28 @@ internal static partial class TargetFrameworkHelper
             var all = new List<(Project, string?)>();
             foreach (var candidate in candidates.OrderBy(p => p.Id == project.Id ? 0 : 1))
             {
-                all.Add((candidate, await GetFrameworkLabel(candidate, frameworks)));
+                all.Add((candidate, await GetFrameworkLabel(candidate, frameworks, failures)));
             }
 
+            ReportFailures();
             return all;
         }
 
         var names = new Dictionary<ProjectId, string?>();
         foreach (var candidate in candidates)
         {
-            names[candidate.Id] = await frameworks.GetName(candidate);
+            var (name, failure) = await frameworks.GetName(candidate);
+            names[candidate.Id] = name;
+            if (failure is not null)
+            {
+                failures.Add(failure);
+            }
         }
 
         if (candidates.Count <= 1 && names[project.Id] is null)
         {
-            // which framework to say it applies to is not known, which MSBuild has reported
+            // which framework to say it applies to is not known
+            ReportFailures();
             return [(project, null)];
         }
 
@@ -169,7 +183,7 @@ internal static partial class TargetFrameworkHelper
                     break;
                 }
 
-                if (await TargetsFramework(candidate, names[candidate.Id]!, targetFramework, frameworks))
+                if (await TargetsFramework(candidate, names[candidate.Id]!, targetFramework, frameworks, failures))
                 {
                     match = candidate;
                 }
@@ -188,19 +202,39 @@ internal static partial class TargetFrameworkHelper
 
         if (missing.Count > 0)
         {
-            var message = $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.";
             // as with `targetFramework`, the projects of a solution commonly target other frameworks
-            if (fromSolution)
-            {
-                Logger.LogInfo(message);
-            }
-            else
-            {
-                Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
-            }
+            ReportFailures();
+            ReportNotFound(
+                $"Project '{project.FilePath}' does not target {string.Join(", ", missing.Select(tfm => $"'{tfm}'"))}, so it is not documented for that.",
+                fromSolution);
         }
 
         return selected;
+
+        void ReportFailures()
+        {
+            if (report)
+            {
+                failures.ForEach(failure => frameworks.ReportFailure(failure, fromSolution));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reports a framework a project lacks, or that MSBuild cannot say whether it has one: as a warning for a project
+    /// the entry lists, and as information for one that comes from a solution, which commonly holds analyzers, tools
+    /// and test projects that target other frameworks.
+    /// </summary>
+    internal static void ReportNotFound(string message, bool fromSolution)
+    {
+        if (fromSolution)
+        {
+            Logger.LogInfo(message);
+        }
+        else
+        {
+            Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
+        }
     }
 
     private static List<Project> GetProjectsFromSameFile(Solution solution, Project project)
@@ -214,16 +248,30 @@ internal static partial class TargetFrameworkHelper
     /// Names the framework of a project as <c>targetFrameworks: "*"</c> lists it: as the project names it, or, for
     /// an alias in <c>TargetFrameworks</c>, as the framework it stands for.
     /// </summary>
-    /// <returns><see langword="null"/> for a project MSBuild cannot evaluate, which it has reported.</returns>
-    internal static async Task<string?> GetFrameworkLabel(Project project, ProjectFrameworks frameworks)
+    /// <returns>
+    /// <see langword="null"/> for a project MSBuild cannot evaluate. Why it cannot, or cannot say what an alias stands
+    /// for, which then names the project, is added to <paramref name="failures"/>, for the caller to report.
+    /// </returns>
+    internal static async Task<string?> GetFrameworkLabel(Project project, ProjectFrameworks frameworks, List<string> failures)
     {
-        if (await frameworks.GetName(project) is not { } name)
+        var (name, failure) = await frameworks.GetName(project);
+        if (name is null || IsFrameworkName(name) || project.FilePath is not { } path)
         {
-            return null;
+            if (failure is not null)
+            {
+                failures.Add(failure);
+            }
+
+            return name;
         }
 
-        return IsFrameworkName(name) || project.FilePath is not { } path ? name
-            : (await frameworks.Evaluate(path, name))?.Moniker ?? name;
+        var evaluation = await frameworks.Evaluate(path, name);
+        if (evaluation.Failure is not null)
+        {
+            failures.Add(evaluation.Failure);
+        }
+
+        return evaluation.Framework?.Moniker ?? name;
     }
 
     /// <summary>
@@ -240,8 +288,21 @@ internal static partial class TargetFrameworkHelper
 
         // only a framework another project names with a version is worth evaluating the project for
         var versioned = frameworks.Where(other => GetTargetFrameworkPlatformVersion(other) is not null && MatchesFramework(other, framework)).ToList();
-        if (versioned.Count == 0 || await projectFrameworks.Evaluate(projectPath, framework) is not { } evaluated)
+        if (versioned.Count == 0)
         {
+            return framework;
+        }
+
+        // A project documented under a name another one gives too is one framework named twice on its pages: worth
+        // a warning whichever input the project comes from.
+        var evaluation = await projectFrameworks.Evaluate(projectPath, framework);
+        if (evaluation.Framework is not { } evaluated)
+        {
+            if (evaluation.Failure is not null)
+            {
+                projectFrameworks.ReportFailure(evaluation.Failure, fromSolution: false);
+            }
+
             return framework;
         }
 
@@ -275,15 +336,16 @@ internal static partial class TargetFrameworkHelper
                     failures.Add(failure);
                 }
 
-                Report($"Project '{project.FilePath}' is not known to target '{targetFramework}', documenting the framework it is loaded for.");
+                ReportFailures();
                 return (project, false);
             }
 
-            if (await TargetsFramework(project, name, targetFramework, frameworks))
+            if (await TargetsFramework(project, name, targetFramework, frameworks, failures))
             {
                 return (project, true);
             }
 
+            ReportFailures();
             Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{name}' instead.");
             return (project, false);
         }
@@ -297,41 +359,37 @@ internal static partial class TargetFrameworkHelper
 
         foreach (var candidate in candidates)
         {
-            if (GetTargetFrameworkFromName(candidate) is { } name && await TargetsFramework(candidate, name, targetFramework, frameworks))
+            if (GetTargetFrameworkFromName(candidate) is { } name && await TargetsFramework(candidate, name, targetFramework, frameworks, failures))
             {
                 return (candidate, true);
             }
         }
 
         var available = string.Join(", ", candidates.Select(GetTargetFrameworkFromName).Where(tfm => tfm is not null).Select(tfm => $"'{tfm}'"));
+        ReportFailures();
         Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{GetTargetFrameworkFromName(project)}' instead. It targets {available}.");
         return (project, false);
 
         void Report(string message)
         {
-            if (!report)
+            if (report)
             {
-                return;
+                ReportNotFound(message, fromSolution);
             }
+        }
 
-            if (failures.Count > 0)
+        void ReportFailures()
+        {
+            if (report)
             {
-                message = $"{message} {string.Join(" ", failures.Select(failure => $"{failure.TrimEnd('.')}."))}";
-            }
-
-            if (fromSolution)
-            {
-                Logger.LogInfo(message);
-            }
-            else
-            {
-                Logger.LogWarning(message, code: WarningCodes.Metadata.TargetFrameworkNotFound);
+                failures.ForEach(failure => frameworks.ReportFailure(failure, fromSolution));
             }
         }
     }
 
-    // Whether a project MSBuild loaded for the framework it names `name` targets `targetFramework`.
-    private static async Task<bool> TargetsFramework(Project project, string name, string targetFramework, ProjectFrameworks frameworks)
+    // Whether a project MSBuild loaded for the framework it names `name` targets `targetFramework`; why MSBuild cannot
+    // say goes to `failures`.
+    private static async Task<bool> TargetsFramework(Project project, string name, string targetFramework, ProjectFrameworks frameworks, List<string> failures)
     {
         if (string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase))
         {
@@ -342,10 +400,23 @@ internal static partial class TargetFrameworkHelper
         // does: MSBuild does.
         var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
             && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
-        var moniker = IsFrameworkName(name) && !leavesOutVersion ? name
-            : project.FilePath is { } path ? (await frameworks.Evaluate(path, name))?.Moniker
-            : null;
-        return moniker is not null && MatchesFramework(moniker, targetFramework);
+        if (IsFrameworkName(name) && !leavesOutVersion)
+        {
+            return MatchesFramework(name, targetFramework);
+        }
+
+        if (project.FilePath is null)
+        {
+            return false;
+        }
+
+        var evaluation = await frameworks.Evaluate(project.FilePath, name);
+        if (evaluation.Failure is { } failure)
+        {
+            failures.Add(failure);
+        }
+
+        return evaluation.Framework is { } framework && MatchesFramework(framework.Moniker, targetFramework);
     }
 
     /// <summary>

@@ -108,6 +108,13 @@ internal static partial class TargetFrameworkVariants
         primary.ExtensionMethods = Union(primary.ExtensionMethods, other.ExtensionMethods);
         // A framework can build a type into an assembly of its own name.
         primary.AssemblyNameList = Union(primary.AssemblyNameList, other.AssemblyNameList);
+        // The cross-references in the text of the other framework, which fills what this one lacks or a variant
+        // shows, are resolved for the page as its own are: only their keys are recorded until then.
+        foreach (var key in other.References?.Keys ?? Enumerable.Empty<string>())
+        {
+            primary.References ??= [];
+            primary.References.TryAdd(key, null);
+        }
 
         // A member inherited in only some frameworks, as its base type differs, is marked with them on the page,
         // and so is a type implementing an interface in only some, on the page of the interface.
