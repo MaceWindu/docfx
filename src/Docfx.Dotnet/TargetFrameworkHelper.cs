@@ -41,7 +41,8 @@ internal static partial class TargetFrameworkHelper
             .Where(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, project.FilePath))
             .ToList();
 
-        // Why MSBuild cannot say what a framework stands for, reported with the project it leaves unmatched.
+        // Why MSBuild cannot say what a framework stands for, reported in the message of the project it leaves
+        // unmatched: one project, one warning.
         var failures = new List<string>();
 
         if (candidates.Count <= 1)
@@ -62,7 +63,6 @@ internal static partial class TargetFrameworkHelper
                 return (project, true);
             }
 
-            failures.ForEach(Report);
             Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{name}' instead.");
             return (project, false);
         }
@@ -83,7 +83,6 @@ internal static partial class TargetFrameworkHelper
         }
 
         var available = string.Join(", ", candidates.Select(GetTargetFrameworkFromName).Where(tfm => tfm is not null).Select(tfm => $"'{tfm}'"));
-        failures.ForEach(Report);
         Report($"Project '{project.FilePath}' does not target '{targetFramework}', documenting '{GetTargetFrameworkFromName(project)}' instead. It targets {available}.");
         return (project, false);
 
@@ -95,12 +94,15 @@ internal static partial class TargetFrameworkHelper
             }
 
             // An alias does not say which framework it stands for, nor `net8.0-windows` the platform version it
-            // does: MSBuild does.
-            var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
-                && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
-            if (IsFrameworkName(name) && !leavesOutVersion)
+            // does: MSBuild does, when the framework and platform it names are those requested.
+            if (IsFrameworkName(name))
             {
-                return MatchesFramework(name, targetFramework);
+                var leavesOutVersion = GetTargetFrameworkPlatform(name) is not null && GetTargetFrameworkPlatformVersion(name) is null
+                    && GetTargetFrameworkPlatformVersion(targetFramework) is not null;
+                if (!leavesOutVersion || !IsSameFrameworkAndPlatform(name, targetFramework))
+                {
+                    return MatchesFramework(name, targetFramework);
+                }
             }
 
             if (candidate.FilePath is null)
@@ -122,6 +124,11 @@ internal static partial class TargetFrameworkHelper
             if (!report)
             {
                 return;
+            }
+
+            if (failures.Count > 0)
+            {
+                message = $"{message} {string.Join(" ", failures.Select(failure => $"{failure.TrimEnd('.')}."))}";
             }
 
             if (fromSolution)
@@ -200,10 +207,15 @@ internal static partial class TargetFrameworkHelper
     /// </summary>
     internal static bool MatchesFramework(string projectFramework, string targetFramework)
     {
-        return string.Equals(GetTargetFrameworkSymbol(projectFramework), GetTargetFrameworkSymbol(targetFramework), StringComparison.Ordinal)
-            && string.Equals(GetTargetFrameworkPlatform(projectFramework), GetTargetFrameworkPlatform(targetFramework), StringComparison.Ordinal)
+        return IsSameFrameworkAndPlatform(projectFramework, targetFramework)
             && (GetTargetFrameworkPlatformVersion(targetFramework) is not { } version
                 || version == GetTargetFrameworkPlatformVersion(projectFramework));
+    }
+
+    private static bool IsSameFrameworkAndPlatform(string a, string b)
+    {
+        return string.Equals(GetTargetFrameworkSymbol(a), GetTargetFrameworkSymbol(b), StringComparison.Ordinal)
+            && string.Equals(GetTargetFrameworkPlatform(a), GetTargetFrameworkPlatform(b), StringComparison.Ordinal);
     }
 
     /// <summary>

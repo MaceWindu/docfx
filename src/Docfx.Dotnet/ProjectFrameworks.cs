@@ -34,7 +34,7 @@ internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Fa
 /// project that targets a single framework included. Neither says what an alias in <c>TargetFrameworks</c>
 /// stands for, nor the platform version a framework such as <c>net8.0-windows</c> leaves out: for those, the
 /// project is evaluated by <c>dotnet msbuild</c>, with the SDK a <c>global.json</c> of the project selects and the
-/// MSBuild properties of the metadata item.
+/// MSBuild properties of the metadata item. Its <c>-getProperty</c> switch needs the .NET SDK 8.0.100 or later.
 /// </remarks>
 internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 {
@@ -44,13 +44,15 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
 
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _loaded = new(FilePathComparer.OSPlatformSensitiveStringComparer);
-    private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new();
+    private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new(EvaluationKeyComparer.Instance);
     private readonly Func<string, string?, Task<ProjectEvaluation>> _evaluate;
 
     /// <param name="properties">The MSBuild properties the workspace loads projects with.</param>
-    public ProjectFrameworks(IReadOnlyDictionary<string, string> properties)
+    /// <param name="evaluationTimeout">How long an evaluation may take, <see cref="EvaluationTimeout"/> when not given.</param>
+    public ProjectFrameworks(IReadOnlyDictionary<string, string> properties, TimeSpan? evaluationTimeout = null)
     {
-        _evaluate = (path, targetFramework) => EvaluateWithMSBuild(path, targetFramework, properties);
+        var timeout = evaluationTimeout ?? EvaluationTimeout;
+        _evaluate = (path, targetFramework) => EvaluateWithMSBuild(path, targetFramework, properties, timeout);
     }
 
     /// <param name="evaluate">Evaluates a project, for a framework when it is given, as MSBuild does.</param>
@@ -112,7 +114,7 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         return _evaluated.GetOrAdd((path, targetFramework), key => _evaluate(key.Path, key.TargetFramework));
     }
 
-    private static async Task<ProjectEvaluation> EvaluateWithMSBuild(string path, string? targetFramework, IReadOnlyDictionary<string, string> properties)
+    private static async Task<ProjectEvaluation> EvaluateWithMSBuild(string path, string? targetFramework, IReadOnlyDictionary<string, string> properties, TimeSpan timeout)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -122,9 +124,16 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+
+        // The output is read as JSON: no first-run banner before it. And no MSBuild server or node outlives the
+        // evaluation, holding its output open.
+        start.Environment["DOTNET_NOLOGO"] = "1";
+        start.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        start.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
         start.ArgumentList.Add("msbuild");
         start.ArgumentList.Add(path);
         start.ArgumentList.Add("-nologo");
+        start.ArgumentList.Add("-nodeReuse:false");
         foreach (var property in s_properties)
         {
             start.ArgumentList.Add($"-getProperty:{property}");
@@ -148,9 +157,9 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         int exitCode;
         try
         {
-            if (await Run(start, EvaluationTimeout) is not { } result)
+            if (await Run(start, timeout) is not { } result)
             {
-                return Failed($"it did not answer within {EvaluationTimeout.TotalSeconds} seconds");
+                return Failed($"it did not answer within {timeout.TotalSeconds} seconds");
             }
 
             (output, error, exitCode) = result;
@@ -162,12 +171,20 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 
         if (exitCode != 0)
         {
-            return Failed(string.Join(" ", (output + error).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+            var text = string.Join(" ", $"{output}\n{error}".Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+            // MSBuild before 17.8 knows no `-getProperty`
+            return Failed(text.Contains("MSB1001", StringComparison.Ordinal)
+                ? $"its '-getProperty' switch needs the .NET SDK 8.0.100 or later: {text}"
+                : text);
         }
 
         try
         {
-            var values = JsonDocument.Parse(output).RootElement.GetProperty("Properties");
+            // whatever the SDK writes before the JSON, such as a notice of a first run
+            var json = output.IndexOf('{') is var brace and >= 0 ? output[brace..] : output;
+            using var document = JsonDocument.Parse(json);
+            var values = document.RootElement.GetProperty("Properties");
             string Get(string property) => values.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
             return Create(Get("TargetFramework"), Get("TargetFrameworkMoniker"), Get("TargetPlatformIdentifier"), Get("TargetPlatformVersion"))
                 is { } evaluated ? new(evaluated, null) : Failed("it names no target framework");
@@ -197,6 +214,11 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         try
         {
             await process.WaitForExitAsync(cancellation.Token);
+
+            // A process it started can hold its output open after it ends.
+            var output = await reading.WaitAsync(cancellation.Token);
+            var error = await readingError.WaitAsync(cancellation.Token);
+            return (output, error, process.ExitCode);
         }
         catch (OperationCanceledException)
         {
@@ -210,10 +232,10 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
                 // it ended meanwhile
             }
 
+            // The output ends with the processes that hold it; read it before the process is disposed.
+            await Task.WhenAny(Task.WhenAll(reading, readingError), Task.Delay(TimeSpan.FromSeconds(5)));
             return null;
         }
-
-        return (await reading, await readingError, process.ExitCode);
     }
 
     /// <summary>
@@ -241,5 +263,24 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     private static string Escape(string value)
     {
         return value.Replace("%", "%25").Replace(";", "%3B").Replace(",", "%2C");
+    }
+
+    // A path as the file system compares it, a framework as MSBuild does: case-insensitively.
+    private sealed class EvaluationKeyComparer : IEqualityComparer<(string Path, string? TargetFramework)>
+    {
+        public static readonly EvaluationKeyComparer Instance = new();
+
+        public bool Equals((string Path, string? TargetFramework) x, (string Path, string? TargetFramework) y)
+        {
+            return FilePathComparer.OSPlatformSensitiveStringComparer.Equals(x.Path, y.Path)
+                && StringComparer.OrdinalIgnoreCase.Equals(x.TargetFramework, y.TargetFramework);
+        }
+
+        public int GetHashCode((string Path, string? TargetFramework) obj)
+        {
+            return HashCode.Combine(
+                FilePathComparer.OSPlatformSensitiveStringComparer.GetHashCode(obj.Path),
+                obj.TargetFramework is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(obj.TargetFramework));
+        }
     }
 }

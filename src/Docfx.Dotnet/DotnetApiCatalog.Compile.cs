@@ -19,7 +19,8 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static async Task<List<(IAssemblySymbol symbol, Compilation compilation)>> Compile(ExtractMetadataConfig config)
+    /// <returns><see langword="null"/> when the metadata item is not documented, for a reason already reported.</returns>
+    private static async Task<List<(IAssemblySymbol symbol, Compilation compilation)>?> Compile(ExtractMetadataConfig config)
     {
         var files = config.Files?.Select(s => new FileInformation(s))
             .GroupBy(f => f.Type)
@@ -40,17 +41,25 @@ partial class DotnetApiCatalog
             Logger.LogError(
                 $"'targetFramework' is '{invalid}', {reason}.",
                 code: ErrorCodes.Metadata.InvalidTargetFramework);
-            return [];
+
+            // with nothing else to say about it
+            return null;
         }
 
         // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
-        if (config.TargetFramework is not null && hasProjectInput &&
-            msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
+        var conflicting = config.TargetFramework is not null && hasProjectInput
+            ? msbuildProperties.Keys.Where(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)).ToList()
+            : [];
+        if (conflicting.Count > 0)
         {
-            var onlyOne = propertyName.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) ? " and leaves only one target framework to select from" : "";
+            var onlyOne = conflicting.Any(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase));
+            var names = string.Join(" and ", conflicting.Select(key => $"'{key}'"));
             Logger.LogWarning(
-                $"Both 'targetFramework' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
-                + $"so it also applies to every referenced project{onlyOne}. Remove it from 'properties'.",
+                conflicting.Count == 1
+                    ? $"Both 'targetFramework' and the MSBuild property {names} are set. The property is passed to MSBuild as a global property, "
+                        + $"so it also applies to every referenced project{(onlyOne ? " and leaves only one target framework to select from" : "")}. Remove it from 'properties'."
+                    : $"Both 'targetFramework' and the MSBuild properties {names} are set. The properties are passed to MSBuild as global properties, "
+                        + $"so they also apply to every referenced project{(onlyOne ? " and leave only one target framework to select from" : "")}. Remove them from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
 

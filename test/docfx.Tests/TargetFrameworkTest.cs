@@ -280,7 +280,45 @@ public class TargetFrameworkTest : TestBase
         await Exec(new() { Src = Src(project), TargetFramework = "net8.0-windows8.O" });
 
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.InvalidTargetFramework);
+        // the error says all there is: the item is not documented
+        AssertWarnings(listener);
         Assert.False(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
+    }
+
+    [Theory]
+    [InlineData("net8.0", "Aliased.OnlyModern.yml")]
+    [InlineData("netstandard2.0", "Aliased.OnlyLegacy.yml")]
+    [InlineData("legacy", "Aliased.OnlyLegacy.yml")]
+    public async Task TargetFrameworkSelectsAnAliasByTheFrameworkItStandsFor(string targetFramework, string expectedFile)
+    {
+        // `dotnet msbuild` says which framework an alias stands for
+        var project = CreateProject("Aliased", "<TargetFrameworks>modern;legacy</TargetFrameworks>", """
+            namespace Aliased
+            {
+            #if MODERN
+                public class OnlyModern { }
+            #else
+                public class OnlyLegacy { }
+            #endif
+            }
+            """, """
+            <PropertyGroup Condition="'$(TargetFramework)' == 'modern'">
+                <TargetFrameworkIdentifier>.NETCoreApp</TargetFrameworkIdentifier>
+                <TargetFrameworkVersion>v8.0</TargetFrameworkVersion>
+                <DefineConstants>$(DefineConstants);MODERN</DefineConstants>
+              </PropertyGroup>
+              <PropertyGroup Condition="'$(TargetFramework)' == 'legacy'">
+                <TargetFrameworkIdentifier>.NETStandard</TargetFrameworkIdentifier>
+                <TargetFrameworkVersion>v2.0</TargetFrameworkVersion>
+              </PropertyGroup>
+            """);
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        AssertWarnings(listener);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, expectedFile)));
     }
 
     [Theory]
@@ -565,6 +603,24 @@ public class TargetFrameworkTest : TestBase
         });
 
         AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+    }
+
+    [Fact]
+    public async Task TargetFrameworkAndBothTargetFrameworkPropertiesWarnOnceNamingBoth()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new()
+        {
+            Src = Src(project),
+            TargetFramework = "net8.0",
+            Properties = new() { ["TargetFramework"] = "net8.0", ["TargetFrameworks"] = "net8.0" },
+        });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.Contains("properties 'TargetFramework' and 'TargetFrameworks' are set", warning.Message);
     }
 
     [Theory]
