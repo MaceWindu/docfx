@@ -136,6 +136,8 @@ test('framework labels', () => {
   assert.strictEqual(frameworkLabel('netstandard2.0'), '.NET Standard 2.0')
   assert.strictEqual(frameworkLabel('net462'), '.NET Framework 4.6.2')
   assert.strictEqual(frameworkLabel('net462', { net462: '.NET Framework 4.6.2+' }), '.NET Framework 4.6.2+')
+  // as the page's own Applies to line, which ManagedReference.common.js writes
+  assert.strictEqual(frameworkLabel('net8.0', { 'NET8.0': 'Modern' }), 'Modern')
 })
 
 test('axis keys', () => {

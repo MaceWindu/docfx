@@ -23,6 +23,7 @@ The YAML document is a tree of TOC nodes, each of which has these properties:
 - `items`: If a node has children, they're listed in the items array.
 - `uid`: The uid of the article. Can be used instead of `href`.
 - `expanded`: Expand children on load, only works if the template is `modern`.
+- `appliesTo` and `axis`: The frameworks and the axis of API entries, which [`docfx metadata`](dotnet-api-docs.md) writes for [`targetFrameworks`](../reference/docfx-json-reference.md#targetframeworks). These names are reserved: the build reads a number or `true`/`false` in them as text, with an `UnquotedTocValue` warning, and the `modern` template reads them on every site to pick the next article, so a TOC must not use them for anything else.
 
 When an article is referenced by a TOC through `href`, the corresponding TOC appears when viewing that article. If multiple TOCs reference the same article, or the article isn't referenced by any TOC, the nearest TOC with the least amount of directory jumps is picked.
 

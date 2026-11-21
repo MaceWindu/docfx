@@ -527,7 +527,7 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
   onSelectionChange(apply)
   // A page the browser kept for its back button, or open in another tab, shows what was picked when it was last
   // shown; the reader may have picked something else since, on another page. A choice in its address still wins, so a
-  // link shows what it names without local storage too.
+  // link shows what it names also where `localStorage` is null (a browser where reading it throws stops the scripts).
   const changed = () => window.dispatchEvent(new Event(changeEvent))
   window.addEventListener('pageshow', (e: PageTransitionEvent) => {
     if (e.persisted) {
@@ -921,8 +921,10 @@ export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'
 
 /** The display name of a framework, as the templates write it in Applies to. */
 export function frameworkLabel(framework: string, names?: Record<string, string>): string {
-  if (names && Object.prototype.hasOwnProperty.call(names, framework)) {
-    return names[framework]
+  // the frameworks are written in lower case, a key of `_frameworkNames` as the site writes it
+  const key = names && Object.keys(names).find(k => k.toLowerCase() === framework.toLowerCase())
+  if (names && key !== undefined) {
+    return names[key]
   }
   let match = /^netstandard(\d+\.\d+)$/.exec(framework)
   if (match) {
