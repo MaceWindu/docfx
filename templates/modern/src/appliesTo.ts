@@ -56,9 +56,14 @@ function parseMonikerCore(moniker: string): Moniker {
   }
   const [, name, digits, platform] = match
   const version = (digits.includes('.') ? digits.split('.') : digits.split('')).map(Number)
+  // Only the names MSBuild writes, as `TargetFrameworkHelper` reads them: a version of two to four parts, so
+  // `netstandard2` or `net8` is no framework it knows, on the page as in `docfx metadata` and `docfx pdf`.
+  if (digits.includes('.') && !/^\d+(?:\.\d+){1,3}$/.test(digits)) {
+    return null
+  }
   switch (name.toLowerCase()) {
-    case 'netstandard': return { family: Family.Standard, version, platform: platform?.toLowerCase() }
-    case 'netcoreapp': return { family: Family.Core, version, platform: platform?.toLowerCase() }
+    case 'netstandard': return digits.includes('.') ? { family: Family.Standard, version, platform: platform?.toLowerCase() } : null
+    case 'netcoreapp': return digits.includes('.') ? { family: Family.Core, version, platform: platform?.toLowerCase() } : null
     default:
       // `net8.0` is .NET 8, `net462` is .NET Framework 4.6.2, one digit per part.
       if (digits.includes('.')) {
@@ -105,11 +110,41 @@ export function canReference(target: string, framework: string): boolean {
 }
 
 /**
+ * Whether two framework names name the same framework, either way round with the platform version one leaves out,
+ * as `TargetFrameworkHelper.IsSameFramework`: `net8.0-windows` is the project loaded as `net8.0-windows10.0.19041.0`.
+ */
+function isSameFramework(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase() || matchesFramework(left, right) || matchesFramework(right, left)
+}
+
+function matchesFramework(project: string, target: string): boolean {
+  const p = frameworkParts(project)
+  const t = frameworkParts(target)
+  return p.framework === t.framework && p.platform === t.platform && (t.platformVersion === undefined || t.platformVersion === p.platformVersion)
+}
+
+// The framework without its platform, the platform without its version, and the platform version with the parts it
+// leaves out as zero, as `TargetFrameworkHelper` reads them: `android34` is 34.0.0.0, a version it cannot read none.
+function frameworkParts(name: string): { framework: string, platform?: string, platformVersion?: string } {
+  const dash = name.indexOf('-')
+  if (dash < 0) {
+    return { framework: name.toLowerCase() }
+  }
+  const rest = name.substring(dash + 1)
+  const platform = /^[a-z]*/i.exec(rest)[0]
+  const digits = rest.substring(platform.length)
+  const platformVersion = /^\d+(?:\.\d+){0,3}$/.test(digits)
+    ? [...digits.split('.').map(Number), 0, 0, 0].slice(0, 4).join('.')
+    : undefined
+  return { framework: name.substring(0, dash).toLowerCase(), platform: platform ? platform.toLowerCase() : undefined, platformVersion }
+}
+
+/**
  * How well `framework` stands in for `target`, lower is better, `Infinity` when it cannot: the target itself,
  * then the same kind of framework from the highest version down, then .NET Standard from the highest down.
  */
 export function rank(target: string, framework: string): number {
-  if (target.toLowerCase() === framework.toLowerCase()) {
+  if (isSameFramework(target, framework)) {
     return 0
   }
   if (!canReference(target, framework)) {
@@ -258,6 +293,34 @@ function storageKey(key: string): string {
  * part that does not, would otherwise undo the pick the reader just made.
  */
 export function getSelection(axis?: Axis, frameworks?: string[]): Selection {
+  if (selectionCache) {
+    const byFrameworks = selectionCache.get(axis) ?? selectionCache.set(axis, new Map()).get(axis)
+    if (!byFrameworks.has(frameworks)) {
+      byFrameworks.set(frameworks, readSelection(axis, frameworks))
+    }
+    return { ...byFrameworks.get(frameworks) }
+  }
+  return readSelection(axis, frameworks)
+}
+
+// The selection by axis and frameworks while the table of contents renders, which asks for that of each entry with an
+// axis, and of the entries below each one, on every click and keystroke in its filter.
+let selectionCache: Map<Axis | undefined, Map<string[] | undefined, Selection>> | undefined
+
+/** Runs `render` with the selection read once for each axis, as nothing changes it while the table of contents renders. */
+export function withSelectionCache<T>(render: () => T): T {
+  if (selectionCache) {
+    return render()
+  }
+  selectionCache = new Map()
+  try {
+    return render()
+  } finally {
+    selectionCache = undefined
+  }
+}
+
+function readSelection(axis?: Axis, frameworks?: string[]): Selection {
   const query = new URLSearchParams(window.location.search)
   const read = (key: string, valid: (value: string) => string | undefined) =>
     [query.get(key), localStorage?.getItem(storageKey(key))].map(value => value ? valid(value) : undefined).find(value => value)

@@ -4,7 +4,7 @@
 import { TemplateResult, html, render } from 'lit-html'
 import { classMap } from 'lit-html/directives/class-map.js'
 import { breakWordLit, meta, isExternalHref, loc, isSameURL } from './helper'
-import { Selection, Toc, TocEntry, entryDisplay, entryHref, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries } from './appliesTo'
+import { Selection, Toc, TocEntry, entryDisplay, entryHref, entrySelection, fetchToc, getChoices, getSelection, isPickerEnabled, onSelectionChange, shownEntries, withSelectionCache } from './appliesTo'
 
 export type TocNode = TocEntry & {
   expanded?: boolean
@@ -62,7 +62,7 @@ export async function renderToc(): Promise<TocNode[]> {
 
   if (selectedNodes.length > 0) {
     const keep = picker ? (node: TocEntry) => activeNodes.includes(node) : () => true
-    const renderNext = () => renderNextArticle(shownEntries(items, selection(), frameworks(), keep), selectedNodes[0])
+    const renderNext = () => withSelectionCache(() => renderNextArticle(shownEntries(items, selection(), frameworks(), keep), selectedNodes[0]))
     renderNext()
     if (picker) {
       onSelectionChange(renderNext)
@@ -111,10 +111,10 @@ export async function renderToc(): Promise<TocNode[]> {
   }
 
   function renderToc() {
-    render(html`
+    withSelectionCache(() => render(html`
       ${renderTocFilter()}
       <div class="flex-fill overflow-y-auto">${renderTocNodes(items, selection()) || renderNoFilterResult()}</div>
-      ${renderDownloadPdf()}`, tocContainer)
+      ${renderDownloadPdf()}`, tocContainer))
   }
 
   function renderTocNodes(nodes: TocNode[], selection: Selection): TemplateResult {

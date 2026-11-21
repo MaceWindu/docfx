@@ -682,6 +682,20 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", await RawPage(site, "Lib.Differs.html"));
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ThePickerIsOffWithoutTheNavbar()
+    {
+        // The picker is in the navbar: without it, a link or an earlier pick would choose a selection the reader
+        // has no dropdown to undo.
+        var options = "\"globalMetadata\": { \"_disableNavbar\": true, \"_enableApiAppliesToPicker\": true },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        Assert.DoesNotContain("docfx:appliestopicker", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+    }
+
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("samePage")]

@@ -7,7 +7,7 @@ import { TemplateResult } from 'lit-html'
 import {
   Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
   getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
-  shownTarget, sortFrameworks, unitsOf, validFramework
+  shownTarget, sortFrameworks, unitsOf, validFramework, withSelectionCache
 } from './appliesTo'
 import { installDom } from './fakeDom'
 
@@ -36,6 +36,10 @@ test('can reference', () => {
   assert.ok(!canReference('net46', 'netstandard2.0'))
   assert.ok(!canReference('netcoreapp2.1', 'netstandard2.1'))
   assert.ok(!canReference('net8.0', 'net8.0-windows'))
+  // names MSBuild does not write are no framework, as in TargetFrameworkHelper
+  assert.ok(!canReference('net8.0', 'netstandard2'))
+  assert.ok(!canReference('net8.0', 'netcoreapp3'))
+  assert.ok(!canReference('netstandard2', 'netstandard2.0'))
 })
 
 // The cases of TargetFrameworkHelperTest.OrderByNearest, so that the page picks the framework `docfx metadata` would.
@@ -50,6 +54,8 @@ test('nearest framework first', () => {
     ['netcoreapp2.1', 'netstandard2.1 netstandard2.0', 'netstandard2.0 netstandard2.1'],
     ['net8.0', 'net8.0-windows netstandard2.0', 'netstandard2.0 net8.0-windows'],
     ['net8.0-windows', 'net8.0 net8.0-windows', 'net8.0-windows net8.0'],
+    ['net8.0-windows', 'net8.0 net8.0-windows10.0.19041.0', 'net8.0-windows10.0.19041.0 net8.0'],
+    ['net8.0-windows7.0', 'net8.0 net8.0-windows', 'net8.0-windows net8.0'],
     ['NET8.0', 'net9.0 net8.0', 'net8.0 net9.0'],
     ['unknown', 'net8.0 netstandard2.0', 'net8.0 netstandard2.0']
   ]
@@ -59,6 +65,15 @@ test('nearest framework first', () => {
     const ordered = [...list].sort((a, b) => (rank(target, a) - rank(target, b)) || (list.indexOf(a) - list.indexOf(b)))
     assert.deepStrictEqual(ordered.join(' '), expected, target)
   }
+})
+
+test('a framework that leaves out the platform version picks the variant of that platform', () => {
+  // The API's own content applies to net8.0, a variant to the Windows project, which loaded with its platform version.
+  const groups = [parseUnits('net8.0'), parseUnits('net8.0-windows10.0.19041.0')]
+
+  assert.strictEqual(chooseGroup(groups, { framework: 'net8.0-windows' }), 1)
+  assert.strictEqual(chooseGroup([parseUnits('net8.0'), parseUnits('net8.0-windows')], { framework: 'net8.0-windows7.0' }), 1)
+  assert.strictEqual(chooseGroup(groups, { framework: 'net8.0' }), 0)
 })
 
 test('choose the content for a selection', () => {
@@ -209,6 +224,21 @@ test('selection from a link, else from what was picked last', () => {
   // so is a value that is not one of the axis
   installDom(site, 'https://example.org/docs/api/A.html?ef-core=ef99')
   assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: undefined })
+})
+
+test('the table of contents reads the selection once per render', () => {
+  const { storage } = installDom(site, 'https://example.org/docs/api/A.html')
+  storage.set('docfx.axis./docs/.ef-core', 'ef3')
+
+  withSelectionCache(() => {
+    assert.strictEqual(getSelection(ef, frameworks).value, 'ef3')
+    storage.set('docfx.axis./docs/.ef-core', 'ef9')
+    assert.strictEqual(getSelection(ef, frameworks).value, 'ef3')
+    // each axis has its own
+    assert.strictEqual(getSelection(driver, frameworks).value, undefined)
+  })
+  // and the next render reads it again
+  assert.strictEqual(getSelection(ef, frameworks).value, 'ef9')
 })
 
 test('a link keeps a valid choice for the next pages', () => {
