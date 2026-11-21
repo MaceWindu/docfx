@@ -275,13 +275,36 @@ public class PdfFrameworkTest
         // nor does one that is not JSON at all
         Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, """u8.ToArray(), "broken/toc.json"));
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'broken/toc.json'"));
-        // nor one with a key twice, at its root or in an entry, which reading it would otherwise throw on
-        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdf": true, "items": [] }"""u8.ToArray(), "twice/toc.json"));
-        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'twice/toc.json'"));
-        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": "net8.0", "items": [ { "name": "A", "name": "B" } ] }"""u8.ToArray(), "twice-entry/toc.json"));
-        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'twice-entry/toc.json'"));
         // the error count is global, and later tests check it
         Logger.ResetCount();
+    }
+
+    [Theory]
+    [InlineData("/api/Lib.html", true)]
+    [InlineData("/API/Lib%20Two.html", true)]
+    [InlineData("/api/", true)]
+    [InlineData("/guide/", false)]
+    [InlineData("/static.html", false)]
+    public void APageDocfxBuiltIsKnownByItsUrl(string pagePath, bool built)
+    {
+        var builtPages = new HashSet<string>(["/api/Lib.html", "/api/Lib Two.html", "/api/index.html"], StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(built, PdfBuilder.IsBuiltPage(builtPages, pagePath));
+    }
+
+    [Fact]
+    public void AKeyWrittenTwiceHasItsLastValue()
+    {
+        using var listener = new TestListenerScope();
+
+        // at the root or in an entry, as when the outline was read without the options, and whether it has a PDF or not
+        Assert.NotNull(PdfBuilder.ReadPdfOutline("""{ "pdf": false, "pdf": true, "items": [] }"""u8.ToArray(), "twice/toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdf": false, "items": [] }"""u8.ToArray(), "twice/toc.json"));
+        var outline = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": "net8.0", "items": [ { "name": "A", "name": "B", "appliesTo": [], "appliesTo": [ { "frameworks": [ "net8.0" ] } ] } ] }"""u8.ToArray(), "twice-entry/toc.json");
+        Assert.Equal("B", outline?.items?[0].name);
+        Assert.Equal("net8.0", outline.items[0].appliesTo?.Single().frameworks?.Single());
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
     }
 
     [Theory]
@@ -322,8 +345,13 @@ public class PdfFrameworkTest
         Assert.All(numbers, w => Assert.Equal(WarningCodes.Build.UnquotedTocValue, w.Code));
         Assert.Contains(numbers, w => w.Message.StartsWith("'pdfAxisValue' of table of contents 'toc.json' is the number 1.10"));
 
+        // so is true or false, which YAML reads unquoted as well
+        Assert.Equal("true", PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfAxisValue": true }"""u8.ToArray(), "bool/toc.json")?.pdfAxisValue);
+        Assert.Equal("false", PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": false }"""u8.ToArray(), "bool/toc.json")?.pdfFramework);
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), w => w.Code == WarningCodes.Build.UnquotedTocValue && w.Message.StartsWith("'pdfAxisValue' of table of contents 'bool/toc.json' is true, which is used as 'true'"));
+
         // anything else is ignored, and says so
-        var other = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": true, "pdfAxisValue": [ "ef8" ], "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json");
+        var other = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfFramework": { "name": "net8.0" }, "pdfAxisValue": [ "ef8" ], "items": [ { "name": "A", "appliesTo": "net8.0" } ] }"""u8.ToArray(), "api/toc.json");
         Assert.Equal("A", string.Join(", ", Names(other?.items)));
         Assert.Null(PdfBuilder.GetAppliesToScript(other));
         var warnings = listener.GetItemsByLogLevel(LogLevel.Warning).Select(w => w.Message).ToList();

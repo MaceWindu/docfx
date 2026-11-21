@@ -656,6 +656,7 @@ public class TargetFrameworkHelperTest
         TargetFrameworkHelper.IsSameFramework(left, right).Should().Be(expected);
     }
 
+
     [Fact]
     public async Task SelectProjectOfASingleTargetProjectWithParenthesesInItsNameReadsTheFrameworkTheWorkspaceLoaded()
     {
@@ -908,6 +909,8 @@ public class TargetFrameworkHelperTest
     [InlineData("net462", "netstandard2.1", false)]
     [InlineData("net8.0", "net8.0-windows", false)]
     [InlineData("unknown", "net8.0", false)]
+    // a name MSBuild does not write, as the template reads it too
+    [InlineData("net8.0", "netstandard2", false)]
     public void CanStandIn(string target, string framework, bool expected)
     {
         TargetFrameworkHelper.CanStandIn(target, framework).Should().Be(expected);

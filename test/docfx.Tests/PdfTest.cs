@@ -339,6 +339,10 @@ public class PdfTest : TestBase
             """
             # Members
 
+            [Within to the member gone](#only-net8)
+
+            [Within to the member staying](#everywhere)
+
             <h3 id="only-net8" data-applies-to="net8.0">OnlyNet8Member</h3>
 
             Only net8 member body
@@ -371,18 +375,22 @@ public class PdfTest : TestBase
         // a link to the member kept goes to it; one to the member left out stays as text, as a link to a page left out
         var linksPage = pdf.GetPages().Single(page => page.Text.Contains("Link to the member kept"));
         var membersPage = pdf.GetPages().Single(page => page.Text.Contains("Everywhere member body"));
-        PdfAction LinkOf(string words)
+        PdfAction LinkOf(Page page, string words)
         {
-            var word = linksPage.GetWords().First(w => w.Text == words);
+            var word = page.GetWords().First(w => w.Text == words);
             var center = word.BoundingBox.Centroid;
-            return linksPage.GetAnnotations().Single(a =>
-                a.Rectangle.Left <= center.X && center.X <= a.Rectangle.Right && a.Rectangle.Bottom <= center.Y && center.Y <= a.Rectangle.Top).Action;
+            return page.GetAnnotations().SingleOrDefault(a =>
+                a.Rectangle.Left <= center.X && center.X <= a.Rectangle.Right && a.Rectangle.Bottom <= center.Y && center.Y <= a.Rectangle.Top)?.Action;
         }
 
-        var kept = Assert.IsType<GoToAction>(LinkOf("kept"));
+        var kept = Assert.IsType<GoToAction>(LinkOf(linksPage, "kept"));
         Assert.Equal(membersPage.Number, kept.Destination.PageNumber);
         Assert.NotEqual(membersPage.MediaBox.Bounds.Top, kept.Destination.Coordinates.Top);
-        Assert.IsNotType<GoToAction>(LinkOf("out"));
+        Assert.False(LinkOf(linksPage, "out") is GoToAction);
+
+        // so does one on the page itself, which Chromium would print as a link to a destination the page has none of
+        Assert.Equal(membersPage.Number, Assert.IsType<GoToAction>(LinkOf(membersPage, "staying")).Destination.PageNumber);
+        Assert.False(LinkOf(membersPage, "gone") is GoToAction);
     }
 
     private sealed class WarningCollector : ILoggerListener

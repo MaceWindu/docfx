@@ -126,8 +126,10 @@ static class PdfBuilder
         JsonNode? parsed;
         try
         {
-            // A key twice, which a table of contents written by hand can have, would otherwise throw when it is read.
-            parsed = JsonNode.Parse(json, documentOptions: new() { AllowDuplicateProperties = false });
+            // A key twice, which a table of contents written by hand can have, has its last value, as when the
+            // outline was deserialized as it is; a JsonObject would throw on it when it is read.
+            using var document = JsonDocument.Parse(json);
+            parsed = ToNode(document.RootElement);
         }
         catch (JsonException ex)
         {
@@ -141,9 +143,9 @@ static class PdfBuilder
             return null;
         }
 
-        // A number is the value it spells, with a warning: the build makes text of a number YAML read, as in
-        // `pdfAxisValue: 8`, so only a table of contents written otherwise has one. An empty option, or one that is
-        // not text, selects nothing, rather than stop the PDF.
+        // A number, true or false is the value it spells, with a warning: the build makes text of one YAML reads, as
+        // in `pdfAxisValue: 8`, but not of one `fileMetadata` or `globalMetadata` gives, nor of a `toc.json` written by
+        // hand. An empty option, or one that is a list or an object, selects nothing, rather than stop the PDF.
         var ignored = new HashSet<string>();
         ReadOptions(root, warn: true);
         foreach (var name in ignored)
@@ -177,6 +179,31 @@ static class PdfBuilder
             return null;
         }
 
+        static JsonNode? ToNode(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    var item = new JsonObject();
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        item[property.Name] = ToNode(property.Value);
+                    }
+                    return item;
+                case JsonValueKind.Array:
+                    return new JsonArray([.. element.EnumerateArray().Select(ToNode)]);
+                case JsonValueKind.String:
+                    return JsonValue.Create(element.GetString());
+                case JsonValueKind.True or JsonValueKind.False:
+                    return JsonValue.Create(element.GetBoolean());
+                case JsonValueKind.Number:
+                    // as written, so that a number used as text, such as 3.10, keeps its digits
+                    return JsonNode.Parse(element.GetRawText());
+                default:
+                    return null;
+            }
+        }
+
         // Only the root's options are read; those of an item below it are made readable as text without a warning,
         // which would be about something that has no effect.
         void ReadOptions(JsonNode? node, bool warn)
@@ -188,13 +215,14 @@ static class PdfBuilder
                     {
                         switch (item[name]?.GetValueKind())
                         {
-                            case JsonValueKind.Number:
+                            case JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False:
+                                var isNumber = item[name]!.GetValueKind() is JsonValueKind.Number;
                                 var text = item[name]!.ToJsonString();
                                 item[name] = text;
                                 if (warn)
                                 {
                                     Logger.LogWarning(
-                                        $"'{name}' of table of contents '{path}' is the number {text}, which is used as '{text}': write it as text, quoted.",
+                                        $"'{name}' of table of contents '{path}' is {(isNumber ? "the number " : "")}{text}, which is used as '{text}': write it as text, quoted.",
                                         code: WarningCodes.Build.UnquotedTocValue);
                                 }
                                 break;
@@ -454,9 +482,39 @@ static class PdfBuilder
         _ => PrintSelectionProblem.None,
     };
 
-    /// <summary>The ids of what a page of a PDF of one framework or axis value leaves out, as the <c>modern</c> template marks it.</summary>
+    /// <summary>
+    /// The ids of what a page of a PDF of one framework or axis value leaves out, as the <c>modern</c> template marks it.
+    /// A link on the page itself to one of them is made text: Chromium prints it as a link to a named destination, which
+    /// it writes for none of them, so it would go nowhere, where a link from another page stays text.
+    /// </summary>
     internal const string LeftOutIdsScript =
-        "() => Array.from(document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]'), e => e.id)";
+        """
+        () => {
+          const ids = Array.from(document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]'), e => e.id)
+          const leftOut = new Set(ids)
+          const page = location.href.split('#')[0]
+          for (const link of document.querySelectorAll('a[href*="#"]')) {
+            if (typeof link.href !== 'string') continue
+            const [target, hash] = link.href.split('#')
+            let id
+            try { id = decodeURIComponent(hash) } catch { id = hash }
+            if (target === page && leftOut.has(id)) {
+              link.removeAttribute('href')
+            }
+          }
+          return ids
+        }
+        """;
+
+    /// <summary>
+    /// Whether the page at <paramref name="pagePath"/>, as its URL has it, is one docfx built, of the paths of
+    /// <paramref name="builtPages"/>: a link to a folder, <c>api/</c>, is served its <c>index.html</c>.
+    /// </summary>
+    internal static bool IsBuiltPage(IReadOnlySet<string> builtPages, string pagePath)
+    {
+        var path = Uri.UnescapeDataString(pagePath);
+        return builtPages.Contains(path) || (path.EndsWith('/') && builtPages.Contains(path + "index.html"));
+    }
 
     // The path of the page a link of the table of contents at `tocPath` goes to, as the page's `location.pathname`
     // has it; none for a link to another site.
@@ -799,7 +857,7 @@ static class PdfBuilder
                     var state = await Ask(() => page.EvaluateAsync<string>(PrintSelectionStateScript)) ?? "";
                     var problem = GetPrintSelectionProblem(state, timedOut);
                     // a hand-written page, which has no template, applies nothing, nor is it expected to
-                    var built = builtPages.Contains(Uri.UnescapeDataString(pagePath));
+                    var built = IsBuiltPage(builtPages, pagePath);
                     if (problem is PrintSelectionProblem.Unavailable)
                     {
                         Logger.LogWarning(
@@ -1261,6 +1319,8 @@ static class PdfBuilder
         {
             return action switch
             {
+                // a link to a destination the page has none of goes nowhere
+                GoToAction { Destination: null } => new UriAction(""),
                 GoToAction link => new GoToAction(new(pageNumbers[node] - 1 + link.Destination.PageNumber, link.Destination.Type, link.Destination.Coordinates)),
                 UriAction url => HandleUriAction(url),
                 _ => action,
