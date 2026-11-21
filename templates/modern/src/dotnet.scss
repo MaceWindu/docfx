@@ -137,4 +137,31 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
       display: block;
       height: 0px;
   }
+
+  // A member that does not exist in the framework or axis value the reader picked: the muted text colour of the
+  // theme, which keeps the contrast of body text in light and dark, where an opacity would not. Its links take it
+  // too: the entries of a namespace's types, inherited members and extension methods are links only.
+  .applies-to-unavailable {
+    color: var(--bs-secondary-color);
+
+    a {
+      color: inherit;
+    }
+
+    // a declaration, whose highlighting theme colours each token
+    code.hljs,
+    code.hljs * {
+      color: var(--bs-secondary-color);
+    }
+  }
+
+  // Lists are links only, which the muted colour no longer tells apart from text.
+  dl.jumplist.applies-to-unavailable a,
+  dl.typelist .applies-to-unavailable a {
+    text-decoration: underline dotted;
+  }
+
+  .applies-to-banner {
+    font-size: 14px;
+  }
 }

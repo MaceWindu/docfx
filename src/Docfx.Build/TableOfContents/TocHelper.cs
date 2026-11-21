@@ -1,7 +1,9 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections;
 using System.Collections.Immutable;
+using System.Globalization;
 using Docfx.Common;
 using Docfx.DataContracts.Common;
 using Docfx.Plugins;
@@ -64,8 +66,10 @@ public static class TocHelper
                 case TocFileType.Yaml:
                     {
                         var yaml = EnvironmentContext.FileAbstractLayer.ReadAllText(file);
-                        return DeserializeYamlToc(yaml)
+                        var toc = DeserializeYamlToc(yaml)
                             ?? throw new NotSupportedException($"{file} is not a valid TOC file.");
+                        KeepIdsAsText(toc, file);
+                        return toc;
                     }
                 default:
                     throw new NotSupportedException($"{file} is not a valid TOC file, supported TOC files should be either \"{Constants.TableOfContents.MarkdownTocFileName}\" or \"{Constants.TableOfContents.YamlTocFileName}\".");
@@ -76,6 +80,82 @@ public static class TocHelper
             var message = $"{file} is not a valid TOC File: {e}";
             Logger.LogError(message, code: ErrorCodes.Toc.InvalidTocFile);
             throw new DocumentException(message, e);
+        }
+    }
+
+    /// <summary>
+    /// The keys whose values name frameworks and axis values by id, which pages compare as text.
+    /// </summary>
+    internal static readonly string[] IdKeys = ["appliesTo", "axis"];
+
+    /// <summary>
+    /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
+    /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false`, also as `True`,
+    /// `TRUE`, `False` and `FALSE`, are read as booleans.
+    /// What it holds is used as text, `3.1` or `true`, with a warning to quote it: `docfx metadata` quotes such
+    /// ids itself.
+    /// </summary>
+    private static void KeepIdsAsText(TocItemViewModel item, string file)
+    {
+        foreach (var key in IdKeys)
+        {
+            if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+            {
+                item.Metadata[key] = AsText(value, key);
+            }
+        }
+        // an empty entry, `-` alone, is null
+        foreach (var child in item.Items ?? [])
+        {
+            if (child is not null)
+            {
+                KeepIdsAsText(child, file);
+            }
+        }
+
+        object AsText(object value, string key)
+        {
+            switch (value)
+            {
+                case int or long or ulong or double:
+                    var text = Convert.ToString(value, CultureInfo.InvariantCulture)!;
+                    Logger.LogWarning(
+                        $"'{key}' of table of contents '{file}' holds {text} unquoted, which YAML reads as a number, so it is used as '{text}': " +
+                        "quote a value that looks like a number, such as \"3.10\", to keep it as written.",
+                        file: file,
+                        code: WarningCodes.Build.UnquotedTocValue);
+                    return text;
+                case bool flag:
+                    // YAML reads three spellings of each as a boolean and keeps none of them, so all are named
+                    var word = flag ? "true" : "false";
+                    var spellings = flag ? "true, True or TRUE" : "false, False or FALSE";
+                    Logger.LogWarning(
+                        $"'{key}' of table of contents '{file}' holds {spellings} unquoted, which YAML reads as a boolean, so it is used as '{word}': " +
+                        "quote it to keep it as written.",
+                        file: file,
+                        code: WarningCodes.Build.UnquotedTocValue);
+                    return word;
+                case IDictionary map:
+                    foreach (var name in map.Keys.Cast<object>().ToList())
+                    {
+                        if (map[name] is { } entry)
+                        {
+                            map[name] = AsText(entry, key);
+                        }
+                    }
+                    return map;
+                case IList list:
+                    for (var i = 0; i < list.Count; i++)
+                    {
+                        if (list[i] is { } entry)
+                        {
+                            list[i] = AsText(entry, key);
+                        }
+                    }
+                    return list;
+                default:
+                    return value;
+            }
         }
     }
 

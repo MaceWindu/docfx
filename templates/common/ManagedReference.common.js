@@ -13,6 +13,8 @@ exports.transform = function (model) {
   // `_disableApiAppliesTo` hides the labels only: what differs in other frameworks is still shown, and
   // `data-applies-to`, which a framework picker and a framework PDF read, is still written.
   var appliesToOptions = { names: model._frameworkNames, hideFrameworks: !!model._disableApiAppliesToFrameworks, hideLabels: !!model._disableApiAppliesTo };
+  // the picker labels frameworks as the page does
+  if (model._enableApiAppliesToPicker && model._frameworkNames) model._frameworkNamesJson = JSON.stringify(model._frameworkNames);
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (showAppliesTo) handleAppliesTo(model, null, appliesToOptions);
   else delete model.variants;
@@ -25,7 +27,10 @@ exports.transform = function (model) {
   if (model.children) {
     model.children.forEach(function (item) {
       handleItem(item, model._gitContribute, model._gitUrlPattern);
-      if (showAppliesTo) handleAppliesTo(item, model, appliesToOptions);
+      if (showAppliesTo) {
+        handleAppliesTo(item, model, appliesToOptions);
+        setVariantViews(item);
+      }
       else delete item.variants;
       if (showAppliesTo) handleImplements(item, appliesToOptions);
     });
@@ -50,6 +55,10 @@ exports.transform = function (model) {
         break;
     }
   }
+
+  // The copies of the type list its children, such as the values of an enum, as the page does: grouped, and each
+  // with what it applies to.
+  if (showAppliesTo) setVariantViews(model, true);
 
   if (model.summary && !model.description) {
     model.description = model.summary.replace(/<.*?>/gi, '').replace(/(\r\n|\n|\r)/gm, ' ').trim();
@@ -170,8 +179,10 @@ function handleAppliesTo(vm, parent, options) {
     if (variant.syntax) {
       // What is the same is left out, so a part the API has and the variant lacks, such as the return value of a
       // method that returns nothing in the variant's frameworks, is written empty: no type, or no parameters. The
-      // declaration of the variant shows it, so neither is listed.
-      if (variant.syntax.return && !variant.syntax.return.type) variant.syntax.return = "";
+      // declaration of the variant shows it, so neither is listed; the copy of the variant keeps that it has none.
+      variant.syntax.noReturn = !!variant.syntax.return && !variant.syntax.return.type;
+      if (variant.syntax.noReturn) variant.syntax.return = "";
+      variant.syntax.noParameters = !!variant.syntax.parameters && variant.syntax.parameters.length === 0;
       // a declaration that is the same is left out when only a description of its parts differs
       variant.syntax.content = variant.syntax.content || [];
       variant.syntax.parameters = variant.syntax.parameters || [];
@@ -181,10 +192,7 @@ function handleAppliesTo(vm, parent, options) {
       if (variant.syntax.return) withDescription(variant.syntax.return);
       // the value is labelled as in the API's own section: a return value, until groupChildren names the value of
       // a member of a type as a field, property or event value
-      variant.syntax.return = variant.syntax.return || "";
-      variant.syntax.fieldValue = "";
-      variant.syntax.propertyValue = "";
-      variant.syntax.eventType = "";
+      setValue(variant.syntax, variant.syntax.return, "");
     }
   });
   // a flag rather than `variants.0`, which would make the first variant the context of what it encloses
@@ -193,6 +201,9 @@ function handleAppliesTo(vm, parent, options) {
   function withDescription(part) {
     part.description = part.description || "";
   }
+
+  vm.primaryAppliesToData = "";
+  vm.variantViews = [];
 
   var frameworks = getAppliesToFrameworks(vm);
   if (frameworks.length === 0) {
@@ -220,6 +231,8 @@ function handleInheritedMembers(model, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
     // set on every member, so that mustache does not look up the values of the type
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    // for the picker, which dims what is not inherited in the selection
+    member.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   handleImplements(model, options);
@@ -228,6 +241,7 @@ function handleInheritedMembers(model, options) {
   (model.derivedClasses || []).forEach(function (derived, index) {
     var appliesTo = derivedIn[index] || [];
     derived.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    derived.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     derived.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   // The types that implement an interface are listed on its page where they can differ between frameworks
@@ -235,6 +249,10 @@ function handleInheritedMembers(model, options) {
   if (model.type && model.type.toLowerCase() === 'interface' && model.derivedClasses && model.derivedClasses.length > 0) {
     model.showImplementingTypes = true;
   }
+  // An extension method has the frameworks it is declared in, which its reference carries.
+  (model.extensionMethods || []).forEach(function (method) {
+    method.appliesToData = getAppliesToFrameworks(method).join(' ');
+  });
 }
 
 // An interface, or for a member an interface member, implemented in only some frameworks of the type or member.
@@ -244,8 +262,82 @@ function handleImplements(vm, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(implementedIn, implemented.uid) ? implementedIn[implemented.uid] : [];
     // set on every one, so that mustache does not look up the values of the type or member
     implemented.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    implemented.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     implemented.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
+}
+
+// Each variant is also rendered as a whole, hidden until a framework it applies to is picked, or printed: a PDF of
+// one framework needs it whether the site has the picker or not.
+function setVariantViews(vm, isPage) {
+  if (!vm.hasVariants || !vm.appliesToData) return;
+  var kind = vm.type ? vm.type.toLowerCase() : "";
+  // The page of a field or event, with `memberLayout: separatePages`, labels its value as a return value, as it
+  // always has; a member on the page of its type has a section for it.
+  var valueKind = isPage ? "" : kind;
+  var inVariants = [].concat.apply([], vm.variants.map(getAppliesToFrameworks));
+  vm.primaryAppliesToData = getAppliesToFrameworks(vm).filter(function (unit) { return inVariants.indexOf(unit) < 0; }).join(' ');
+  if (isPage) {
+    // A page lists its see-also links after its members, outside its content, so it swaps them on their own when a
+    // variant has links of its own; the ids of a copy's headings end with the copy's suffix.
+    vm.hasSeeAlsoVariants = vm.variants.some(function (variant) { return variant.seealso.length > 0; });
+    vm.copySuffix = "";
+  }
+  vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, valueKind, index); });
+}
+
+// The value of a field, property or event is labelled as in the API's own section, not as a return value.
+function setValue(syntax, value, kind) {
+  value = value || "";
+  syntax.fieldValue = kind === "field" ? value : "";
+  syntax.propertyValue = kind === "property" || kind === "attachedproperty" ? value : "";
+  syntax.eventType = kind === "event" || kind === "attachedevent" ? value : "";
+  syntax.return = syntax.fieldValue || syntax.propertyValue || syntax.eventType ? "" : value;
+}
+
+// The API as it is in the frameworks of a variant: its own content, with what the variant records in place.
+function getVariantView(vm, variant, kind, valueKind, index) {
+  var view = {};
+  for (var key in vm) {
+    if (Object.prototype.hasOwnProperty.call(vm, key) && key !== 'variants' && key !== 'variantViews') view[key] = vm[key];
+  }
+  // headings of the copy must not repeat the ids of the API's own
+  var suffix = '_variant' + (index + 1);
+  view.id = vm.id + suffix;
+  view.copySuffix = suffix;
+  // nor the ids of what it lists, the values of an enum; the copy of another type shows none of its members
+  view.children = kind === 'enum' && vm.children ? vm.children.map(function (child) { return withIdSuffix(child, suffix); }) : [];
+  view.appliesToData = variant.appliesToData;
+  view.variantViews = [];
+  if (variant.summary) view.summary = variant.summary;
+  if (variant.remarks) view.remarks = variant.remarks;
+  ['inheritance', 'example', 'exceptions', 'seealso'].forEach(function (field) {
+    if (variant[field].length > 0) view[field] = variant[field];
+  });
+  if (variant.syntax) {
+    var own = vm.syntax || {};
+    var syntax = {
+      // a variant leaves out a declaration that is the same, which the copy then takes from the API, unless the
+      // variant has none of it: no parameters, or no return value, where the API has them
+      content: variant.syntax.content.length > 0 ? variant.syntax.content : own.content,
+      parameters: variant.syntax.parameters.length > 0 || variant.syntax.noParameters ? variant.syntax.parameters : (own.parameters || []),
+      typeParameters: variant.syntax.typeParameters.length > 0 ? variant.syntax.typeParameters : (own.typeParameters || [])
+    };
+    // before groupChildren, which names the value of a member of a type, both still hold it as a return value
+    setValue(syntax, variant.syntax.noReturn ? "" : variant.syntax.return || own.return, valueKind);
+    view.syntax = syntax;
+  }
+  return view;
+}
+
+function withIdSuffix(item, suffix) {
+  var copy = {};
+  for (var key in item) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) copy[key] = item[key];
+  }
+  if (copy.id) copy.id = copy.id + suffix;
+  if (copy.children) copy.children = copy.children.map(function (child) { return withIdSuffix(child, suffix); });
+  return copy;
 }
 
 function groupChildren(model, category) {

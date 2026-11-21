@@ -1,6 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections;
 using System.Collections.Immutable;
 using System.Web;
 using Docfx.Build.Engine;
@@ -912,6 +913,96 @@ items:
         var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
         var ex = Assert.Throws<DocumentException>(() => TocHelper.LoadSingleToc(toc));
         Assert.StartsWith("toc.yml is not a valid TOC File: (Line: 3, Col: 10, Idx: 22) - (Line: 3, Col: 10, Idx: 22): ", ex.Message);
+    }
+
+    [Fact]
+    public void AFrameworkOrAxisValueThatYamlReadsAsANumberOrBooleanIsUsedAsTextAndWarns()
+    {
+        var content = """
+            - name: EF Core
+              axis:
+                name: EF Core
+                values:
+                - id: 3.10
+                  label: EF Core 3.1
+                - id: "10"
+                  label: EF Core 10
+                - id: false
+                  label: EF Core off
+              appliesTo:
+              - version: 3.10
+                frameworks: [ net8.0 ]
+              memberLayout: 7
+              items:
+              - name: Reader
+                appliesTo:
+                - version: 10
+                  frameworks: [ net8.0 ]
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        // what YAML read can no longer say 3.10, but it is text, as the ids pages carry are
+        var entry = model.Items[0];
+        var axisValues = (IList)((IDictionary)entry.Metadata["axis"])["values"];
+        Assert.Equal("3.1", ((IDictionary)axisValues[0])["id"]);
+        Assert.Equal("10", ((IDictionary)axisValues[1])["id"]);
+        Assert.Equal("false", ((IDictionary)axisValues[2])["id"]);
+        Assert.Equal("3.1", ((IDictionary)((IList)entry.Metadata["appliesTo"])[0])["version"]);
+        Assert.Equal("10", ((IDictionary)((IList)entry.Items[0].Metadata["appliesTo"])[0])["version"]);
+        // other keys are not ids
+        Assert.Equal(7, entry.Metadata["memberLayout"]);
+
+        Assert.Equal(4, listener.Items.Count);
+        Assert.All(listener.Items, item => Assert.Equal(LogLevel.Warning, item.LogLevel));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds 3.1 unquoted"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'appliesTo' of table of contents 'toc.yml' holds 10 unquoted"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false, False or FALSE unquoted, which YAML reads as a boolean"));
+    }
+
+    [Fact]
+    public void AFrameworkOrAxisValueThatYamlReadsAsABooleanInAnyLetterCaseWarnsWithEverySpelling()
+    {
+        var content = """
+            - name: EF Core
+              axis:
+                name: EF Core
+                values:
+                - id: TRUE
+                  label: EF Core on
+                - id: False
+                  label: EF Core off
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        // YAML keeps no spelling, so the warning names every one it reads
+        var axisValues = (IList)((IDictionary)model.Items[0].Metadata["axis"])["values"];
+        Assert.Equal("true", ((IDictionary)axisValues[0])["id"]);
+        Assert.Equal("false", ((IDictionary)axisValues[1])["id"]);
+        Assert.Equal(2, listener.Items.Count);
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds true, True or TRUE unquoted, which YAML reads as a boolean, so it is used as 'true'"));
+        Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false, False or FALSE unquoted"));
     }
 
     [Theory]

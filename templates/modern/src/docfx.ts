@@ -8,7 +8,8 @@ import { renderMarkdown } from './markdown'
 import { enableSearch } from './search'
 import { renderToc } from './toc'
 import { initTheme } from './theme'
-import { renderBreadcrumb, renderInThisArticle, renderNavbar } from './nav'
+import { initAppliesTo } from './appliesTo'
+import { renderBreadcrumb, renderInThisArticle, renderNavbar, updateInThisArticle } from './nav'
 
 import 'bootstrap-icons/font/bootstrap-icons.scss'
 import './docfx.scss'
@@ -42,7 +43,8 @@ async function init() {
       renderInThisArticle(),
       renderMarkdown(),
       renderNav(),
-      highlight()
+      highlight(),
+      initAppliesTo(updateInThisArticle)
     ])
   }
 
