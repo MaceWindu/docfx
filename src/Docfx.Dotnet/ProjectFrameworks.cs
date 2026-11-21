@@ -38,6 +38,9 @@ internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Fa
 /// </remarks>
 internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 {
+    // An evaluation takes seconds; one that takes this long is waiting on something that may never come.
+    internal static readonly TimeSpan EvaluationTimeout = TimeSpan.FromMinutes(2);
+
     private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
 
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _loaded = new(FilePathComparer.OSPlatformSensitiveStringComparer);
@@ -72,24 +75,31 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     /// <returns>A <c>Name</c> of <see langword="null"/> when MSBuild cannot say, and the <c>Failure</c> that says why.</returns>
     public async Task<(string? Name, string? Failure)> GetName(Project project)
     {
+        if (project.FilePath is null)
+        {
+            return TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } unsaved
+                ? (unsaved, null)
+                : (null, $"The workspace names no file for project '{project.Name}', so which framework it targets is not known.");
+        }
+
         // A project that targets a single framework is loaded for that one alone, and has no framework in its name:
-        // the `(Legacy)` of a `Foo(Legacy).csproj` is part of its file name.
-        if (project.FilePath is { } path && _loaded.TryGetValue(path, out var loaded) && loaded.Count == 1)
+        // the `(Legacy)` of a `Foo(Legacy).csproj` is part of its file name. Only a file loaded for several
+        // frameworks names one there.
+        var path = project.FilePath;
+        _loaded.TryGetValue(path, out var loaded);
+        if (loaded is { Count: 1 })
         {
             return (loaded.Keys.First(), null);
         }
 
-        if (TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
+        if ((loaded is { Count: > 1 } || project.Solution.Projects.Count(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path)) > 1)
+            && TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
         {
             return (name, null);
         }
 
-        // which the workspace reports for SDK-style projects only
-        if (project.FilePath is null)
-        {
-            return (null, $"The workspace names no file for project '{project.Name}', so which framework it targets is not known.");
-        }
-
+        // The workspace reports the framework of SDK-style projects only: a non-SDK project is evaluated, also
+        // when its file name ends in parentheses.
         var evaluation = await Evaluate(project.FilePath, null);
         return (evaluation.Framework?.Name, evaluation.Failure);
     }
@@ -138,11 +148,12 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         int exitCode;
         try
         {
-            using var process = Process.Start(start)!;
-            var reading = process.StandardOutput.ReadToEndAsync();
-            var readingError = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            (output, error, exitCode) = (await reading, await readingError, process.ExitCode);
+            if (await Run(start, EvaluationTimeout) is not { } result)
+            {
+                return Failed($"it did not answer within {EvaluationTimeout.TotalSeconds} seconds");
+            }
+
+            (output, error, exitCode) = result;
         }
         catch (Exception ex)
         {
@@ -171,6 +182,38 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             var framework = targetFramework is null ? "" : $" for '{targetFramework}'";
             return new(null, $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}");
         }
+    }
+
+    /// <summary>
+    /// Runs a process to its end, or stops it after <paramref name="timeout"/>.
+    /// </summary>
+    /// <returns><see langword="null"/> when it did not end in time.</returns>
+    internal static async Task<(string Output, string Error, int ExitCode)?> Run(ProcessStartInfo start, TimeSpan timeout)
+    {
+        using var process = Process.Start(start)!;
+        var reading = process.StandardOutput.ReadToEndAsync();
+        var readingError = process.StandardError.ReadToEndAsync();
+        using var cancellation = new CancellationTokenSource(timeout);
+        try
+        {
+            await process.WaitForExitAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // An evaluation that waits on something, such as an SDK resolver, would otherwise block the whole run.
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // it ended meanwhile
+            }
+
+            return null;
+        }
+
+        return (await reading, await readingError, process.ExitCode);
     }
 
     /// <summary>

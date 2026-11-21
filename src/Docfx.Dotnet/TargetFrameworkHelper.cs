@@ -141,7 +141,6 @@ internal static partial class TargetFrameworkHelper
     /// not a version, such as <c>net8.0-windows10.0.19041.O</c>.
     /// </summary>
     /// <returns><see langword="null"/> when it can.</returns>
-    /// <seealso cref="IsValid"/>
     internal static string? GetInvalidReason(string targetFramework)
     {
         if (targetFramework.IndexOfAny([';', ',']) >= 0)
@@ -159,18 +158,13 @@ internal static partial class TargetFrameworkHelper
         var digits = new string(platform.SkipWhile(char.IsLetter).ToArray());
         if (digits.Length == platform.Length)
         {
-            return "a framework with a dash but no platform after it, such as the 'windows' of 'net8.0-windows'";
+            return "a framework with a dash but no platform after it: write the platform after the dash, as 'net8.0-windows' does, or leave out the dash";
         }
 
         return digits.Length == 0 || ParseVersion(digits) is not null
             ? null
-            : "a framework whose platform version is not a version, such as the '10.0.19041.0' of 'net8.0-windows10.0.19041.0'";
+            : $"a framework whose platform version '{digits}' is not a version: write it in digits and dots, as 'net8.0-windows10.0.19041.0' does";
     }
-
-    /// <summary>
-    /// Whether <paramref name="targetFramework"/> can name a single framework; see <see cref="GetInvalidReason"/>.
-    /// </summary>
-    internal static bool IsValid(string targetFramework) => GetInvalidReason(targetFramework) is null;
 
     /// <summary>
     /// Reads the framework from the <c>(tfm)</c> suffix Roslyn appends to the name of a project

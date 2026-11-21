@@ -567,8 +567,11 @@ public class TargetFrameworkTest : TestBase
         AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
     }
 
-    [Fact]
-    public async Task TargetFrameworkWithoutProjectInputIsInformation()
+    [Theory]
+    [InlineData("net8.0")]
+    // a value that selects nothing is no error where the option selects nothing anyway
+    [InlineData("net8.0;netstandard2.0")]
+    public async Task TargetFrameworkWithoutProjectInputIsInformation(string targetFramework)
     {
         var directory = Path.Combine(_projectFolder, "Source");
         Directory.CreateDirectory(directory);
@@ -581,11 +584,12 @@ public class TargetFrameworkTest : TestBase
         await Exec(new()
         {
             Src = Src(source),
-            TargetFramework = "net8.0",
+            TargetFramework = targetFramework,
             Properties = new() { ["TargetFramework"] = "net8.0" },
         });
 
         AssertWarnings(listener);
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
         Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("applies to project and solution input only"));
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Source.Widget.yml")));
     }

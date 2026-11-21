@@ -28,19 +28,19 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
-        // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
-        if (config.TargetFramework is { } invalid && TargetFrameworkHelper.GetInvalidReason(invalid) is { } reason)
+        var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
+        if (config.TargetFramework is not null && !hasProjectInput)
         {
+            // so it selects nothing here, whatever its value
+            Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
+        }
+        else if (config.TargetFramework is { } invalid && TargetFrameworkHelper.GetInvalidReason(invalid) is { } reason)
+        {
+            // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
             Logger.LogError(
                 $"'targetFramework' is '{invalid}', {reason}.",
                 code: ErrorCodes.Metadata.InvalidTargetFramework);
             return [];
-        }
-
-        var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
-        if (config.TargetFramework is not null && !hasProjectInput)
-        {
-            Logger.LogInfo("'targetFramework' applies to project and solution input only, and this metadata item has none.");
         }
 
         // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
