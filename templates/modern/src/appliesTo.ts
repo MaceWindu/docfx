@@ -1072,7 +1072,10 @@ export function applySelection(selection: Selection, axis?: Axis, print = false)
       }
       const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
       const following: HTMLElement[] = []
-      for (let e = section.nextElementSibling; e && !(ends.test(e.tagName) && !inMember(e)); e = e.nextElementSibling) {
+      // the see-also links of a page whose variants have links of their own come in a content of their own, after
+      // the last section, which they are not part of
+      const endsSection = (e: Element) => (ends.test(e.tagName) && !inMember(e)) || isSeeAlsoContents(e)
+      for (let e = section.nextElementSibling; e && !endsSection(e); e = e.nextElementSibling) {
         following.push(e as HTMLElement)
       }
       const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))

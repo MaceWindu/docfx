@@ -934,6 +934,24 @@ test('a heading of a member\'s example does not end the member', () => {
   assert.deepStrictEqual(memberElements(swapped.getElementById('Lib_Run') as unknown as Element).map(e => e.tagName), ['H3', 'P'])
 })
 
+test('in print, the see-also links of variants are not part of the last section', () => {
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib" data-uid="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 class="section" id="events">Events</h2>
+    <h3 id="Lib_Stopped" data-uid="Lib.Stopped" data-applies-to="net8.0">Stopped</h3><p>Only on .NET 8.</p>
+    <div class="api-contents" id="links">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="seealso">See Also</h2><div class="seealso"><div>Span</div></div></div>
+      <div class="api-content" data-applies-to="net462" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2><div class="seealso"><div>Array</div></div></div>
+    </div>
+  </article></body>`)
+  applySelection({ framework: 'net462' }, undefined, true)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+  // the section goes with its only member, the links of the type stay, as the selection has them
+  assert.ok(hidden('events') && hidden('Lib_Stopped'))
+  assert.ok(!hidden('links') && !hidden('seealso_variant1'))
+  assert.strictEqual(document.getElementById('links').closest('[data-applies-to-left-out]'), null)
+})
+
 test('a link to content hidden for the selection goes to the content shown', () => {
   installDom(page)
   applySelection({ framework: 'netstandard2.0' })
