@@ -19,7 +19,8 @@ namespace Docfx.Dotnet;
 
 partial class DotnetApiCatalog
 {
-    private static async Task<(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, Dictionary<Compilation, string>? frameworks)> Compile(ExtractMetadataConfig config)
+    /// <returns><see langword="null"/> when the metadata item is not documented, for a reason already reported.</returns>
+    private static async Task<(List<(IAssemblySymbol symbol, Compilation compilation)> assemblies, Dictionary<Compilation, string>? frameworks)?> Compile(ExtractMetadataConfig config)
     {
         var files = config.Files?.Select(s => new FileInformation(s))
             .GroupBy(f => f.Type)
@@ -56,18 +57,24 @@ partial class DotnetApiCatalog
 
         if (invalid.Count > 0)
         {
-            return ([], null);
+            // with nothing else to say about it
+            return null;
         }
 
         // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
-        if (targetFrameworkOption is not null && hasProjectInput &&
-            msbuildProperties.Keys.FirstOrDefault(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)) is { } propertyName)
+        var conflicting = targetFrameworkOption is not null && hasProjectInput
+            ? msbuildProperties.Keys.Where(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase) || key.Equals("TargetFrameworks", StringComparison.OrdinalIgnoreCase)).ToList()
+            : [];
+        if (conflicting.Count > 0)
         {
             var onlyOne = conflicting.Any(key => key.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase));
             var names = string.Join(" and ", conflicting.Select(key => $"'{key}'"));
             Logger.LogWarning(
-                $"Both '{targetFrameworkOption}' and the MSBuild property '{propertyName}' are set. The property is passed to MSBuild as a global property, "
-                + $"so it also applies to every referenced project{onlyOne}. Remove it from 'properties'.",
+                conflicting.Count == 1
+                    ? $"Both '{targetFrameworkOption}' and the MSBuild property {names} are set. The property is passed to MSBuild as a global property, "
+                        + $"so it also applies to every referenced project{(onlyOne ? " and leaves only one target framework to select from" : "")}. Remove it from 'properties'."
+                    : $"Both '{targetFrameworkOption}' and the MSBuild properties {names} are set. The properties are passed to MSBuild as global properties, "
+                        + $"so they also apply to every referenced project{(onlyOne ? " and leave only one target framework to select from" : "")}. Remove them from 'properties'.",
                 code: WarningCodes.Metadata.ConflictingTargetFramework);
         }
 
@@ -98,6 +105,7 @@ partial class DotnetApiCatalog
         // and the values of the axis are merged.
         var frameworks = targetFrameworks is null && config.Axis is null ? null : new Dictionary<Compilation, string>();
         var projectPaths = new Dictionary<Compilation, string>();
+        var matchedAxisValues = new HashSet<string>();
 
         // TODO: Add BinaryLogger support and print log warnings/errors to console. (It requires Roslyn v5.0.0)
         // NOTE:
@@ -171,6 +179,18 @@ partial class DotnetApiCatalog
             foreach (var projectFile in projectFiles)
             {
                 projectCompilations.UnionWith(await LoadCompilationsFromProject(projectFile.NormalizedPath));
+            }
+        }
+
+        // A project off the axis is information in a solution, but a value no project matches documents nothing for
+        // it, which its `files`, relative to a `src` folder, most likely miss.
+        if (config.Axis is { } documentedAxis && hasProjectInput)
+        {
+            foreach (var value in documentedAxis.Values.Where(value => !matchedAxisValues.Contains(value)))
+            {
+                Logger.LogWarning(
+                    $"No project matches value '{value}' of axis '{documentedAxis.Name}', so nothing is documented for it. Its 'files' patterns are relative to a 'src' folder that holds the project.",
+                    code: WarningCodes.Metadata.AxisValueNotFound);
             }
         }
 
@@ -309,6 +329,11 @@ partial class DotnetApiCatalog
                 return [];
             }
 
+            if (axisValue is not null)
+            {
+                matchedAxisValues.Add(axisValue);
+            }
+
             // Selected after loading rather than passed to MSBuild as a global property: a global
             // `TargetFramework` would also retarget every project this one references.
             if (config.TargetFramework is { } targetFramework)
@@ -348,7 +373,7 @@ partial class DotnetApiCatalog
                 selection = [(project, await TargetFrameworkHelper.GetFrameworkLabel(project, projectFrameworks!, failures))];
                 if (reportFailures)
                 {
-                    failures.ForEach(failure => projectFrameworks!.ReportFailure(failure, fromSolution));
+                    projectFrameworks!.ReportFailures(null, failures, fromSolution);
                 }
             }
             else

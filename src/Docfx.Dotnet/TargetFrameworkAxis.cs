@@ -32,6 +32,11 @@ internal sealed class TargetFrameworkAxis
     public string Default { get; }
 
     /// <summary>
+    /// The ids of the values, in their order.
+    /// </summary>
+    public IEnumerable<string> Values => _values.Select(v => v.Id);
+
+    /// <summary>
     /// Resolves the axes of a metadata item, logging an <see cref="ErrorCodes.Metadata.InvalidAxis"/>
     /// error and returning <see langword="null"/> when they cannot be used.
     /// </summary>

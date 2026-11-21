@@ -64,11 +64,6 @@ public class ApiVariantBuildOutput
     [JsonPropertyName("inheritance")]
     public List<ApiReferenceBuildOutput> Inheritance { get; set; }
 
-    [YamlMember(Alias = "attributes")]
-    [JsonProperty("attributes")]
-    [JsonPropertyName("attributes")]
-    public List<AttributeInfo> Attributes { get; set; }
-
     private bool _needExpand = true;
 
     /// <summary>
@@ -94,7 +89,6 @@ public class ApiVariantBuildOutput
             Exceptions = model.Exceptions?.Select(ApiExceptionInfoBuildOutput.FromModel).ToList(),
             SeeAlsos = model.SeeAlsos?.Select(ApiLinkInfoBuildOutput.FromModel).ToList(),
             Inheritance = model.Inheritance?.Select(uid => new ApiReferenceBuildOutput { Uid = uid }).ToList(),
-            Attributes = model.Attributes,
         };
     }
 

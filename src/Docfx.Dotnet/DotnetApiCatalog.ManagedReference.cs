@@ -20,9 +20,10 @@ partial class DotnetApiCatalog
         // Symbols of different compilations cannot be used together, and each framework is a compilation
         // of its own, so extension methods and the documented assemblies are worked out per framework.
         // The first group provides the content of an API that several share, so the default value of an
-        // axis goes first, then its other values in their order, then the default framework and those nearest to it, or else the frameworks in
-        // the order `targetFrameworks` lists them: the projects are loaded in the order of `src`, so a
-        // project that targets only a later framework would otherwise put it first. `"*"` keeps the order.
+        // axis goes first, then its other values in their order; within each, the default framework and
+        // those nearest to it, or else the frameworks in the order `targetFrameworks` lists them: the
+        // projects are loaded in the order of `src`, so a project that targets only a later framework
+        // would otherwise put it first. `"*"` keeps the order.
         var frameworkOrder = frameworks is null ? []
             : config.DefaultFramework is { } defaultFramework
                 ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))

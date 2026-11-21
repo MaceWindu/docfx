@@ -1191,6 +1191,24 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task AValueOfTheAxisNoProjectMatchesWarns()
+    {
+        // `files` relative to a folder `src` does not list, as a path that leaves it is
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+        var axis = Axis(defaultValue: "v1");
+        axis.Values.Add(new() { Id = "v3", Label = "Version 3", Files = ["../V3/V3.csproj"] });
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(v1, v2), Axes = [axis] });
+
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.AxisValueNotFound);
+        Assert.Contains("value 'v3' of axis 'Version'", warning.Message);
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Equal(["v1", "v2"], Page("Lib.Shared.yml").Items[0].AppliesTo.Select(a => a.Version));
+    }
+
+    [Fact]
     public async Task AnInvalidAxisIsAnError()
     {
         var (v1, v2) = CreateTwoVersionsOfOneAssembly();

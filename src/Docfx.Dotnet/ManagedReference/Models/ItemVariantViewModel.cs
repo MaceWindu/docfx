@@ -78,9 +78,4 @@ public class ItemVariantViewModel
     [JsonPropertyName("inheritance")]
     [UniqueIdentityReference]
     public List<string> Inheritance { get; set; }
-
-    [YamlMember(Alias = "attributes")]
-    [JsonProperty("attributes")]
-    [JsonPropertyName("attributes")]
-    public List<AttributeInfo> Attributes { get; set; }
 }

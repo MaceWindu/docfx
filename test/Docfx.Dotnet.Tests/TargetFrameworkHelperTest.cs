@@ -404,7 +404,10 @@ public class TargetFrameworkHelperTest
         await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0", "net9.0"], frameworks);
         await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0", "net9.0"], frameworks);
 
-        listener.Items.Where(i => i.Message.StartsWith("MSBuild cannot evaluate project")).Should().HaveCount(2);
+        // in the message that the project lacks the frameworks, which each run gives
+        listener.Items.Should().HaveCount(2).And.OnlyContain(i => i.Message.StartsWith($"Project '{LibPath}' does not target 'net8.0', 'net9.0'"));
+        listener.Items.Count(i => i.Message.Contains($"MSBuild cannot evaluate project '{LibPath}' for 'modern'")).Should().Be(1);
+        listener.Items.Count(i => i.Message.Contains($"MSBuild cannot evaluate project '{LibPath}' for 'legacy'")).Should().Be(1);
     }
 
     [Theory]
@@ -696,17 +699,55 @@ public class TargetFrameworkHelperTest
 
         await TargetFrameworkHelper.SelectProject(solution, projects[0], "net8.0", NotEvaluated(), fromSolution, report);
 
-        var failures = listener.Items.Where(i => i.Message.StartsWith("MSBuild cannot evaluate project")).ToList();
         if (expected is { } level)
         {
-            // once per alias, as each says nothing without MSBuild
-            failures.Should().HaveCount(2).And.OnlyContain(i => i.LogLevel == level);
-            listener.Items.Should().ContainSingle(i => i.Message.StartsWith($"Project '{LibPath}' does not target 'net8.0'")).Which.LogLevel.Should().Be(level);
+            // one message for the project, which says why each alias says nothing without MSBuild
+            var item = listener.Items.Should().ContainSingle().Which;
+            item.LogLevel.Should().Be(level);
+            item.Message.Should().StartWith($"Project '{LibPath}' does not target 'net8.0'")
+                .And.Contain($"MSBuild cannot evaluate project '{LibPath}' for 'modern': test.")
+                .And.Contain($"MSBuild cannot evaluate project '{LibPath}' for 'legacy': test.");
         }
         else
         {
             listener.Items.Should().BeEmpty();
         }
+    }
+
+    [Fact]
+    public async Task SelectProjectEvaluatesNoFrameworkThatCannotMatch()
+    {
+        // neither family is net10.0's, so the platform version they leave out does not matter
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib(net8.0-windows)", "Lib(net9.0-windows)");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(null);
+        });
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net10.0-windows10.0.19041.0", frameworks);
+
+        matched.Should().BeFalse();
+        evaluated.Should().BeEmpty();
+        listener.Items.Should().ContainSingle().Which.Message.Should().NotContain("MSBuild cannot evaluate");
+    }
+
+    [Fact]
+    public async Task ProjectFrameworksEvaluatesAProjectOnceWhateverTheCaseOfTheFramework()
+    {
+        var count = 0;
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            count++;
+            return Evaluated(new ProjectFramework("net8.0", "net8.0"));
+        });
+
+        await frameworks.Evaluate(LibPath, "net8.0-windows");
+        await frameworks.Evaluate(LibPath, "NET8.0-Windows");
+
+        count.Should().Be(1);
     }
 
     [Fact]

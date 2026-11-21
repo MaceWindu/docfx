@@ -33,6 +33,7 @@ public static class WarningCodes
         public const string ConflictingTargetFramework = "ConflictingTargetFramework";
         public const string ApiKindDiffersBetweenFrameworks = "ApiKindDiffersBetweenFrameworks";
         public const string InvalidVariantIgnore = "InvalidVariantIgnore";
+        public const string AxisValueNotFound = "AxisValueNotFound";
     }
 
     public static class Markdown

@@ -441,7 +441,6 @@ internal static class YamlViewModelExtensions
             Exceptions = content.Exceptions,
             SeeAlsos = content.SeeAlsos,
             Inheritance = content.Inheritance,
-            Attributes = content.Attributes,
         };
     }
 

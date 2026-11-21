@@ -101,7 +101,12 @@ public static partial class DotnetApiCatalog
                     code: WarningCodes.Metadata.ConflictingTargetFramework);
             }
 
-            var (assemblies, frameworks) = await Compile(config);
+            if (await Compile(config) is not { } compiled)
+            {
+                return;
+            }
+
+            var (assemblies, frameworks) = compiled;
             var documented = frameworks;
 
             // A single framework has nothing to merge, and its output must not differ from plain selection.

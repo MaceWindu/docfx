@@ -242,7 +242,10 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
             Uid = key,
             Children = overload.Select(s => s.Uid).ToList(),
             Type = firstMember.Type,
-            AssemblyNameList = firstMember.AssemblyNameList,
+            // the assemblies of every overload, which can differ between frameworks, in the order of the type
+            AssemblyNameList = MergeInOrder(overload, s => s.AssemblyNameList)?
+                .OrderBy(assembly => primaryItem.AssemblyNameList?.IndexOf(assembly) is int index and >= 0 ? index : int.MaxValue)
+                .ToList() ?? firstMember.AssemblyNameList,
             NamespaceName = firstMember.NamespaceName,
             Metadata = new Dictionary<string, object>
             {
@@ -309,6 +312,12 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
         List<string> TypeFrameworks(string version) => typeAppliesTo?.FirstOrDefault(t => t.Version == version)?.Frameworks;
 
         static int IndexOf<T>(List<T> list, Predicate<T> match) => list?.FindIndex(match) is int index and >= 0 ? index : int.MaxValue;
+    }
+
+    private static List<string> MergeInOrder(IEnumerable<ItemViewModel> children, Func<ItemViewModel, IEnumerable<string>> selector)
+    {
+        var items = children.SelectMany(s => selector(s) ?? []).Distinct().ToList();
+        return items.Count == 0 ? null : items;
     }
 
     private static List<string> MergeList(IEnumerable<ItemViewModel> children, Func<ItemViewModel, IEnumerable<string>> selector)

@@ -279,6 +279,9 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Contains($"<dt>Applies to</dt><dd>{Both}</dd>", page);
         Assert.Contains(string.Format(Badge, Net8), page);
+        // Do(int) is built into Lib on net8.0, Do(string) into Lib.Legacy on netstandard2.0
+        // listed in the order of the type, whichever overload comes first
+        Assert.Contains("<dd>Lib.dll, Lib.Legacy.dll</dd>", page);
     }
 
     [Fact]

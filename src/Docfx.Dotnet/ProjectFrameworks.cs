@@ -111,15 +111,23 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     }
 
     /// <summary>
-    /// Reports a <see cref="ProjectEvaluation.Failure"/> as <see cref="TargetFrameworkHelper.ReportNotFound"/> does, once:
-    /// a project is evaluated once for a framework, which the frameworks of a list, the label of a framework, and
-    /// several solutions holding the project can each ask for.
+    /// Reports why MSBuild cannot evaluate a project, the <see cref="ProjectEvaluation.Failure"/>s of its frameworks,
+    /// as <see cref="TargetFrameworkHelper.ReportNotFound"/> does: in one message with <paramref name="message"/>, what
+    /// is said about the project, when it is given. Each failure is reported once: a project is evaluated once for a
+    /// framework, which the frameworks of a list, the label of a framework, and several solutions holding the project
+    /// can each ask for.
     /// </summary>
-    public void ReportFailure(string failure, bool fromSolution)
+    public void ReportFailures(string? message, IEnumerable<string> failures, bool fromSolution)
     {
-        if (_reported.TryAdd(failure, true))
+        var unreported = failures.Where(failure => _reported.TryAdd(failure, true)).Select(failure => $"{failure.TrimEnd('.')}.").ToList();
+        if (message is not null)
         {
-            TargetFrameworkHelper.ReportNotFound(failure, fromSolution);
+            unreported.Insert(0, message);
+        }
+
+        if (unreported.Count > 0)
+        {
+            TargetFrameworkHelper.ReportNotFound(string.Join(" ", unreported), fromSolution);
         }
     }
 
