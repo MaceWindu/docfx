@@ -312,6 +312,37 @@ public class TargetFrameworkTest : TestBase
         Assert.False(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
     }
 
+    [Fact]
+    public async Task TargetFrameworksWithSeveralFrameworksInOneItemSaysToListThem()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFrameworks = ["net8.0;netstandard2.0"] });
+
+        var error = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Equal(ErrorCodes.Metadata.InvalidTargetFramework, error.Code);
+        Assert.Contains("list each framework as an item of its own", error.Message);
+    }
+
+    [Fact]
+    public async Task InvalidTargetFrameworksWithoutProjectInputAreInformation()
+    {
+        var directory = Path.Combine(_projectFolder, "Source");
+        Directory.CreateDirectory(directory);
+        var source = Path.Combine(directory, "Widget.cs");
+        File.WriteAllText(source, "namespace Source { public class Widget { } }");
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        await Exec(new() { Src = Src(source), TargetFrameworks = ["net8.0;netstandard2.0"] });
+
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Contains(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("'targetFrameworks' applies to project and solution input only"));
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Source.Widget.yml")));
+    }
+
     [Theory]
     [InlineData("net8.0", "Aliased.OnlyModern.yml")]
     [InlineData("netstandard2.0", "Aliased.OnlyLegacy.yml")]
@@ -1166,9 +1197,12 @@ public class TargetFrameworkTest : TestBase
 
         using var listener = new TestListenerScope();
 
-        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v3")] });
+        await Exec(new() { Src = Src(v1, v2), Axes = [Axis(defaultValue: "v3")], DefaultFramework = "net8.0" });
 
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Code == ErrorCodes.Metadata.InvalidAxis && x.Message.Contains("'v3'"));
+        // nothing is documented, as with an invalid `targetFramework`: not the projects of every value as one
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.False(Directory.Exists(_outputFolder) && Directory.EnumerateFiles(_outputFolder, "*.yml").Any());
     }
 
     [Fact]
@@ -1211,6 +1245,25 @@ public class TargetFrameworkTest : TestBase
         Assert.Single(listener.Items, x => x.LogLevel == LogLevel.Info && x.Message.Contains("Tests.csproj' matches none of the values"));
         Assert.False(File.Exists(Path.Combine(_outputFolder, "Tests.Fixture.yml")));
         Assert.Equal(["v1", "v2"], Page("Lib.Shared.yml").Items[0].AppliesTo.Select(a => a.Version));
+    }
+
+    [Fact]
+    public async Task TargetFrameworkWithAnAxisOnASolutionNeitherReportsNorCountsAProjectNotOnTheAxis()
+    {
+        // Only the test project, which is not on the axis, targets the framework.
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+        var tests = CreateProject("Tests", "<TargetFramework>netstandard2.0</TargetFramework>", "namespace Tests { public class Fixture { } }");
+        var solution = CreateSolution(v1, v2, tests);
+
+        using var listener = new TestListenerScope(LogLevel.Info);
+
+        await Exec(new() { Src = Src(solution), Axes = [Axis(defaultValue: "v2")], TargetFramework = "netstandard2.0" });
+
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+        Assert.StartsWith("No project of solution", warning.Message);
+        Assert.DoesNotContain(listener.Items, x => x.Message.Contains("Tests.csproj' does not target"));
+        Assert.Single(listener.Items, x => x.Message.Contains("Tests.csproj' matches none of the values"));
     }
 
     [Fact]

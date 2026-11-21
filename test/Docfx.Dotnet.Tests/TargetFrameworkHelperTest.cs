@@ -87,9 +87,15 @@ public class TargetFrameworkHelperTest
     [InlineData("net8.0,netstandard2.0", false)]
     [InlineData("net8.0-", false)]
     [InlineData("net8.0-10.0", false)]
-    public void IsValid(string targetFramework, bool expected)
+    public void GetInvalidReason(string targetFramework, bool expectValid)
     {
-        TargetFrameworkHelper.IsValid(targetFramework).Should().Be(expected);
+        (TargetFrameworkHelper.GetInvalidReason(targetFramework) is null).Should().Be(expectValid);
+    }
+
+    [Fact]
+    public void GetInvalidReasonQuotesThePlatformVersionThatIsNotOne()
+    {
+        TargetFrameworkHelper.GetInvalidReason("net8.0-windows10.0.19041.O").Should().Contain("'10.0.19041.O'");
     }
 
     [Theory]
@@ -336,10 +342,12 @@ public class TargetFrameworkHelperTest
     [InlineData("Lib(modern)", "net8.0")]
     public async Task GetFrameworkLabelOfAMultiTargetedProject(string name, string expected)
     {
-        var (_, projects) = CreateProjects(name);
+        // loaded for another framework too, as the file of a project named after its framework is; added last, so
+        // that the solution it belongs to holds both
+        var (_, projects) = CreateProjects("Lib(netstandard2.0)", name);
         var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(tfm == "modern" ? new ProjectFramework("modern", "net8.0") : null));
 
-        (await TargetFrameworkHelper.GetFrameworkLabel(projects[0], frameworks, [])).Should().Be(expected);
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[1], frameworks, [])).Should().Be(expected);
     }
 
     [Fact]
@@ -355,10 +363,10 @@ public class TargetFrameworkHelperTest
     [Fact]
     public async Task GetFrameworkLabelOfAnAliasMSBuildCannotEvaluateIsTheAliasAndSaysWhy()
     {
-        var (_, projects) = CreateProjects("Lib(modern)");
+        var (_, projects) = CreateProjects("Lib(legacy)", "Lib(modern)");
         var failures = new List<string>();
 
-        (await TargetFrameworkHelper.GetFrameworkLabel(projects[0], NotEvaluated(), failures)).Should().Be("modern");
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[1], NotEvaluated(), failures)).Should().Be("modern");
         failures.Should().ContainSingle();
     }
 
@@ -550,6 +558,40 @@ public class TargetFrameworkHelperTest
     }
 
     [Theory]
+    [InlineData("ef9", "EF9")]
+    [InlineData("ef9", "ef9")]
+    public void AnAxisWithTwoValuesThatDifferOnlyInCaseIsInvalid(string first, string second)
+    {
+        using var listener = new Docfx.Tests.Common.TestListenerScope();
+
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = first, Files = ["a"] }, new() { Id = second, Files = ["b"] }] }], ["."]);
+
+        axis.Should().BeNull();
+        listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error).Should().ContainSingle(x => x.Code == Docfx.Common.ErrorCodes.Metadata.InvalidAxis);
+    }
+
+    [Fact]
+    public void TheDefaultOfAnAxisNamesAValueInAnyCase()
+    {
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = "ef3", Files = ["a"] }, new() { Id = "ef9", Files = ["b"] }], Default = "EF9" }], ["."]);
+
+        axis.Default.Should().Be("ef9");
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows7", "net8.0-windows7.0 net8.0-windows7", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows7.0", "net8.0-windows7.0 net8.0-windows7", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows10.0.19041", "net8.0-windows10.0.19041.0", "net8.0-windows10.0.19041.0")]
+    // another version, or none, is another name
+    [InlineData("net8.0-windows8.0", "net8.0-windows7.0 net8.0-windows8.0", "net8.0-windows8.0")]
+    [InlineData("net8.0-windows", "net8.0-windows7.0 net8.0-windows", "net8.0-windows")]
+    [InlineData("net8.0", "net8.0", "net8.0")]
+    public void AsNamedFirst(string framework, string named, string expected)
+    {
+        TargetFrameworkHelper.AsNamedFirst(framework, named.Split(' ')).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", true)]
     [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows", true)]
     [InlineData("NET8.0", "net8.0", true)]
@@ -559,7 +601,6 @@ public class TargetFrameworkHelperTest
     {
         TargetFrameworkHelper.IsSameFramework(left, right).Should().Be(expected);
     }
-
 
     [Fact]
     public async Task SelectProjectOfASingleTargetProjectWithParenthesesInItsNameReadsTheFrameworkTheWorkspaceLoaded()
@@ -578,6 +619,68 @@ public class TargetFrameworkHelperTest
 
         matched.Should().BeTrue();
         evaluated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SelectProjectOfANonSdkProjectWithParenthesesInItsNameEvaluatesItWithoutAFramework()
+    {
+        // a non-SDK `Lib(Legacy).csproj`, for which the workspace reports no framework: `Legacy` is no framework of it
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib(Legacy)");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework("net48", "net48"));
+        });
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net472", frameworks);
+
+        matched.Should().BeFalse();
+        evaluated.Should().ContainSingle().Which.Should().BeNull();
+        listener.Items.Should().ContainSingle(i => i.Message.Contains("documenting 'net48' instead"));
+    }
+
+    [Fact]
+    public async Task ProjectFrameworksStopsAnEvaluationThatDoesNotAnswer()
+    {
+        var start = OperatingSystem.IsWindows()
+            ? new System.Diagnostics.ProcessStartInfo("cmd", "/c ping -n 60 127.0.0.1")
+            : new System.Diagnostics.ProcessStartInfo("sleep", "60");
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        start.UseShellExecute = false;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await ProjectFrameworks.Run(start, TimeSpan.FromSeconds(1));
+
+        result.Should().BeNull();
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task ProjectFrameworksNamesAProjectAfterItsFrameworkWhenItsFileIsLoadedForSeveral()
+    {
+        var (_, projects) = CreateProjects("Lib(net8.0)", "Lib(netstandard2.0)");
+
+        var (name, failure) = await NotEvaluated().GetName(projects[1]);
+
+        name.Should().Be("netstandard2.0");
+        failure.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SelectProjectOfAProjectLoadedForSeveralFrameworksReadsTheFrameworkFromItsName()
+    {
+        // the other frameworks of the file failed to load, so the solution holds one project of it
+        var (solution, projects) = CreateProjects("Lib(net8.0)");
+        var frameworks = NotEvaluated();
+        frameworks.AddLoaded(LibPath, "net8.0");
+        frameworks.AddLoaded(LibPath, "netstandard2.0");
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net8.0", frameworks);
+
+        matched.Should().BeTrue();
     }
 
     [Theory]

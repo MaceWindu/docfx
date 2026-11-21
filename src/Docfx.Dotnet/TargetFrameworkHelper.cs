@@ -275,6 +275,17 @@ internal static partial class TargetFrameworkHelper
     }
 
     /// <summary>
+    /// Names a framework with a platform version as the first of <paramref name="frameworks"/> that gives the same
+    /// version, however it writes it: <c>net8.0-windows7</c> and <c>net8.0-windows7.0</c> are one framework.
+    /// </summary>
+    internal static string AsNamedFirst(string framework, IEnumerable<string> frameworks)
+    {
+        return GetTargetFrameworkPlatformVersion(framework) is { } version
+            ? frameworks.FirstOrDefault(other => MatchesFramework(other, framework) && GetTargetFrameworkPlatformVersion(other) == version) ?? framework
+            : framework;
+    }
+
+    /// <summary>
     /// Names a framework that leaves out its platform version, <c>net8.0-windows</c>, as the one of
     /// <paramref name="frameworks"/> that gives the version MSBuild evaluates it to, so that both are one framework:
     /// <c>net8.0-windows7.0</c>, if another project is named that.

@@ -20,7 +20,7 @@ internal enum VariantIgnore
     None = 0,
 
     /// <summary>
-    /// Attributes, including the attribute lines of a declaration.
+    /// The attribute lines of a declaration.
     /// </summary>
     Attributes = 1,
 
@@ -65,7 +65,14 @@ internal static partial class TargetFrameworkVariants
         nameof(MetadataItem.ExtensionMethods),
         nameof(MetadataItem.Items),
         nameof(MetadataItem.References),
+        // No template shows them but in the declaration, which is compared: an attribute whose constructor takes an
+        // `int` in one framework and a `long` in another is written the same there, and would be a variant that
+        // shows nothing.
+        nameof(MetadataItem.Attributes),
     ];
+
+    // Templates show the declaration in C#, the first language an item lists.
+    private const string ShownLanguage = nameof(SyntaxLanguage.CSharp);
 
     private static readonly (PropertyInfo Property, string Name)[] Compared = typeof(MetadataItem)
         .GetProperties()
@@ -272,8 +279,7 @@ internal static partial class TargetFrameworkVariants
 
     private static bool AreEquivalent(JsonNode left, JsonNode right, string name, VariantIgnore ignore, bool inDeclaration, bool baseLists, bool strict)
     {
-        if ((ignore.HasFlag(VariantIgnore.Attributes) && name == "attributes") ||
-            (ignore.HasFlag(VariantIgnore.Documentation) && Documentation.Contains(name)))
+        if (ignore.HasFlag(VariantIgnore.Documentation) && Documentation.Contains(name))
         {
             return true;
         }
@@ -291,6 +297,9 @@ internal static partial class TargetFrameworkVariants
                     // framework has an attribute such as `NotNullWhen` and another lacks or hides it: the variant
                     // would repeat a declaration and parameters that are the same.
                     .Where(key => !(key == "attributes" && name is "parameters" or "typeParameters" or "return"))
+                    // Pages show the declaration in one language: one that differs only in Visual Basic would be a
+                    // variant that repeats the same C# declaration.
+                    .Where(key => !(name == "content" && key != ShownLanguage && leftObject.ContainsKey(ShownLanguage) && rightObject.ContainsKey(ShownLanguage)))
                     .All(key => AreEquivalent(leftObject[key], rightObject[key], key, ignore, inDeclaration: name == "content", baseLists, strict));
 
             case JsonArray leftArray when right is JsonArray rightArray:

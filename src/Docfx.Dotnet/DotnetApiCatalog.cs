@@ -84,6 +84,12 @@ public static partial class DotnetApiCatalog
 
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
+            // as an invalid `targetFramework` is: the error has been logged, and nothing is documented
+            if (config.InvalidAxes)
+            {
+                return;
+            }
+
             // Both apply to what several frameworks or values of an axis merge into, which nothing else gives.
             if ((config.TargetFrameworks is null || config.TargetFramework is not null) && config.Axis is null &&
                 (config.DefaultFramework is not null || config.VariantIgnore is not VariantIgnore.None))
@@ -234,6 +240,7 @@ public static partial class DotnetApiCatalog
             DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
             VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
             Axis = axis,
+            InvalidAxes = axis is null && configModel?.Axes is { Count: > 0 },
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,

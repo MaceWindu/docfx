@@ -515,6 +515,40 @@ public class TargetFrameworkMergeTest
         item.Variants.Should().BeNull();
     }
 
+    [Fact]
+    public void AttributeDataTheDeclarationWritesTheSameIsNotADifference()
+    {
+        // `[A(1)]` either way, while the attribute data records an `int` and a `long` argument
+        var result = Merge(
+            ("namespace N { public class A : System.Attribute { public A(int x) { } } [A(1)] public class T { } }", First),
+            ("namespace N { public class A : System.Attribute { public A(long x) { } } [A(1)] public class T { } }", Second));
+
+        result["N.T"].Attributes.Should().NotBeEmpty();
+        result["N.T"].Variants.Should().BeNull();
+    }
+
+    [Fact]
+    public void AnAttributeTheDeclarationShowsIsADifference()
+    {
+        var result = Merge(
+            ("namespace N { public class A : System.Attribute { public A(int x) { } } [A(1)] public class T { } }", First),
+            ("namespace N { public class A : System.Attribute { public A(int x) { } } [A(2)] public class T { } }", Second));
+
+        result["N.T"].Variants.Should().ContainSingle().Which.Content.Syntax.Content[SyntaxLanguage.CSharp].Should().Contain("[A(2)]");
+    }
+
+    [Fact]
+    public void ADeclarationThatDiffersOnlyInVisualBasicIsNotADifference()
+    {
+        // Pages show the C# declaration.
+        var primary = new MetadataItem { Name = "N.T", Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public class T", [SyntaxLanguage.VB] = "Public Class T" } } };
+        var other = new MetadataItem { Name = "N.T", Syntax = new() { Content = new() { [SyntaxLanguage.CSharp] = "public class T", [SyntaxLanguage.VB] = "Public NotInheritable Class T" } } };
+
+        TargetFrameworkVariants.Merge(primary, other, Second);
+
+        primary.Variants.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(nameof(VariantIgnore.None), true)]
     [InlineData(nameof(VariantIgnore.Documentation), false)]

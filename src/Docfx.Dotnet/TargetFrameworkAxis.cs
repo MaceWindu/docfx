@@ -64,20 +64,26 @@ internal sealed class TargetFrameworkAxis
                 return Invalid($"Every value of axis '{axis.Name}' needs an 'id' without '{Separator}' or whitespace and at least one pattern in 'files'.");
             }
 
-            if (values.Any(v => v.Item1 == value.Id))
+            // Values that differ only in case read as one to a reader, and to whatever a template keys on them.
+            if (values.FirstOrDefault(v => string.Equals(v.Item1, value.Id, StringComparison.OrdinalIgnoreCase)).Item1 is { } same)
             {
-                return Invalid($"Axis '{axis.Name}' has the value '{value.Id}' more than once.");
+                return Invalid(same == value.Id
+                    ? $"Axis '{axis.Name}' has the value '{value.Id}' more than once."
+                    : $"Axis '{axis.Name}' has the values '{same}' and '{value.Id}', which differ only in case.");
             }
 
             values.Add((value.Id, value.Label ?? value.Id, value.Files.Select(f => new GlobMatcher(f)).ToArray()));
         }
 
-        if (axis.Default is not null && !values.Any(v => v.Item1 == axis.Default))
+        // named in any case, as the values are told apart
+        var defaultValue = axis.Default is null ? values[0].Item1
+            : values.FirstOrDefault(v => string.Equals(v.Item1, axis.Default, StringComparison.OrdinalIgnoreCase)).Item1;
+        if (defaultValue is null)
         {
             return Invalid($"The default '{axis.Default}' of axis '{axis.Name}' is not one of its values.");
         }
 
-        return new(axis.Name, values, axis.Default ?? values[0].Item1, bases.ToArray());
+        return new(axis.Name, values, defaultValue, bases.ToArray());
 
         static TargetFrameworkAxis? Invalid(string message)
         {

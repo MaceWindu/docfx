@@ -28,22 +28,6 @@ partial class DotnetApiCatalog
         var msbuildProperties = config.MSBuildProperties ?? [];
         msbuildProperties.TryAdd("Configuration", "Release");
 
-        // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
-        var invalid = new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", config.DefaultFramework) }
-            .Concat((config.TargetFrameworks ?? []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
-            .Select(option => (option.Option, option.Framework, Reason: option.Framework is { } framework ? TargetFrameworkHelper.GetInvalidReason(framework) : null))
-            .Where(option => option.Reason is not null)
-            .ToList();
-        foreach (var (option, framework, reason) in invalid)
-        {
-            Logger.LogError($"'{option}' holds '{framework}', {reason}.", code: ErrorCodes.Metadata.InvalidTargetFramework);
-        }
-
-        if (invalid.Count > 0)
-        {
-            return ([], null);
-        }
-
         var hasProjectInput = files.ContainsKey(FileType.Solution) || files.ContainsKey(FileType.Project);
         var targetFrameworkOption = config.TargetFramework is not null ? "targetFramework"
             : config.TargetFrameworksFromAxes ? "axes"
@@ -51,7 +35,28 @@ partial class DotnetApiCatalog
             : null;
         if (targetFrameworkOption is not null && !hasProjectInput)
         {
+            // so they select nothing here, whatever their values
             Logger.LogInfo($"'{targetFrameworkOption}' applies to project and solution input only, and this metadata item has none.");
+        }
+
+        // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
+        List<(string Option, string? Framework, string? Reason)> invalid = !hasProjectInput ? [] : new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", config.DefaultFramework) }
+            .Concat((config.TargetFrameworks ?? []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
+            .Select(option => (option.Option, option.Framework, Reason: option.Framework is { } framework ? TargetFrameworkHelper.GetInvalidReason(framework) : null))
+            .Where(option => option.Reason is not null)
+            .ToList();
+        foreach (var (option, framework, reason) in invalid)
+        {
+            // `targetFrameworks` takes a list, but of one framework per item.
+            var why = option == "targetFrameworks" && framework!.IndexOfAny([';', ',']) >= 0
+                ? "several frameworks in one item: list each framework as an item of its own, as in [\"net8.0\", \"netstandard2.0\"]"
+                : reason;
+            Logger.LogError($"'{option}' holds '{framework}', {why}.", code: ErrorCodes.Metadata.InvalidTargetFramework);
+        }
+
+        if (invalid.Count > 0)
+        {
+            return ([], null);
         }
 
         // `TargetFrameworks` retargets every referenced project as well, to the frameworks it lists.
@@ -223,6 +228,14 @@ partial class DotnetApiCatalog
             foreach (var (compilation, unit) in frameworks.ToList())
             {
                 var (value, framework) = TargetFrameworkAxis.SplitUnit(unit);
+
+                // and a platform version written two ways, `net8.0-windows7` and `net8.0-windows7.0`, is one framework
+                if (TargetFrameworkHelper.AsNamedFirst(framework, named) is var first && first != framework)
+                {
+                    frameworks[compilation] = value is null ? first : TargetFrameworkAxis.GetUnit(value, first);
+                    continue;
+                }
+
                 if (projectPaths.TryGetValue(compilation, out var projectPath)
                     && await TargetFrameworkHelper.WithPlatformVersionOf(framework, projectPath, named, projectFrameworks!) is var versioned && versioned != framework)
                 {
@@ -277,6 +290,25 @@ partial class DotnetApiCatalog
                 return [];
             }
 
+            // Every framework of a project comes from the same file, so it matches the same value of the axis. Matched
+            // before a framework is selected: a project off the axis is not documented, so whether it targets the
+            // framework is neither reported nor counted toward its solution.
+            string? axisValue = null;
+            if (config.Axis is { } axis && (axisValue = axis.Match(project.FilePath!)) is null)
+            {
+                var message = $"Project '{project.FilePath}' matches none of the values of axis '{axis.Name}', so it is not documented.";
+                // as with the frameworks, a solution commonly holds analyzers, tools and tests that are not on the axis
+                if (fromSolution)
+                {
+                    Logger.LogInfo(message);
+                }
+                else
+                {
+                    Logger.LogError(message, code: ErrorCodes.Metadata.InvalidAxis);
+                }
+                return [];
+            }
+
             // Selected after loading rather than passed to MSBuild as a global property: a global
             // `TargetFramework` would also retarget every project this one references.
             if (config.TargetFramework is { } targetFramework)
@@ -304,23 +336,6 @@ partial class DotnetApiCatalog
                 }
 
                 return await project.GetCompilationAsync() is { } single ? [single] : [];
-            }
-
-            // Every framework of a project comes from the same file, so it matches the same value of the axis.
-            string? axisValue = null;
-            if (config.Axis is { } axis && (axisValue = axis.Match(project.FilePath!)) is null)
-            {
-                var message = $"Project '{project.FilePath}' matches none of the values of axis '{axis.Name}', so it is not documented.";
-                // as with the frameworks, a solution commonly holds analyzers, tools and tests that are not on the axis
-                if (fromSolution)
-                {
-                    Logger.LogInfo(message);
-                }
-                else
-                {
-                    Logger.LogError(message, code: ErrorCodes.Metadata.InvalidAxis);
-                }
-                return [];
             }
 
             // With `targetFramework`, the project selected above, which is at its default framework if it does
