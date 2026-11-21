@@ -10,8 +10,11 @@ import { isExternalHref, isSameURL, loc, meta } from './helper'
  */
 export type Unit = { value?: string, framework: string }
 
-/** What the reader picked. A missing part is "all". */
-export type Selection = { value?: string, framework?: string }
+/**
+ * What the reader picked. A missing part is "all". `axisValues`, the ids of the axis `value` is one of, is set where
+ * a page of another axis can show, as in a PDF of the API of several metadata items.
+ */
+export type Selection = { value?: string, framework?: string, axisValues?: string[] }
 
 /** One entry of `appliesTo` in the table of contents, as written by `docfx metadata`. */
 export type AppliesToGroup = { version?: string, label?: string, frameworks?: string[] }
@@ -123,8 +126,9 @@ export function rank(target: string, framework: string): number {
 }
 
 export function matches(unit: Unit, selection: Selection): boolean {
-  // a value picked for the axis of one part of the docs says nothing about a part without that axis
-  return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
+  // a value picked for the axis of one part of the docs says nothing about a part without that axis, or with another
+  const valueApplies = !!selection.value && unit.value !== undefined && (!selection.axisValues || selection.axisValues.includes(unit.value))
+  return (!valueApplies || unit.value === selection.value) &&
     (!selection.framework || rank(selection.framework, unit.framework) < Infinity)
 }
 
@@ -673,9 +677,9 @@ function selectionLabel(selection: Selection, axis?: Axis): string {
  * Shows the page for the selection: the content of each API for the framework that stands in best, and of what
  * differs elsewhere only what differs within the selection; members, types, and inherited members and extension
  * methods, that do not exist in the selection dimmed; "Applies to" for what is shown; a banner when the API itself
- * does not exist in it.
+ * does not exist in it. In print, for a PDF of one framework, such members are left out instead.
  */
-export function applySelection(selection: Selection, axis?: Axis) {
+export function applySelection(selection: Selection, axis?: Axis, print = false) {
   const any = !!(selection.framework || selection.value)
   const label = selectionLabel(selection, axis)
 
@@ -716,19 +720,39 @@ export function applySelection(selection: Selection, axis?: Axis) {
     if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
       return
     }
+    if (print) {
+      memberElements(heading).forEach(leaveOut)
+      return
+    }
     heading.appendChild(unavailableBadge(label, false))
     for (const e of memberElements(heading)) {
       e.classList.add('applies-to-unavailable')
     }
   })
 
+  // In print, the anchor of an overload group, which each of its members follows, goes when all of them do, so that a
+  // link to the group is text, as to a member left out.
+  if (print) {
+    const anchors = document.querySelectorAll<HTMLElement>('article a[data-overload][id]')
+    for (const id of new Set(Array.from(anchors, a => a.id))) {
+      const group = Array.from(anchors).filter(a => a.id === id)
+      if (group.every(a => a.nextElementSibling?.hasAttribute('data-applies-to-left-out'))) {
+        group.forEach(leaveOut)
+      }
+    }
+  }
+
   // The entries of a list are marked as members are, not only dimmed, which a reader who cannot tell the colours
   // apart, or does not see them, would miss.
   // the types a namespace page lists, and the members of a type with a page each
   document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
     if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
-      entry.classList.add('applies-to-unavailable')
-      entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
+      if (print) {
+        leaveOut(entry)
+      } else {
+        entry.classList.add('applies-to-unavailable')
+        entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
+      }
     }
   })
 
@@ -736,17 +760,62 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // as a base type differs, and
   // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
-    list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
-      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)) {
+    const entries = Array.from(list.querySelectorAll<HTMLElement>('dd div'))
+    entries.filter(entry => entry.dataset.appliesTo && !isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)).forEach(entry => {
+      if (print) {
+        leaveOut(entry)
+      } else {
         entry.classList.add('applies-to-unavailable')
         entry.appendChild(unavailableBadge(label, true))
       }
     })
+    if (print && entries.length > 0 && entries.every(entry => entry.hidden)) {
+      leaveOut(list)
+    }
   })
 
+  // In print, a section whose members are all left out goes too: "Events" on a type page, or "Interfaces" on a
+  // namespace page, where the headings of such groups are `h3`s without frameworks of their own. Only on API pages,
+  // and by the members that have frameworks: a hidden tab of an article has terms of its own. Members left out, not
+  // hidden: the values of an enum in its own content, when a copy is shown in its place, are printed in the copy.
+  if (print && document.querySelector('article h1[data-applies-to]')) {
+    const member = 'h3[data-applies-to], dt[data-applies-to], dl.jumplist[data-applies-to]'
+    // the headings of a member's own markdown, such as its example, are none of the page's sections
+    const ofMembers = new Set(Array.from(document.querySelectorAll('article h3[data-uid]')).flatMap(h => memberElements(h).slice(1)))
+    const inMember = (e: Element) => {
+      for (let a = e; a; a = a.parentElement) {
+        if (ofMembers.has(a)) {
+          return true
+        }
+      }
+      return false
+    }
+    document.querySelectorAll<HTMLElement>('article h2, article h3:not([data-applies-to])').forEach(section => {
+      if (inMember(section)) {
+        return
+      }
+      const ends = section.tagName === 'H2' ? /^H[12]$/ : /^H[1-3]$/
+      const following: HTMLElement[] = []
+      for (let e = section.nextElementSibling; e && !(ends.test(e.tagName) && !inMember(e)); e = e.nextElementSibling) {
+        following.push(e as HTMLElement)
+      }
+      const members = following.flatMap(e => e.matches(member) ? [e] : Array.from(e.querySelectorAll<HTMLElement>(member)))
+      if (members.length > 0 && members.every(m => m.closest('[data-applies-to-left-out]'))) {
+        leaveOut(section)
+        following.forEach(leaveOut)
+      }
+    })
+  }
+
+  // A PDF of one framework leaves out the pages of APIs that do not exist in it, by their entries in the table of
+  // contents; `docfx pdf` warns about a page it printed all the same. It keeps "Applies to" as it is: it has no axis
+  // to label a value with.
   const title = document.querySelector<HTMLElement>('article h1[data-applies-to]')
   const units = title ? parseUnits(title.dataset.appliesTo) : []
-  if (title && !isAvailable(units, selection)) {
+  const unavailable = !!title && !isAvailable(units, selection)
+  if (print) {
+    document.body?.toggleAttribute('data-applies-to-unavailable', unavailable)
+  } else if (unavailable) {
     const banner = document.createElement('div')
     banner.className = 'applies-to-banner alert alert-warning'
     banner.textContent = loc('appliesToUnavailable', { selection: label })
@@ -817,6 +886,15 @@ export function isHiddenBySelection(element: Element): boolean {
   return !!element.closest('.api-content[hidden], .api-variant[hidden], .api-variants-heading[hidden]')
 }
 
+/**
+ * In print, leaves out of the page what does not exist in the selection, marked for `docfx pdf`, which makes the
+ * links to it text, as to a page the PDF leaves out.
+ */
+function leaveOut(element: Element) {
+  (element as HTMLElement).hidden = true
+  element.setAttribute('data-applies-to-left-out', '')
+}
+
 /** The badge of something that does not exist in the selection; smaller in a list than in a heading. */
 function unavailableBadge(label: string, inList: boolean): HTMLElement {
   const badge = document.createElement('span')
@@ -839,14 +917,17 @@ function variantsAfter(contents: Element): Element[] {
 
 /**
  * The elements of a member: its heading and what follows up to the next heading or member, or for the value of an
- * enum, its term and description.
+ * enum, its term and description. The heading of a member docfx writes has its uid: its example is markdown as it
+ * is, whose headings are not the page's, so it ends only at the next member, section, or the see-also links of
+ * the page.
  */
 export function memberElements(heading: Element): Element[] {
   const elements = [heading]
+  const written = heading.hasAttribute('data-uid')
   for (let e = heading.nextElementSibling; e; e = e.nextElementSibling) {
     const ends = heading.tagName === 'DT'
       ? e.tagName !== 'DD'
-      : /^H[1-3]$/.test(e.tagName) || e.hasAttribute('data-overload') || isSeeAlsoContents(e)
+      : e.hasAttribute('data-overload') || isSeeAlsoContents(e) || (written ? endsMember(e) : /^H[1-3]$/.test(e.tagName))
     if (ends) {
       break
     }
@@ -860,6 +941,12 @@ const isSeeAlso = (h: Element) => h.tagName === 'H2' && /^seealso(_variant\d+)?$
 /** The see-also links of a page whose variants have links of their own, which come in a content of their own for each. */
 function isSeeAlsoContents(e: Element): boolean {
   return e.classList.contains('api-contents') && Array.from(e.querySelectorAll('h2')).some(isSeeAlso)
+}
+
+function endsMember(e: Element): boolean {
+  return e.tagName === 'H1' ||
+    (e.tagName === 'H2' && (e.classList.contains('section') || isSeeAlso(e))) ||
+    (e.tagName === 'H3' && e.hasAttribute('data-uid'))
 }
 
 /**
@@ -917,6 +1004,44 @@ export function addHeadingAnchors(add: (headings: Element[]) => void) {
  */
 export function entryHref(entry: TocEntry, display: 'leaf' | 'group' | 'heading'): string | undefined {
   return display === 'heading' ? undefined : entry.href
+}
+
+declare global {
+  interface Window {
+    /**
+     * Set by `docfx pdf` for a PDF of one framework or axis value: `pdfFramework`, `pdfAxisValue`, the ids of the
+     * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
+     * not have the value, whose own values may have the same ids. `applied` is set once the page shows it, which
+     * `docfx pdf` reads to warn about the pages of a template that does not; `error`, when the page could not.
+     */
+    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[], applied?: boolean, error?: string }
+  }
+}
+
+/** In a PDF of one framework or axis value, shows the pages for it. */
+export function applyPrintSelection() {
+  const selection = window.docfxAppliesTo
+  if (!selection) {
+    return
+  }
+  try {
+    // A copy shown in place of the API's own content has the ids of its headings to itself, as on the site, so that
+    // the outline of a PDF with `pdfTocSource: headings` goes to the heading printed.
+    distinguishCopies()
+    // the value of another axis says nothing about this page
+    const otherAxis = !!selection.otherAxisPages?.includes(window.location.pathname)
+    applySelection({
+      framework: selection.framework || undefined,
+      value: otherAxis ? undefined : selection.value || undefined,
+      axisValues: otherAxis ? undefined : selection.axisValues || undefined
+    }, undefined, true)
+    selection.applied = true
+  } catch (e) {
+    // The page is printed as far as the selection was applied, and `docfx pdf` says why, rather than wait for a page
+    // that is never ready.
+    console.error(e)
+    selection.error = String((e as Error)?.message || e)
+  }
 }
 
 /** The display name of a framework, as the templates write it in Applies to. */

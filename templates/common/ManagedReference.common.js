@@ -231,7 +231,7 @@ function handleInheritedMembers(model, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(inheritedIn, member.uid) ? inheritedIn[member.uid] : [];
     // set on every member, so that mustache does not look up the values of the type
     member.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
-    // for the picker, which dims what is not inherited in the selection
+    // for the picker, which dims what is not inherited in the selection, and a PDF of one framework, which leaves it out
     member.appliesToData = getAppliesToFrameworks({ appliesTo: appliesTo }).join(' ');
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });

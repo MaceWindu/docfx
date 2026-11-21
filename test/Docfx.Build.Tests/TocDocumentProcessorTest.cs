@@ -1005,6 +1005,38 @@ items:
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds false, False or FALSE unquoted"));
     }
 
+    [Fact]
+    public void APdfFrameworkOrAxisValueThatYamlReadsAsANumberIsUsedAsTextAndWarns()
+    {
+        var content = """
+            pdf: true
+            pdfAxisValue: 3.10
+            pdfFramework: net8.0
+            items:
+            - name: EF Core 10
+              pdfAxisValue: 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.Equal("3.1", model.Metadata["pdfAxisValue"]);
+        Assert.Equal("net8.0", model.Metadata["pdfFramework"]);
+        // only the root's are options of its PDF: one below it has no effect, which a warning would not say
+        Assert.IsNotType<string>(model.Items[0].Metadata["pdfAxisValue"]);
+        var warning = Assert.Single(listener.Items);
+        Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.1 unquoted", warning.Message);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("# comment only\n")]

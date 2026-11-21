@@ -84,9 +84,12 @@ public static class TocHelper
     }
 
     /// <summary>
-    /// The keys whose values name frameworks and axis values by id, which pages compare as text.
+    /// The keys whose values name frameworks and axis values by id, which pages and PDFs compare as text.
     /// </summary>
-    internal static readonly string[] IdKeys = ["appliesTo", "axis"];
+    internal static readonly string[] IdKeys = ["appliesTo", "axis", "pdfFramework", "pdfAxisValue"];
+
+    // The options of the PDF of a table of contents, which only its root has: `docfx pdf` reads no others.
+    private static readonly string[] RootIdKeys = ["pdfFramework", "pdfAxisValue"];
 
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
@@ -95,11 +98,11 @@ public static class TocHelper
     /// What it holds is used as text, `3.1` or `true`, with a warning to quote it: `docfx metadata` quotes such
     /// ids itself.
     /// </summary>
-    private static void KeepIdsAsText(TocItemViewModel item, string file)
+    private static void KeepIdsAsText(TocItemViewModel item, string file, bool root = true)
     {
         foreach (var key in IdKeys)
         {
-            if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+            if ((root || !RootIdKeys.Contains(key)) && item.Metadata.TryGetValue(key, out var value) && value is not null)
             {
                 item.Metadata[key] = AsText(value, key);
             }
@@ -109,7 +112,7 @@ public static class TocHelper
         {
             if (child is not null)
             {
-                KeepIdsAsText(child, file);
+                KeepIdsAsText(child, file, root: false);
             }
         }
 
