@@ -259,6 +259,15 @@ public class PdfFrameworkTest
         Assert.Null(PdfBuilder.ReadPdfOutline(handWritten, "toc.json"));
         Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": false, "appliesTo": 1 }"""u8.ToArray(), "toc.json"));
         Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Warning));
+
+        // only true is a PDF, as the boolean the outline reads; a value of another kind is none, and says so
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": "false", "items": [] }"""u8.ToArray(), "text/toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": 0, "items": [] }"""u8.ToArray(), "number/toc.json"));
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        Assert.Equal(
+            ["'pdf' of table of contents 'text/toc.json' is not true or false, so it has no PDF.", "'pdf' of table of contents 'number/toc.json' is not true or false, so it has no PDF."],
+            listener.GetItemsByLogLevel(LogLevel.Warning).Select(w => w.Message));
 
         Assert.Equal("Lib", PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes(Json(null, null)), "toc.json")?.items?[1].name);
 

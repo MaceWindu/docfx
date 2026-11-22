@@ -1040,13 +1040,13 @@ items:
         // only the root's are options of its PDF: one below it has no effect, which a warning would not say
         Assert.IsNotType<string>(model.Items[0].Metadata["pdfAxisValue"]);
         var warning = Assert.Single(listener.Items);
-        Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.1 unquoted", warning.Message);
+        Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.10 unquoted, which YAML reads as a number, so it is used as '3.1'", warning.Message);
     }
 
     [Theory]
-    [InlineData("pdfFramework", "true", "true, True or TRUE")]
-    [InlineData("pdfAxisValue", "False", "false, False or FALSE")]
-    public void APdfFrameworkOrAxisValueThatYamlReadsAsABooleanIsUsedAsTextAndWarns(string key, string written, string spellings)
+    [InlineData("pdfFramework", "true")]
+    [InlineData("pdfAxisValue", "False")]
+    public void APdfFrameworkOrAxisValueThatYamlReadsAsABooleanIsUsedAsTextAndWarns(string key, string written)
     {
         var content = $"""
             pdf: true
@@ -1069,7 +1069,7 @@ items:
 
         Assert.Equal(written.ToLowerInvariant(), model.Metadata[key]);
         var warning = Assert.Single(listener.Items);
-        Assert.StartsWith($"'{key}' of table of contents 'toc.yml' holds {spellings} unquoted, which YAML reads as a boolean", warning.Message);
+        Assert.StartsWith($"'{key}' of table of contents 'toc.yml' holds {written} unquoted, which YAML reads as a boolean, so it is used as '{written.ToLowerInvariant()}'", warning.Message);
     }
 
     [Theory]

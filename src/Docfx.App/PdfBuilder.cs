@@ -139,7 +139,7 @@ static class PdfBuilder
             // outline was deserialized as it is; a JsonObject would throw on it when it is read.
             using var document = JsonDocument.Parse(json);
             // Most tables of contents, such as the large ones of an API, have no PDF, and are read no further.
-            if (!HasPdf(document.RootElement))
+            if (!HasPdf(document.RootElement, path))
             {
                 return null;
             }
@@ -192,7 +192,7 @@ static class PdfBuilder
             return null;
         }
 
-        static bool HasPdf(JsonElement root)
+        static bool HasPdf(JsonElement root, string path)
         {
             if (root.ValueKind is not JsonValueKind.Object)
             {
@@ -207,7 +207,13 @@ static class PdfBuilder
                     pdf = property.Value.ValueKind;
                 }
             }
-            return pdf is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.False);
+            // Only `true` is a PDF, as the boolean the outline reads: a value of another kind, such as "false" or 0,
+            // which would stop it, is none, and says so.
+            if (pdf is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.True or JsonValueKind.False))
+            {
+                Logger.LogWarning($"'pdf' of table of contents '{path}' is not true or false, so it has no PDF.");
+            }
+            return pdf is JsonValueKind.True;
         }
 
         static JsonNode? ToNode(JsonElement element)
@@ -883,11 +889,13 @@ static class PdfBuilder
                 // and a page docfx built with a template that does not apply the selection, which only the table of
                 // contents follows then.
                 var pagePath = url.AbsolutePath;
+                // A page that does not answer is left out, with a warning of its own, and checked where the table of
+                // contents lists it again.
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage)
+                    && !checkedPages.ContainsKey((outline, pagePath))
+                    && await Ask(() => page.EvaluateAsync<string>(PrintSelectionStateScript)) is { } state
                     && checkedPages.TryAdd((outline, pagePath), true))
                 {
-                    // a page that does not answer is left out, with a warning of its own
-                    var state = await Ask(() => page.EvaluateAsync<string>(PrintSelectionStateScript)) ?? "";
                     var problem = GetPrintSelectionProblem(state, timedOut);
                     // a hand-written page, which has no template, applies nothing, nor is it expected to
                     var built = IsBuiltPage(builtPages, pagePath);
