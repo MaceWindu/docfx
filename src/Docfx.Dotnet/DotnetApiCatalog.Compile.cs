@@ -42,8 +42,7 @@ partial class DotnetApiCatalog
 
         // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
         // What `targetFramework` overrides, and is warned about as ignored, selects nothing either.
-        var merges = MergesFrameworks(config);
-        List<(string Option, string? Framework, string? Reason)> invalid = !hasProjectInput ? [] : new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", merges ? config.DefaultFramework : null) }
+        List<(string Option, string? Framework, string? Reason)> invalid = !hasProjectInput ? [] : new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", UsesDefaultFramework(config) ? config.DefaultFramework : null) }
             .Concat((config.TargetFramework is null ? config.TargetFrameworks ?? [] : []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
             .Select(option => (option.Option, option.Framework, Reason: option.Framework is { } framework ? TargetFrameworkHelper.GetInvalidReason(framework) : null))
             .Where(option => option.Reason is not null)
@@ -296,6 +295,7 @@ partial class DotnetApiCatalog
                         throw new DocfxException($"dotnet restore failed for '{path}' with exit code {process.ExitCode}.");
                     }
                 }
+                projectFrameworks?.Opening(path);
                 project = await workspace.OpenProjectAsync(path, msbuildLogger, projectFrameworks);
             }
 

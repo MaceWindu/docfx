@@ -24,7 +24,11 @@ internal sealed record ProjectFramework(string Name, string Moniker);
 /// What <c>dotnet msbuild</c> evaluates a project to: its <paramref name="Framework"/>, or the
 /// <paramref name="Failure"/> that says why it cannot, for the caller to report.
 /// </summary>
-internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Failure);
+/// <param name="ListsFrameworks">
+/// Evaluated without a framework, the project sets no <c>TargetFramework</c> but lists frameworks in
+/// <c>TargetFrameworks</c>, which the workspace loads one at a time, with each as a global property.
+/// </param>
+internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Failure, bool ListsFrameworks = false);
 
 /// <summary>
 /// What MSBuild says the target frameworks of the projects a workspace loads are.
@@ -34,30 +38,33 @@ internal sealed record ProjectEvaluation(ProjectFramework? Framework, string? Fa
 /// <c>Foo(net8.0)</c>, and reports the framework of every project it loads to the progress it is given, a
 /// project that targets a single framework included. Neither says what an alias in <c>TargetFrameworks</c>
 /// stands for, nor the platform version a framework such as <c>net8.0-windows</c> leaves out: for those, the
-/// project is evaluated by <c>dotnet msbuild</c>, with the SDK a <c>global.json</c> of the project selects and the
-/// MSBuild properties of the metadata item. Its <c>-getProperty</c> switch needs the .NET SDK 8.0.100 or later.
+/// project is evaluated by <c>dotnet msbuild</c>, with the SDK the workspace loaded it with and the MSBuild
+/// properties of the metadata item. Its <c>-getProperty</c> switch needs the .NET SDK 8.0.100 or later.
 /// </remarks>
 internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 {
     // An evaluation takes seconds; one that takes this long is waiting on something that may never come.
     internal static readonly TimeSpan EvaluationTimeout = TimeSpan.FromMinutes(2);
 
-    private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
+    private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworks", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
 
     // What MSBuildLocator sets in a process to point MSBuild at an SDK.
     private static readonly string[] s_locatedSdkVariables = ["MSBuildSDKsPath", "MSBuildExtensionsPath", "MSBUILD_EXE_PATH"];
 
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _loaded = new(FilePathComparer.OSPlatformSensitiveStringComparer);
+    private readonly ConcurrentDictionary<string, string> _openedWith = new(FilePathComparer.OSPlatformSensitiveStringComparer);
     private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new(EvaluationKeyComparer.Instance);
     private readonly Func<string, string?, Task<ProjectEvaluation>> _evaluate;
     private readonly ConcurrentDictionary<string, bool> _reported = new();
+    private string? _opening;
 
     /// <param name="properties">The MSBuild properties the workspace loads projects with.</param>
     /// <param name="evaluationTimeout">How long an evaluation may take, <see cref="EvaluationTimeout"/> when not given.</param>
     public ProjectFrameworks(IReadOnlyDictionary<string, string> properties, TimeSpan? evaluationTimeout = null)
     {
         var timeout = evaluationTimeout ?? EvaluationTimeout;
-        _evaluate = (path, targetFramework) => EvaluateWithMSBuild(path, targetFramework, properties, timeout);
+        var dotnet = GetDotnet(Environment.GetEnvironmentVariable("DOTNET_ROOT"));
+        _evaluate = (path, targetFramework) => EvaluateWithMSBuild(dotnet, path, GetSdkDirectory(path), targetFramework, properties, timeout);
     }
 
     /// <param name="evaluate">Evaluates a project, for a framework when it is given, as MSBuild does.</param>
@@ -66,14 +73,52 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         _evaluate = evaluate;
     }
 
+    /// <summary>
+    /// Says that the workspace opens <paramref name="path"/> next, for the projects it loads with it.
+    /// </summary>
+    public void Opening(string path) => _opening = path;
+
     public void Report(ProjectLoadProgress value) => AddLoaded(value.FilePath, value.TargetFramework);
 
     internal void AddLoaded(string? path, string? targetFramework)
     {
-        if (!string.IsNullOrEmpty(targetFramework) && !string.IsNullOrEmpty(path))
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        if (_opening is { } opening)
+        {
+            _openedWith.TryAdd(path, opening);
+        }
+
+        if (!string.IsNullOrEmpty(targetFramework))
         {
             _loaded.GetOrAdd(path, _ => new(StringComparer.OrdinalIgnoreCase)).TryAdd(targetFramework, true);
         }
+    }
+
+    /// <summary>
+    /// The folder whose <c>global.json</c> selects the SDK the workspace loaded <paramref name="path"/> with.
+    /// </summary>
+    /// <remarks>
+    /// Each project the workspace opens gets a build host of its own, which takes its SDK from the folder of that
+    /// project and keeps it for the projects it references, which it loads too: a project first loaded as a
+    /// reference has the SDK of the project that references it.
+    /// </remarks>
+    internal string GetSdkDirectory(string path)
+    {
+        return Path.GetDirectoryName(_openedWith.TryGetValue(path, out var opened) ? opened : path)!;
+    }
+
+    /// <summary>
+    /// The <c>dotnet</c> the workspace's build host takes its SDK from: the one in <paramref name="dotnetRoot"/>, a
+    /// <c>DOTNET_ROOT</c>, before the <c>dotnet</c> both start as, as MSBuildLocator does.
+    /// </summary>
+    internal static string GetDotnet(string? dotnetRoot)
+    {
+        var dotnet = Path.Combine(dotnetRoot ?? "", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        return !string.IsNullOrEmpty(dotnetRoot) && File.Exists(dotnet) ? dotnet : "dotnet";
     }
 
     /// <summary>
@@ -139,12 +184,25 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         return _evaluated.GetOrAdd((path, targetFramework), key => _evaluate(key.Path, key.TargetFramework));
     }
 
-    private static async Task<ProjectEvaluation> EvaluateWithMSBuild(string path, string? targetFramework, IReadOnlyDictionary<string, string> properties, TimeSpan timeout)
+    /// <summary>
+    /// Evaluates a project the workspace loaded for <paramref name="targetFramework"/> alone as it loaded it: one that
+    /// sets <c>TargetFramework</c> without the framework as a global property, one whose <c>TargetFrameworks</c> lists
+    /// only that framework with it. What a <c>Directory.Build.props</c> sets for a <c>TargetFramework</c>, before the
+    /// project sets it, then is what the workspace saw.
+    /// </summary>
+    public async Task<ProjectEvaluation> EvaluateAsLoaded(string path, string targetFramework)
     {
-        var start = new ProcessStartInfo("dotnet")
+        var evaluation = await Evaluate(path, null);
+        return evaluation.ListsFrameworks ? await Evaluate(path, targetFramework) : evaluation;
+    }
+
+    private static async Task<ProjectEvaluation> EvaluateWithMSBuild(
+        string dotnet, string path, string sdkDirectory, string? targetFramework, IReadOnlyDictionary<string, string> properties, TimeSpan timeout)
+    {
+        var start = new ProcessStartInfo(dotnet)
         {
-            // so that the SDK is the one a `global.json` of the project selects, as for the workspace
-            WorkingDirectory = Path.GetDirectoryName(path),
+            // so that the SDK is the one a `global.json` selects for the workspace
+            WorkingDirectory = sdkDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -189,29 +247,28 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             start.ArgumentList.Add($"-property:TargetFramework={Escape(targetFramework)}");
         }
 
-        string output;
-        string error;
-        int exitCode;
         try
         {
-            if (await Run(start, timeout) is not { } result)
-            {
-                return Failed($"it did not answer within {timeout.TotalSeconds} seconds");
-            }
-
-            (output, error, exitCode) = result;
+            return await Run(start, timeout) is { } result
+                ? ReadEvaluation(path, targetFramework, result.Output, result.Error, result.ExitCode)
+                : Failed(path, targetFramework, $"it did not answer within {timeout.TotalSeconds} seconds");
         }
         catch (Exception ex)
         {
-            return Failed(ex.Message);
+            return Failed(path, targetFramework, ex.Message);
         }
+    }
 
+    /// <summary>
+    /// Reads what <c>dotnet msbuild -getProperty</c> wrote for a project.
+    /// </summary>
+    internal static ProjectEvaluation ReadEvaluation(string path, string? targetFramework, string output, string error, int exitCode)
+    {
+        var text = string.Join(" ", $"{output}\n{error}".Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         if (exitCode != 0)
         {
-            var text = string.Join(" ", $"{output}\n{error}".Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
             // MSBuild before 17.8 knows no `-getProperty`
-            return Failed(text.Contains("MSB1001", StringComparison.Ordinal)
+            return Failed(path, targetFramework, text.Contains("MSB1001", StringComparison.Ordinal)
                 ? $"its '-getProperty' switch needs the .NET SDK 8.0.100 or later: {text}"
                 : text);
         }
@@ -221,19 +278,26 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             using var document = JsonDocument.Parse(ReadJson(output));
             var values = document.RootElement.GetProperty("Properties");
             string Get(string property) => values.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
+
+            // as the workspace tells a project it loads once per framework from one it loads once
+            if (targetFramework is null && Get("TargetFramework").Length == 0 && Get("TargetFrameworks").Length > 0)
+            {
+                return Failed(path, targetFramework, "it lists its target frameworks in 'TargetFrameworks' only") with { ListsFrameworks = true };
+            }
+
             return Create(Get("TargetFramework"), Get("TargetFrameworkMoniker"), Get("TargetPlatformIdentifier"), Get("TargetPlatformVersion"))
-                is { } evaluated ? new(evaluated, null) : Failed("it names no target framework");
+                is { } evaluated ? new(evaluated, null) : Failed(path, targetFramework, "it names no target framework");
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return Failed(output.Trim());
+            return Failed(path, targetFramework, text.Length > 0 ? text : $"it wrote nothing, and exited with code {exitCode}");
         }
+    }
 
-        ProjectEvaluation Failed(string reason)
-        {
-            var framework = targetFramework is null ? "" : $" for '{targetFramework}'";
-            return new(null, $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}");
-        }
+    private static ProjectEvaluation Failed(string path, string? targetFramework, string reason)
+    {
+        var framework = targetFramework is null ? "" : $" for '{targetFramework}'";
+        return new(null, $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}");
     }
 
     /// <summary>
@@ -317,10 +381,11 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         return new(name, moniker);
     }
 
-    // `;` and `,` separate properties on the command line.
+    // `;` and `,` separate properties on the command line. A `%` is left alone: MSBuild reads a value on the command
+    // line as escaped, as the workspace's global properties, so `%3B` is a `;` in both.
     private static string Escape(string value)
     {
-        return value.Replace("%", "%25").Replace(";", "%3B").Replace(",", "%2C");
+        return value.Replace(";", "%3B").Replace(",", "%2C");
     }
 
     // A path as the file system compares it, a framework as MSBuild does: case-insensitively.

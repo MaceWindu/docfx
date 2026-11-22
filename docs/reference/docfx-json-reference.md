@@ -519,7 +519,7 @@ The framework of [`targetFrameworks`](#targetframeworks) that provides the conte
 }
 ```
 
-A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements. Frameworks that cannot stand in for it follow in the order they first appear across the projects of the entry. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged. Without `targetFrameworks` or [`axes`](#axes), or with a [`targetFramework`](#targetframework) that overrides `targetFrameworks`, there is nothing for it to choose from: it is ignored, whatever its value, with a `ConflictingTargetFramework` warning, and so is [`variantIgnore`](#variantignore).
+A project that does not target it uses the framework nearest to it among those it targets, the way NuGet picks the assets of a package: the same kind of framework at the highest lower version first, such as `net6.0` for `net8.0`, then the highest .NET Standard it implements. Frameworks that cannot stand in for it follow in the order they first appear across the projects of the entry. If no project is documented for it, a `TargetFrameworkNotFound` warning is logged. Without `targetFrameworks` or [`axes`](#axes), or with a [`targetFramework`](#targetframework), which selects one framework, also for each value of an axis, there is nothing for it to choose from: it is ignored, whatever its value, with a `ConflictingTargetFramework` warning. So is [`variantIgnore`](#variantignore) when nothing is merged, without `axes`.
 
 ### `axes`
 
@@ -552,6 +552,8 @@ Pages show each value with its frameworks, as in `Applies to: EF Core 8 (.NET 8)
 ### `variantIgnore`
 
 The kinds of difference between the frameworks of [`targetFrameworks`](#targetframeworks) that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces, the attributes of parameters and return values, which pages do not show, and what only the declaration in Visual Basic or the attribute data says, as pages show the declaration in C#). Nothing else is ignored by default.
+
+The values are read in any case.
 
 - `attributes`: the attribute lines of the declaration of an API.
 - `documentation`: summaries, remarks, examples, descriptions, exceptions and see-also links.

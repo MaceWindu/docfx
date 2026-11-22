@@ -617,6 +617,18 @@
         }
       }
     },
+    "variantIgnoreValue": {
+      "description": "A kind of difference that is not recorded as a variant, in any case.",
+      "type": "string",
+      "anyOf": [
+        {
+          "enum": [ "attributes", "documentation", "inheritdoc" ]
+        },
+        {
+          "pattern": "^\\s*([Aa][Tt][Tt][Rr][Ii][Bb][Uu][Tt][Ee][Ss]|[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt][Aa][Tt][Ii][Oo][Nn]|[Ii][Nn][Hh][Ee][Rr][Ii][Tt][Dd][Oo][Cc])\\s*$"
+        }
+      ]
+    },
     "metadataConfig": {
       "type": "array",
       "items": {
@@ -751,14 +763,12 @@
             "description": "The kinds of difference between the frameworks of `targetFrameworks`, or the values of `axes`, that are not recorded as variants, besides those never recorded (documentation one framework lacks, whitespace, the order of interfaces). Nothing else is ignored by default.",
             "anyOf": [
               {
-                "type": "string",
-                "enum": [ "attributes", "documentation", "inheritdoc" ]
+                "$ref": "#/$defs/variantIgnoreValue"
               },
               {
                 "type": "array",
                 "items": {
-                  "type": "string",
-                  "enum": [ "attributes", "documentation", "inheritdoc" ]
+                  "$ref": "#/$defs/variantIgnoreValue"
                 }
               }
             ]

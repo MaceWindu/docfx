@@ -201,14 +201,17 @@ internal static partial class TargetFrameworkVariants
         // another one's text.
         // An override the other framework lacks leaves `Overridden` unset, which reads as "the same".
         var noOverridden = primary.Overridden is not null && other.Overridden is null;
+        // So does the base type of a class that is an interface in the other framework, whose base would otherwise
+        // list it as derived there too.
+        var noInheritance = primary.Inheritance is { Count: > 0 } && other.Inheritance is not { Count: > 0 };
         primary.Variants ??= [];
-        if (primary.Variants.FirstOrDefault(variant => variant.NoOverridden == noOverridden && HasSameContent(variant.Content, content, sharedIgnore, baseLists)) is { } existing)
+        if (primary.Variants.FirstOrDefault(variant => variant.NoOverridden == noOverridden && variant.NoInheritance == noInheritance && HasSameContent(variant.Content, content, sharedIgnore, baseLists)) is { } existing)
         {
             existing.Frameworks.Add(framework);
         }
         else
         {
-            primary.Variants.Add(new() { Frameworks = [framework], Content = content, NoOverridden = noOverridden });
+            primary.Variants.Add(new() { Frameworks = [framework], Content = content, NoOverridden = noOverridden, NoInheritance = noInheritance });
         }
     }
 

@@ -77,6 +77,9 @@ public class TargetFrameworkHelperTest
     [InlineData("net8.0-windows10.0.19041.0", true)]
     [InlineData("net8.0-android34", true)]
     [InlineData("modern", true)]
+    // an alias may hold a dash and digits
+    [InlineData("lib-2", true)]
+    [InlineData("lib-v2.x", true)]
     [InlineData("net", true)]
     // a platform version that is not one would otherwise match every version of its platform
     [InlineData("net8.0-windows10.0.19041.O", false)]
@@ -267,6 +270,46 @@ public class TargetFrameworkHelperTest
         var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], targetFramework, frameworks);
 
         matched.Should().Be(expectMatch);
+    }
+
+    [Fact]
+    public async Task SelectProjectOfASingleTargetProjectEvaluatesItWithoutItsFramework()
+    {
+        // a `TargetFramework`, which the workspace loads without the framework as a global property
+        var (solution, projects) = CreateProjects("Lib");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework("net8.0-windows", "net8.0-windows7.0"));
+        });
+        frameworks.AddLoaded(LibPath, "net8.0-windows");
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net8.0-windows7.0", frameworks);
+
+        matched.Should().BeTrue();
+        evaluated.Should().ContainSingle().Which.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SelectProjectOfAProjectWhoseTargetFrameworksListsOneEvaluatesItForTheFramework()
+    {
+        // the workspace loads it with the framework as a global property, and names it without the framework
+        var (solution, projects) = CreateProjects("Lib");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return tfm is null
+                ? Task.FromResult(new ProjectEvaluation(null, "MSBuild cannot evaluate project 'Lib.csproj': test", ListsFrameworks: true))
+                : Evaluated(new ProjectFramework("net8.0-windows", "net8.0-windows7.0"));
+        });
+        frameworks.AddLoaded(LibPath, "net8.0-windows");
+
+        var (_, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net8.0-windows7.0", frameworks);
+
+        matched.Should().BeTrue();
+        evaluated.Should().Equal(null, "net8.0-windows");
     }
 
     [Fact]
@@ -793,10 +836,42 @@ public class TargetFrameworkHelperTest
         listener.Items.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("net8.O")]
+    [InlineData("net")]
+    public async Task SelectProjectEvaluatesNoAliasForAValueThatNamesNoFramework(string targetFramework)
+    {
+        // what an alias stands for is a framework, which such a value never is
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib(modern)", "Lib(legacy)");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework(tfm, "net8.0"));
+        });
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], targetFramework, frameworks);
+
+        matched.Should().BeFalse();
+        selected.Should().BeSameAs(projects[0]);
+        evaluated.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("{\n  \"Properties\": {\n    \"TargetFramework\": \"net8.0\"\n  }\n}\n")]
+    // a notice of a first run, or a warning that quotes a `{`, before it, and text after it
+    [InlineData("Welcome to .NET!\r\nwarning MSB4011: 'C:\\{x}\\a.props' cannot be imported again.\r\n{\r\n  \"Properties\": {\r\n    \"TargetFramework\": \"net8.0\"\r\n  }\r\n}\r\nBuild succeeded.\r\n")]
+    public void ProjectFrameworksReadsTheJsonOfTheEvaluationWhateverIsAroundIt(string output)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(ProjectFrameworks.ReadJson(output));
+
+        document.RootElement.GetProperty("Properties").GetProperty("TargetFramework").GetString().Should().Be("net8.0");
+    }
+
     private static Task<ProjectEvaluation> Evaluated(ProjectFramework framework) =>
         Task.FromResult(new ProjectEvaluation(framework, framework is null ? "MSBuild cannot evaluate project 'Lib.csproj': test" : null));
 
-    // a failure per project and framework, as `dotnet msbuild` gives
     // as the workspace reports the frameworks it loads a file for
     private static ProjectFrameworks WithLoaded(ProjectFrameworks frameworks, params string[] loaded)
     {
@@ -808,6 +883,7 @@ public class TargetFrameworkHelperTest
         return frameworks;
     }
 
+    // a failure per project and framework, as `dotnet msbuild` gives
     private static ProjectFrameworks NotEvaluated() =>
         new((path, tfm) => Task.FromResult(new ProjectEvaluation(null, $"MSBuild cannot evaluate project '{path}' for '{tfm}': test")));
 

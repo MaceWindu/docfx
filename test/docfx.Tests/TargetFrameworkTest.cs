@@ -1454,6 +1454,33 @@ public class TargetFrameworkTest : TestBase
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADefaultFrameworkIsIgnoredWithTargetFrameworkAlsoWithAnAxis(bool targetFrameworks)
+    {
+        // `targetFramework` leaves one framework to each value of the axis, which are still merged
+        var (v1, v2) = CreateTwoVersionsOfOneAssembly();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new()
+        {
+            Src = Src(v1, v2),
+            Axes = [Axis(defaultValue: "v2")],
+            TargetFramework = "net8.0",
+            TargetFrameworks = targetFrameworks ? ["net8.0;netstandard2.0"] : null,
+            DefaultFramework = "net8.0-",
+        });
+
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        var warning = targetFrameworks
+            ? AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework, WarningCodes.Metadata.ConflictingTargetFramework)
+            : AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.Equal("'defaultFramework' chooses among the frameworks of 'targetFrameworks', and 'targetFramework' selects a single one, so it is ignored.", warning.Message);
+        Assert.Equal(["v1", "v2"], Page("Lib.Shared.yml").Items[0].AppliesTo.Select(group => group.Version).Order());
+    }
+
     [Fact]
     public async Task EnumValuesOfAnotherFrameworkKeepTheDeclaringOrder()
     {

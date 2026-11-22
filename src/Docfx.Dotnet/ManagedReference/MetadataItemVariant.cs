@@ -20,4 +20,10 @@ internal class MetadataItemVariant
     /// Whether the API overrides nothing in these frameworks, while it does in the framework that provides its content.
     /// </summary>
     public bool NoOverridden { get; init; }
+
+    /// <summary>
+    /// Whether the API has no base type in these frameworks, as an interface has not, while it has one in the
+    /// framework that provides its content: the variant's unset <c>Inheritance</c> would read as the same one.
+    /// </summary>
+    public bool NoInheritance { get; init; }
 }

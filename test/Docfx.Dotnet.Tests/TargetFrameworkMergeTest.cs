@@ -306,6 +306,26 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void AClassThatIsAnInterfaceInAnotherFrameworkDerivesFromItsBaseOnlyWhereItIsAClass()
+    {
+        using var listener = new TestListenerScope();
+
+        var result = Merge(
+            ("namespace N { public class B { } public class K : B { } }", First),
+            ("namespace N { public class B { } public interface K { } }", Second));
+
+        // the variant's unset base would read as the same one
+        var variant = result["N.K"].Variants.Should().ContainSingle().Subject;
+        variant.NoInheritance.Should().BeTrue();
+
+        var model = new MetadataModel { Members = [result["N.B"], result["N.K"]] };
+        new SetDerivedClass().Run(model, new ResolverContext { References = [] });
+
+        result["N.B"].DerivedClasses.Should().Equal("N.K");
+        result["N.B"].DerivedClassesAppliesTo.Should().ContainKey("N.K").WhoseValue.Should().Equal(First);
+    }
+
+    [Fact]
     public void DocumentationMissingInOneFrameworkIsNotADifference()
     {
         var result = Merge(

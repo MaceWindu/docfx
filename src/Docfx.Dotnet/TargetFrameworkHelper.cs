@@ -184,7 +184,7 @@ internal static partial class TargetFrameworkHelper
                     break;
                 }
 
-                if (await TargetsFramework(candidate, names[candidate.Id]!, targetFramework, frameworks, failures))
+                if (await TargetsFramework(candidate, names[candidate.Id]!, targetFramework, frameworks, failures, loadedAlone: candidates.Count <= 1))
                 {
                     match = candidate;
                 }
@@ -354,7 +354,7 @@ internal static partial class TargetFrameworkHelper
                 return (project, false);
             }
 
-            if (await TargetsFramework(project, name, targetFramework, frameworks, failures))
+            if (await TargetsFramework(project, name, targetFramework, frameworks, failures, loadedAlone: true))
             {
                 return (project, true);
             }
@@ -372,7 +372,7 @@ internal static partial class TargetFrameworkHelper
 
         foreach (var candidate in candidates)
         {
-            if (GetTargetFrameworkFromName(candidate) is { } name && await TargetsFramework(candidate, name, targetFramework, frameworks, failures))
+            if (GetTargetFrameworkFromName(candidate) is { } name && await TargetsFramework(candidate, name, targetFramework, frameworks, failures, loadedAlone: false))
             {
                 return (candidate, true);
             }
@@ -392,8 +392,8 @@ internal static partial class TargetFrameworkHelper
     }
 
     // Whether a project MSBuild loaded for the framework it names `name` targets `targetFramework`; why MSBuild cannot
-    // say goes to `failures`.
-    private static async Task<bool> TargetsFramework(Project project, string name, string targetFramework, ProjectFrameworks frameworks, List<string> failures)
+    // say goes to `failures`. `loadedAlone` is a file the workspace loaded for one framework only.
+    private static async Task<bool> TargetsFramework(Project project, string name, string targetFramework, ProjectFrameworks frameworks, List<string> failures, bool loadedAlone)
     {
         if (string.Equals(name, targetFramework, StringComparison.OrdinalIgnoreCase))
         {
@@ -412,12 +412,18 @@ internal static partial class TargetFrameworkHelper
             }
         }
 
-        if (project.FilePath is null)
+        // What an alias stands for is a framework, which a value that names none, such as a typo, never matches:
+        // only the name itself can, and it does not.
+        if (project.FilePath is null || !IsFrameworkName(targetFramework))
         {
             return false;
         }
 
-        var evaluation = await frameworks.Evaluate(project.FilePath, name);
+        // A project loaded for its framework alone is evaluated as the workspace loaded it, with the framework
+        // as a global property only when its `TargetFrameworks` lists it.
+        var evaluation = loadedAlone
+            ? await frameworks.EvaluateAsLoaded(project.FilePath, name)
+            : await frameworks.Evaluate(project.FilePath, name);
         if (evaluation.Failure is { } failure)
         {
             failures.Add(failure);

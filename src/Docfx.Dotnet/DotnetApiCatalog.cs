@@ -100,6 +100,13 @@ public static partial class DotnetApiCatalog
                     $"{string.Join(" and ", unused)} {(both ? "apply" : "applies")} to 'targetFrameworks' and 'axes' only, {why}, so {(both ? "they are" : "it is")} ignored.",
                     code: WarningCodes.Metadata.ConflictingTargetFramework);
             }
+            else if (config.DefaultFramework is not null && !UsesDefaultFramework(config))
+            {
+                // The values of an axis still merge, each at that one framework.
+                Logger.LogWarning(
+                    "'defaultFramework' chooses among the frameworks of 'targetFrameworks', and 'targetFramework' selects a single one, so it is ignored.",
+                    code: WarningCodes.Metadata.ConflictingTargetFramework);
+            }
 
             if (await Compile(config) is not { } compiled)
             {
@@ -138,7 +145,7 @@ public static partial class DotnetApiCatalog
 
             // As the frameworks are ordered: `net8.0-windows` is documented by the project loaded as `net8.0-windows10.0.19041.0`.
             // Also for a single framework, where a mistyped default would otherwise go unnoticed.
-            if (documented is { Count: > 0 } && config.DefaultFramework is { } defaultFramework &&
+            if (documented is { Count: > 0 } && UsesDefaultFramework(config) && config.DefaultFramework is { } defaultFramework &&
                 !documented.Values.Any(unit => TargetFrameworkHelper.IsSameFramework(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework)))
             {
                 Logger.LogWarning(
@@ -207,6 +214,13 @@ public static partial class DotnetApiCatalog
     private static bool MergesFrameworks(ExtractMetadataConfig config)
     {
         return (config.TargetFrameworks is not null && config.TargetFramework is null) || config.Axis is not null;
+    }
+
+    // Whether `defaultFramework` chooses among several frameworks, of which `targetFramework` leaves one, also with an
+    // axis, whose values are then merged at that framework.
+    private static bool UsesDefaultFramework(ExtractMetadataConfig config)
+    {
+        return config.DefaultFramework is not null && config.TargetFramework is null && MergesFrameworks(config);
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)

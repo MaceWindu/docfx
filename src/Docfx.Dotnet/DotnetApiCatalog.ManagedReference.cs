@@ -23,11 +23,11 @@ partial class DotnetApiCatalog
         // axis goes first, then its other values in their order; within each, the default framework and
         // those nearest to it, or else the frameworks in the order `targetFrameworks` lists them: the
         // projects are loaded in the order of `src`, so a project that targets only a later framework
-        // would otherwise put it first. `"*"` keeps the order.
+        // would otherwise put it first. `"*"` keeps the order, and so does `targetFramework`, which overrides both.
         var frameworkOrder = frameworks is null ? []
-            : config.DefaultFramework is { } defaultFramework
+            : UsesDefaultFramework(config) && config.DefaultFramework is { } defaultFramework
                 ? TargetFrameworkHelper.OrderByNearest(defaultFramework, frameworks.Values.Select(unit => TargetFrameworkAxis.SplitUnit(unit).Framework))
-            : config.TargetFrameworks is { } listed && !listed.Contains(TargetFrameworkHelper.AllTargetFrameworks) ? listed
+            : config.TargetFramework is null && config.TargetFrameworks is { } listed && !listed.Contains(TargetFrameworkHelper.AllTargetFrameworks) ? listed
             : [];
         List<List<(IAssemblySymbol symbol, Compilation compilation)>> frameworkGroups = frameworks is null
             ? [assemblies]

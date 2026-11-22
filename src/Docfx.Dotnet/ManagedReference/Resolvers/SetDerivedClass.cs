@@ -47,7 +47,11 @@ internal class SetDerivedClass : IResolverPipeline
             {
                 foreach (var framework in frameworks)
                 {
-                    var inheritance = item.Variants?.FirstOrDefault(v => v.Frameworks.Contains(framework) && v.Content?.Inheritance is { Count: > 0 })?.Content.Inheritance ?? item.Inheritance;
+                    // An interface in a framework where the type is a class elsewhere derives from no base there.
+                    var variant = item.Variants?.FirstOrDefault(v => v.Frameworks.Contains(framework));
+                    var inheritance = variant is { NoInheritance: true } ? null
+                        : variant?.Content?.Inheritance is { Count: > 0 } own ? own
+                        : item.Inheritance;
                     if (GetSuperClass(inheritance, reference) is { } superClass)
                     {
                         AddDerivedIn(superClass, item.Name, framework);
