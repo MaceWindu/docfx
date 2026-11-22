@@ -6,7 +6,7 @@ import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
   Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, articleEntries, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, narrowSelection, parseUnits, rank, scrollToShownTarget, select, shownEntries,
+  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, isNavEntryShown, keepLinkSelection, memberElements, narrowSelection, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework, withSelectionCache
 } from './appliesTo'
 import { installDom } from './fakeDom'
@@ -111,6 +111,32 @@ test('choose the content for an axis value', () => {
   // EF Core 3.1, picked on the EF Core pages, says nothing about APIs without that axis
   assert.ok(isAvailable(parseUnits('net10.0 net462'), { value: 'ef3' }))
   assert.strictEqual(chooseGroup([parseUnits('net10.0'), parseUnits('net462')], { value: 'ef3', framework: 'net472' }), 1)
+})
+
+test('a framework picked stands for the build of the part of the docs a project targeting it gets', () => {
+  // a project for .NET 8 and .NET Standard 2.0: a project for .NET 8 gets the .NET 8 build, which lacks what only the
+  // .NET Standard 2.0 build has
+  const project = parseUnits('net8.0 netstandard2.0')
+  assert.ok(!isAvailable(parseUnits('netstandard2.0'), { framework: 'net8.0', part: project }))
+  assert.ok(isAvailable(parseUnits('netstandard2.0'), { framework: 'net10.0', part: parseUnits('netstandard2.0') }))
+  assert.ok(isAvailable(parseUnits('net8.0'), { framework: 'net10.0', part: project }))
+  assert.ok(isAvailable(parseUnits('netstandard2.0'), { framework: 'net462', part: project }))
+  assert.strictEqual(chooseGroup([parseUnits('net8.0'), parseUnits('netstandard2.0')], { framework: 'net10.0', part: project }), 0)
+  // where the part is not known, any build that can stand in does
+  assert.ok(isAvailable(parseUnits('netstandard2.0'), { framework: 'net8.0' }))
+
+  // each value of an axis is built for frameworks of its own: .NET 10 gets the .NET Standard 2.0 build of EF Core 3.1,
+  // which lacks what only its .NET Framework 4.6.2 build has, and the .NET 10 build of EF Core 10
+  const ef = parseUnits('ef3:netstandard2.0 ef3:net462 ef10:net10.0')
+  assert.strictEqual(chooseGroup([parseUnits('ef10:net10.0'), parseUnits('ef3:netstandard2.0')], { value: 'ef3', framework: 'net10.0', part: ef }), 1)
+  assert.ok(isAvailable(parseUnits('ef3:netstandard2.0'), { framework: 'net10.0', part: ef }))
+  assert.ok(!isAvailable(parseUnits('ef3:net462'), { framework: 'net10.0', part: ef }))
+  assert.ok(isAvailable(parseUnits('ef3:net462'), { framework: 'net472', part: ef }))
+  // a framework no build of the part can stand in for has nothing of it
+  assert.ok(!isAvailable(parseUnits('net8.0'), { framework: 'net462', part: parseUnits('net8.0 net10.0') }))
+  // the platform version a framework leaves out is that of its build
+  assert.ok(isAvailable(parseUnits('net8.0-windows10.0.19041.0'), { framework: 'net8.0-windows', part: parseUnits('net8.0 net8.0-windows10.0.19041.0') }))
+  assert.ok(!isAvailable(parseUnits('net8.0'), { framework: 'net8.0-windows', part: parseUnits('net8.0 net8.0-windows10.0.19041.0') }))
 })
 
 test('one dimension picked keeps what differs in the other', () => {
@@ -468,6 +494,50 @@ test('a namespace the selection leaves out is the heading of the namespaces in i
   assert.strictEqual(entryHref(lib.items[0], 'leaf'), 'Lib.Span.html')
 })
 
+test('the table of contents leaves out what the build of its part for the framework picked lacks', () => {
+  installDom(site, 'https://example.org/docs/api/A.html')
+  const net8 = { frameworks: ['net8.0', 'netstandard2.0'] }
+  // a part for .NET 8 and .NET Standard 2.0, whose Legacy type only the .NET Standard 2.0 build has, nor its members'
+  // category, which is no part of its own; and a part for .NET Standard 2.0 only
+  const toc: Toc = {
+    items: [
+      {
+        name: 'Core',
+        items: [{
+          name: 'Lib',
+          href: 'Lib.html',
+          type: 'Namespace',
+          appliesTo: [net8],
+          items: [
+            { name: 'Shared', href: 'Lib.Shared.html', type: 'Class', appliesTo: [net8] },
+            {
+              name: 'Legacy',
+              href: 'Lib.Legacy.html',
+              type: 'Class',
+              appliesTo: [{ frameworks: ['netstandard2.0'] }],
+              items: [{ name: 'Methods', items: [{ name: 'Run', href: 'Lib.Legacy.Run.html', type: 'Method', appliesTo: [{ frameworks: ['netstandard2.0'] }] }] }]
+            }
+          ]
+        }]
+      },
+      { name: 'Old', items: [{ name: 'Old', href: 'Old.html', type: 'Namespace', appliesTo: [{ frameworks: ['netstandard2.0'] }] }] }
+    ]
+  }
+  const { frameworks: listed } = getChoices(toc)
+  const names = (framework: string) => shownEntries(toc.items, { framework }, listed, () => false).map(e => e.name)
+
+  assert.deepStrictEqual(names('net8.0'), ['Lib', 'Shared', 'Old'])
+  assert.deepStrictEqual(names('netstandard2.0'), ['Lib', 'Shared', 'Legacy', 'Run', 'Old'])
+  // "Next article" goes through the same entries
+  const { storage } = installDom(`${site}<meta name="docfx:appliestopicker" content="true">`, 'https://example.org/docs/api/A.html')
+  storage.set('docfx.axis./docs/.framework', 'net8.0')
+  assert.deepStrictEqual(articleEntries(toc, []).map(e => e.name), ['Lib', 'Shared', 'Old'])
+  // a page knows the part it is in
+  const tocUrl = new URL('https://example.org/docs/toc.json')
+  assert.deepStrictEqual(getChoices(toc, findPath(toc.items, tocUrl, { pathname: '/docs/Old.html' })).part, parseUnits('netstandard2.0'))
+  assert.deepStrictEqual(getChoices(toc, findPath(toc.items, tocUrl, { pathname: '/docs/Lib.Legacy.html' })).part, parseUnits('net8.0 netstandard2.0'))
+})
+
 test('an entry written with an empty appliesTo says nothing of its frameworks', () => {
   installDom(site, 'https://example.org/docs/api/A.html')
   // as an entry without `appliesTo`, such as an article: shown for any selection, and not the API of a heading
@@ -534,6 +604,31 @@ test('the page shows the content for the selection', () => {
   assert.ok(!shown('Lib_Shared_Size_variant1_remarks'))
   assert.ok(document.querySelectorAll('.api-variants-heading, .api-variant').every(e => !e.hidden))
   assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable, .applies-to-unavailable-badge, .applies-to-banner'), [])
+})
+
+test('the title of a type that is an interface in some frameworks names what is shown', () => {
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Shape" data-applies-to="net8.0 netstandard2.0"><span class="api-contents"><span class="api-content" data-applies-to="net8.0">Class Shape</span><span class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden>Interface Shape</span></span></h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><p id="own">own</p></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><p id="copy">copy</p></div>
+    </div>
+    <h6 class="api-variants-heading">In other frameworks</h6>
+    <div class="api-variant" data-applies-to="netstandard2.0">interface</div>
+  </article>`)
+  const title = () => document.querySelectorAll('h1 .api-content').filter(e => !e.hidden).map(e => e.textContent)
+
+  applySelection({ framework: 'netstandard2.0' })
+  assert.deepStrictEqual(title(), ['Interface Shape'])
+  assert.ok(document.getElementById('copy').closest('[hidden]') === null)
+  // and the title does not take the place of what "In other frameworks" lists
+  assert.ok(document.querySelector<HTMLElement>('.api-variant').hidden)
+
+  applySelection({})
+  assert.deepStrictEqual(title(), ['Class Shape'])
+  assert.ok(!document.querySelector<HTMLElement>('.api-variant').hidden)
 })
 
 test('one dimension picked keeps what differs in the other on the page', () => {
@@ -1083,6 +1178,48 @@ test('a dropdown keeps what the reader picked for the page where local storage i
   assert.deepStrictEqual(getSelection(ef, frameworks), { framework: undefined, value: undefined })
 })
 
+test('a dropdown keeps what the reader picked for the page where local storage refuses it', () => {
+  const { window } = installDom(site, 'https://example.org/docs/api/A.html')
+  let changes = 0
+  window.addEventListener('docfx:appliestochange', () => changes++)
+  const storage = globalThis.localStorage
+  const setItem = storage.setItem
+  // as when it is full
+  storage.setItem = () => { throw new Error('QuotaExceededError') }
+
+  select('framework', 'netstandard2.0')
+  assert.strictEqual(changes, 1)
+  assert.strictEqual(getSelection(ef, frameworks).framework, 'netstandard2.0')
+  storage.setItem = setItem
+  select('framework', 'net8.0')
+  assert.strictEqual(getSelection(ef, frameworks).framework, 'net8.0')
+  select('framework', undefined)
+  assert.strictEqual(getSelection(ef, frameworks).framework, undefined)
+})
+
+test('the navbar leaves out what the selection lacks where its table of contents is that of an API', () => {
+  const { storage } = installDom(`${site}<meta name="docfx:appliestopicker" content="true">`, 'https://example.org/docs/api/A.html')
+  const navToc: Toc = {
+    items: [
+      { name: 'Lib', href: 'Lib.html', type: 'Namespace', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] },
+      { name: 'Lib.Modern', href: 'Lib.Modern.html', type: 'Namespace', appliesTo: [{ frameworks: ['net8.0'] }] },
+      { name: 'Lib.Data', type: 'Namespace', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }], items: [{ name: 'Span', href: 'Span.html', appliesTo: [{ frameworks: ['net8.0'] }] }] }
+    ]
+  }
+  const [lib, modern, data] = navToc.items
+  const shown = () => [lib, modern, data, data.items[0]].map(e => isNavEntryShown(navToc, e, e === data.items[0] ? data : undefined, false))
+
+  assert.deepStrictEqual(shown(), [true, true, true, true])
+  storage.set('docfx.axis./docs/.framework', 'netstandard2.0')
+  // a dropdown whose entries all go goes too
+  assert.deepStrictEqual(shown(), [true, false, false, false])
+  // the page being read stays
+  assert.strictEqual(isNavEntryShown(navToc, modern, undefined, true), true)
+  // a navbar of articles names no framework
+  const articles: Toc = { items: [{ name: 'Docs', href: 'docs.html' }] }
+  assert.strictEqual(isNavEntryShown(articles, articles.items[0], undefined, false), true)
+})
+
 test('Next article reads a table of contents as before without the picker', () => {
   // `appliesTo` and `axis` of other shapes, which the picker cannot read
   const toc = {
@@ -1174,6 +1311,47 @@ test('a framework the page does not name is not applied before the table of cont
   // only once the table of contents is loaded, which leaves it out, and keeps it
   assert.strictEqual(applied, 1)
   assert.strictEqual(storage.get('docfx.axis./docs/.framework'), 'net462')
+})
+
+test('an extension method of another part does not name a framework for the page before the table of contents is loaded', async() => {
+  fetchTocs({ '/docs/api/toc.json': { items: [{ name: 'Shared', href: 'Lib.Shared.html', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }] } })
+  const { storage } = installDom(`${pickerSite}
+  <article>
+    <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1>
+    <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd><div id="Old" data-applies-to="net462">OldExt.Use()</div></dd></dl>
+  </article>`)
+  storage.set('docfx.axis./docs/.framework', 'net462')
+  let applied = 0
+
+  await initAppliesTo(() => applied++)
+  // only once the table of contents is loaded, which does not list it
+  assert.strictEqual(applied, 1)
+})
+
+test('the page leaves out what the build of its part for the framework picked lacks', async() => {
+  fetchTocs({
+    '/docs/api/toc.json': {
+      items: [{ name: 'Shared', href: 'Lib.Shared.html', type: 'Class', appliesTo: [{ frameworks: ['net8.0', 'netstandard2.0'] }] }]
+    }
+  })
+  const { document, storage } = installDom(`${pickerSite}
+  <article>
+    <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1>
+    <div class="facts"></div>
+    <h3 id="Lib_Shared_Legacy" data-applies-to="netstandard2.0">Legacy</h3>
+    <p>Only on .NET Standard 2.0.</p>
+    <dl class="typelist extensionMethods"><dt>Extension Methods</dt><dd><div id="Ext" data-applies-to="netstandard2.0">Ext.Use()</div></dd></dl>
+  </article>`)
+  const dimmed = () => document.querySelectorAll('.applies-to-unavailable').map(e => e.id).filter(id => id)
+  storage.set('docfx.axis./docs/.framework', 'net8.0')
+  const seen: string[][] = []
+
+  await initAppliesTo(() => seen.push(dimmed()))
+  // before the table of contents is loaded too, by what the page's own APIs are documented for; an extension method,
+  // which another part, built for .NET Standard 2.0 only, can declare, is not
+  assert.deepStrictEqual(seen, [['Lib_Shared_Legacy'], ['Lib_Shared_Legacy']])
+  select('framework', 'netstandard2.0')
+  assert.deepStrictEqual(dimmed(), [])
 })
 
 test('a page whose table of contents lists no frameworks shows them all', async() => {

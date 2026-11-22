@@ -5,7 +5,7 @@ import AnchorJs from 'anchor-js'
 import { render, html, TemplateResult } from 'lit-html'
 import { breakWordLit, meta, isExternalHref, loc, options } from './helper'
 import { themePicker } from './theme'
-import { addHeadingAnchors, appliesToPicker, isHiddenBySelection, loadChoices, onSelectionChange } from './appliesTo'
+import { Toc, TocEntry, addHeadingAnchors, appliesToPicker, isHiddenBySelection, isNavEntryShown, loadChoices, onSelectionChange } from './appliesTo'
 import { TocNode } from './toc'
 
 export type NavItem = {
@@ -28,6 +28,9 @@ export async function renderNavbar(): Promise<NavItem[]> {
   }
 
   const { iconLinks } = await options()
+  // the entries of the navbar's table of contents, which say what each item applies to
+  const entries = new WeakMap<NavItem | NavItemContainer, TocEntry>()
+  let navToc: Toc = { items: [] }
   const navItems = await loadNavItems()
   const activeItem = findActiveItem(navItems)
 
@@ -44,8 +47,12 @@ export async function renderNavbar(): Promise<NavItem[]> {
     return html`<li class='nav-item'><a class='nav-link ${active}' aria-current=${current} href=${item.href}>${breakWordLit(item.name)}</a></li>`
   }
 
-  const menu = html`
-    <ul class='navbar-nav'>${navItems.map(item => {
+  // What the selection leaves out goes, as in the table of contents, where the navbar's is that of an API.
+  const shown = <T extends NavItem | NavItemContainer>(items: T[], parent?: NavItemContainer) =>
+    items.filter(item => isNavEntryShown(navToc, entries.get(item), parent && entries.get(parent), item === activeItem || ('items' in item && item.items.includes(activeItem))))
+
+  const menu = () => html`
+    <ul class='navbar-nav'>${shown(navItems).map(item => {
     if ('items' in item) {
       const active = item.items.some(i => i === activeItem) ? 'active' : null
       return html`
@@ -53,7 +60,7 @@ export async function renderNavbar(): Promise<NavItem[]> {
               <a class='nav-link dropdown-toggle ${active}' href='#' role='button' data-bs-toggle='dropdown' aria-expanded='false'>
                 ${breakWordLit(item.name)}
               </a>
-              <ul class='dropdown-menu'>${item.items.map(menuItem)}</ul>
+              <ul class='dropdown-menu'>${shown(item.items, item).map(menuItem)}</ul>
             </li>`
     } else {
       return menuItem(item)
@@ -69,7 +76,7 @@ export async function renderNavbar(): Promise<NavItem[]> {
         ${await themePicker(renderCore)}
       </form>`
 
-    render(html`${menu} ${icons}`, navbar)
+    render(html`${menu()} ${icons}`, navbar)
   }
 
   await renderCore()
@@ -84,12 +91,16 @@ export async function renderNavbar(): Promise<NavItem[]> {
     }
 
     const navUrl = new URL(navrel.replace(/.html$/gi, '.json'), window.location.href)
-    const { items } = await fetch(navUrl).then(res => res.json())
-    return items.map((a: NavItem | NavItemContainer) => {
+    navToc = await fetch(navUrl).then(res => res.json())
+    const keep = <T extends NavItem | NavItemContainer>(item: T, entry: TocEntry): T => {
+      entries.set(item, entry)
+      return item
+    }
+    return navToc.items.map((a: TocEntry) => {
       if ('items' in a) {
-        return { name: a.name, items: a.items.map(i => ({ name: i.name, href: new URL(i.href, navUrl) })) }
+        return keep({ name: a.name, items: a.items.map(i => keep({ name: i.name, href: new URL(i.href, navUrl) }, i)) }, a)
       }
-      return { name: a.name, href: new URL(a.href, navUrl) }
+      return keep({ name: a.name, href: new URL(a.href, navUrl) }, a)
     })
   }
 }

@@ -12,9 +12,10 @@ export type Unit = { value?: string, framework: string }
 
 /**
  * What the reader picked. A missing part is "all". `within` limits it to some units, those of the copy of a variant
- * shown whole that the pick cannot tell apart, as `narrowSelection` reads them.
+ * shown whole that the pick cannot tell apart, as `narrowSelection` reads them. `part` is what the part of the docs the
+ * API is in is built for, by which a framework picked stands for the one of them a project targeting it gets.
  */
-export type Selection = { value?: string, framework?: string, within?: Unit[] }
+export type Selection = { value?: string, framework?: string, within?: Unit[], part?: Unit[] }
 
 /** One entry of `appliesTo` in the table of contents, as written by `docfx metadata`. */
 export type AppliesToGroup = { version?: string, label?: string, frameworks?: string[] }
@@ -160,16 +161,61 @@ export function rank(target: string, framework: string): number {
   return (f.family === t.family ? 1 : 2) * 1e7 - weight
 }
 
-export function matches(unit: Unit, selection: Selection): boolean {
+/**
+ * The framework a project targeting `framework` gets of the part of the docs built for `part`, for the units of the
+ * axis value `value`: the nearest of them, as NuGet picks the nearest framework of a package, not of each API. `null`
+ * when none can stand in; `undefined` when the part has no unit of that value to tell.
+ */
+function resolveFramework(framework: string, value: string | undefined, part: Unit[]): string | null | undefined {
+  let resolved = resolutions.get(part)
+  if (!resolved) {
+    resolved = new Map()
+    resolutions.set(part, resolved)
+  }
+  const key = `${value ?? ''}\n${framework.toLowerCase()}`
+  if (!resolved.has(key)) {
+    const candidates = part.filter(u => u.value === value)
+    let best: string | null = candidates.length > 0 ? null : undefined
+    let bestRank = Infinity
+    for (const unit of candidates) {
+      const r = rank(framework, unit.framework)
+      if (r < bestRank) {
+        best = unit.framework
+        bestRank = r
+      }
+    }
+    resolved.set(key, best)
+  }
+  return resolved.get(key)
+}
+
+// The table of contents asks again for every entry of a part, on every click and keystroke in its filter.
+const resolutions = new WeakMap<Unit[], Map<string, string | null | undefined>>()
+
+/**
+ * Whether a unit stands in for the framework picked: it is the framework the API's part of the docs resolves the pick
+ * to, so that an API the build of that framework lacks, such as one only the .NET Standard 2.0 build of a project for
+ * .NET 8 and .NET Standard 2.0 has, does not exist on .NET 8; any that can stand in where the part is not known.
+ */
+function standsIn(framework: string, unit: Unit, part: Unit[] | null | undefined): boolean {
+  const resolved = part ? resolveFramework(framework, unit.value, part) : undefined
+  return resolved === undefined ? rank(framework, unit.framework) < Infinity : resolved !== null && isSameFramework(resolved, unit.framework)
+}
+
+/**
+ * Whether a unit is in the selection; `part` is what the API's part of the docs is built for, that of the selection by
+ * default, `null` when it is not known.
+ */
+export function matches(unit: Unit, selection: Selection, part: Unit[] | null | undefined = selection.part): boolean {
   // a value picked for the axis of one part of the docs says nothing about a part without that axis
   return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
-    (!selection.framework || rank(selection.framework, unit.framework) < Infinity) &&
+    (!selection.framework || standsIn(selection.framework, unit, part)) &&
     (!selection.within || selection.within.some(w =>
       (w.value === undefined || unit.value === undefined || w.value === unit.value) && isSameFramework(w.framework, unit.framework)))
 }
 
-export function isAvailable(units: Unit[], selection: Selection): boolean {
-  return units.some(u => matches(u, selection))
+export function isAvailable(units: Unit[], selection: Selection, part: Unit[] | null | undefined = selection.part): boolean {
+  return units.some(u => matches(u, selection, part))
 }
 
 /**
@@ -233,7 +279,7 @@ export function narrowSelection(units: Unit[], selection: Selection): Selection 
   const bestRank = Math.min(...ranked.map(r => r.rank))
   const best = ranked.filter(r => r.rank === bestRank).map(r => r.unit)
   return best.length === 1
-    ? { framework: selection.framework || best[0].framework, value: selection.value || best[0].value }
+    ? { framework: selection.framework || best[0].framework, value: selection.value || best[0].value, ...(selection.part ? { part: selection.part } : {}) }
     : { ...selection, within: best }
 }
 
@@ -257,16 +303,17 @@ export function sortFrameworks(frameworks: string[]): string[] {
 export type Axis = { name: string, values: { id: string, label: string }[] }
 
 /** An entry of the table of contents, with what the picker reads from it. */
-export type TocEntry = { name?: string, href?: string, appliesTo?: AppliesToGroup[], axis?: Axis, items?: TocEntry[] }
+export type TocEntry = { name?: string, href?: string, appliesTo?: AppliesToGroup[], axis?: Axis, type?: string, items?: TocEntry[] }
 
 /** A table of contents as `toc.json` has it. */
 export type Toc = { items?: TocEntry[], axis?: Axis, frameworkNames?: Record<string, string> }
 
 /**
  * What a reader can pick on a page: the frameworks of its table of contents, and the axis of its part of the docs;
- * `axes` are those of every part, whose entries the table of contents filters by the value picked for each.
+ * `axes` are those of every part, whose entries the table of contents filters by the value picked for each; `part` what
+ * the part the page is in is built for.
  */
-export type Choices = { frameworks: string[], axis?: Axis, key?: string, axes?: Axis[] }
+export type Choices = { frameworks: string[], axis?: Axis, key?: string, axes?: Axis[], part?: Unit[] }
 
 const changeEvent = 'docfx:appliestochange'
 
@@ -343,22 +390,33 @@ export function withSelectionCache<T>(render: () => T): T {
   }
 }
 
-// What the reader picked where `localStorage` is null, such as in a browser set to keep no site data: for the page.
-const picks = new Map<string, string>()
+// What the reader picked where `localStorage` cannot keep it, for the page: where it is null, such as in a browser set
+// to keep no site data, or refuses to, such as when it is full. `null` for "All".
+const picks = new Map<string, string | null>()
 
 function keptPick(key: string): string | null {
-  return localStorage ? localStorage.getItem(storageKey(key)) : (picks.get(key) ?? null)
+  return picks.has(key) ? picks.get(key) : (localStorage?.getItem(storageKey(key)) ?? null)
 }
 
 function keepPick(key: string, value: string | undefined) {
   if (localStorage) {
-    if (value) {
-      localStorage.setItem(storageKey(key), value)
-    } else {
-      localStorage.removeItem(storageKey(key))
+    try {
+      if (value) {
+        localStorage.setItem(storageKey(key), value)
+      } else {
+        localStorage.removeItem(storageKey(key))
+      }
+      picks.delete(key)
+      return
+    } catch {
+      // kept for the page below, so that the pick still shows
     }
-  } else if (value) {
+  }
+  if (value) {
     picks.set(key, value)
+  } else if (localStorage) {
+    // "All", over what storage still has
+    picks.set(key, null)
   } else {
     picks.delete(key)
   }
@@ -423,7 +481,7 @@ export function onSelectionChange(callback: () => void) {
   window.addEventListener(changeEvent, callback)
 }
 
-type TocSummary = { frameworks: string[], axes: Axis[] }
+type TocSummary = { frameworks: string[], axes: Axis[], part: Unit[] }
 
 // The table of contents is rendered again on every click and keystroke in its filter, and can have thousands of entries.
 const summaries = new WeakMap<Toc, TocSummary>()
@@ -449,15 +507,35 @@ function summarize(toc: Toc): TocSummary {
     if (toc.axis) {
       add(toc.axis)
     }
-    const visit = (items: TocEntry[]) => items?.forEach(item => {
-      unitsOf(item.appliesTo).forEach(u => frameworks.push(u.framework))
+    // The entries outside any API that are not one, such as the entry of each part in a table of contents that includes
+    // several, and the root, are the roots of parts; the groups within an API, such as the categories of the members of
+    // a type, are not. A part is built for the units of its own entries, not of the parts in it.
+    const seen = new Map<Unit[], Set<string>>()
+    const visit = (items: TocEntry[], part: Unit[], inApi: boolean) => items?.forEach(item => {
+      unitsOf(item.appliesTo).forEach(u => {
+        frameworks.push(u.framework)
+        const key = `${u.value ?? ''}:${u.framework.toLowerCase()}`
+        if (!seen.get(part).has(key)) {
+          seen.get(part).add(key)
+          part.push(u)
+        }
+      })
       if (item.axis) {
         add(item.axis)
       }
-      visit(item.items)
+      const api = isApiEntry(item)
+      entryParts.set(item, part)
+      const root = !inApi && !api && item.items?.length > 0
+      visit(item.items, root ? newPart() : part, inApi || api)
     })
-    visit(toc.items)
-    summaries.set(toc, { frameworks: sortFrameworks(frameworks), axes })
+    const newPart = () => {
+      const part: Unit[] = []
+      seen.set(part, new Set())
+      return part
+    }
+    const part = newPart()
+    visit(toc.items, part, false)
+    summaries.set(toc, { frameworks: sortFrameworks(frameworks), axes, part })
   }
   return summaries.get(toc)
 }
@@ -468,11 +546,20 @@ function summarize(toc: Toc): TocSummary {
  * there is one only. An API page of a part without an axis has none, even when another part has one.
  */
 export function getChoices(toc: Toc, path: TocEntry[] = []): Choices {
-  const { frameworks, axes } = summarize(toc)
+  const { frameworks, axes, part } = summarize(toc)
   const axis = [...path].reverse().find(entry => entry.axis)?.axis || toc.axis ||
     (axes.length === 1 && !path.some(entry => hasData(entry)) ? axes[0] : undefined)
-  return { frameworks, axis, key: axis ? axisKey(axis) : undefined, axes }
+  const page = path[path.length - 1]
+  return { frameworks, axis, key: axis ? axisKey(axis) : undefined, axes, part: (page && entryParts.get(page)) || part }
 }
+
+/** Whether an entry is an API, which `docfx metadata` writes with its type, and with `appliesTo` for its frameworks. */
+function isApiEntry(entry: TocEntry): boolean {
+  return hasData(entry) || typeof entry.type === 'string'
+}
+
+// What the part of the docs each entry of a table of contents that `summarize` read is in is built for.
+const entryParts = new WeakMap<TocEntry, Unit[]>()
 
 /** The entries from the root down to the entry of the page at `url`, none when the table of contents has no such entry. */
 export function findPath(items: TocEntry[], tocUrl: URL, url: { pathname: string }): TocEntry[] {
@@ -509,7 +596,7 @@ function hasData(entry: TocEntry): boolean {
 
 /** Whether a table of contents entry exists in what the reader picked. */
 export function isEntryShown(entry: TocEntry, selection: Selection): boolean {
-  return !hasData(entry) || !(selection.framework || selection.value) || isAvailable(unitsOf(entry.appliesTo), selection)
+  return !hasData(entry) || !(selection.framework || selection.value) || isAvailable(unitsOf(entry.appliesTo), selection, entryParts.get(entry))
 }
 
 /**
@@ -571,6 +658,23 @@ export function entryDisplay(entry: TocEntry, selection: Selection, frameworks: 
   return 'group'
 }
 
+/**
+ * Whether the navbar shows an entry of its table of contents, `parent` the entry of the dropdown it is in: what the
+ * selection leaves out goes, as in the table of contents, where the navbar's is that of an API, such as with
+ * `_disableToc`; the page being read and its dropdown, `active`, stay. Any other names no framework, so it stays whole.
+ */
+export function isNavEntryShown(toc: Toc, entry: TocEntry | undefined, parent: TocEntry | undefined, active: boolean): boolean {
+  if (!isPickerEnabled() || active || !entry) {
+    return true
+  }
+  const { frameworks } = getChoices(toc)
+  if (frameworks.length === 0) {
+    return true
+  }
+  const root = getSelection(toc.axis, frameworks)
+  return entryDisplay(entry, parent ? entrySelection(parent, root, frameworks) : root, frameworks, () => false) !== 'none'
+}
+
 const tocs = new Map<string, Promise<unknown>>()
 
 // `_frameworkNames`, which the table of contents carries for the pages that are not API pages
@@ -608,8 +712,9 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
   // frameworks first; the value of an axis needs the axis, which the table of contents names. Only a framework the
   // page names, though: one kept from another part of the site, which this table of contents does not list, would show
   // first, then all frameworks, on every page.
-  const early = isPickerEnabled() ? getSelection() : {}
-  if (early.framework && !namesFramework(early.framework)) {
+  // What the page's own APIs are documented for stands in for what its part of the docs is built for until then.
+  const early: Selection = isPickerEnabled() ? { ...getSelection(), part: pageUnits() } : {}
+  if (early.framework && !early.part.some(u => u.framework.toLowerCase() === early.framework.toLowerCase())) {
     early.framework = undefined
   }
   if (early.framework) {
@@ -628,7 +733,7 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
 
   keepLinkSelection(choices)
   const apply = () => {
-    applySelection(getSelection(choices.axis, choices.frameworks), choices.axis)
+    applySelection({ ...getSelection(choices.axis, choices.frameworks), part: choices.part }, choices.axis)
     onApplied()
   }
   apply()
@@ -661,11 +766,14 @@ export async function initAppliesTo(onApplied: () => void = () => { }) {
   })
 }
 
-/** Whether an API of the page is documented for `framework` itself. */
-function namesFramework(framework: string): boolean {
-  const name = framework.toLowerCase()
-  return Array.from(document.querySelectorAll<HTMLElement>('[data-applies-to]'))
-    .some(e => parseUnits(e.dataset.appliesTo).some(u => u.framework.toLowerCase() === name))
+/**
+ * What the APIs of the page are documented for: not the extension methods it lists, which can be declared in another
+ * part of the docs, built for frameworks this part is not.
+ */
+function pageUnits(): Unit[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('article [data-applies-to]'))
+    .filter(e => !e.closest('dl.extensionMethods'))
+    .flatMap(e => parseUnits(e.dataset.appliesTo))
 }
 
 /**
@@ -899,8 +1007,12 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // as a base type differs, and
   // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
+    // an extension method can be declared in another part of the docs, built for frameworks the page does not know:
+    // any that can stand in does
+    const extensionMethods = list.classList.contains('extensionMethods')
     list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
-      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selectionOf(entry))) {
+      const own = selectionOf(entry)
+      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), own, extensionMethods ? null : own.part)) {
         entry.classList.add('applies-to-unavailable')
         entry.appendChild(unavailableBadge(labelOf(entry), true))
       }

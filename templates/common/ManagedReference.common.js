@@ -174,6 +174,7 @@ function handleAppliesTo(vm, parent, options) {
     variant.overridden = variant.overridden || "";
     // Overriding nothing where the API overrides is a difference too, which the declaration of the variant shows.
     variant.noOverridden = !!variant.noOverridden;
+    variant.noInheritance = !!variant.noInheritance;
     // a part without a description must not show the description of the page, the summary of the API
     variant.exceptions.forEach(withDescription);
     if (variant.syntax) {
@@ -243,6 +244,9 @@ function handleInheritedMembers(model, options) {
     var appliesTo = Object.prototype.hasOwnProperty.call(extendedIn, method.uid) ? extendedIn[method.uid] : [];
     method.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
     method.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
+    // for the picker, which dims one the selection lacks: where it extends the type in only some frameworks, those,
+    // else the frameworks it is declared in, which its reference carries
+    method.appliesToData = getAppliesToFrameworks(appliesTo.length > 0 ? { appliesTo: appliesTo } : method).join(' ');
   });
   // in the order of the derived classes, which carry no uid
   var derivedIn = model.derivedClassesAppliesTo || [];
@@ -257,10 +261,6 @@ function handleInheritedMembers(model, options) {
   if (model.type && model.type.toLowerCase() === 'interface' && model.derivedClasses && model.derivedClasses.length > 0) {
     model.showImplementingTypes = true;
   }
-  // An extension method has the frameworks it is declared in, which its reference carries.
-  (model.extensionMethods || []).forEach(function (method) {
-    method.appliesToData = getAppliesToFrameworks(method).join(' ');
-  });
 }
 
 // An interface, or for a member an interface member, implemented in only some frameworks of the type or member.
@@ -292,6 +292,8 @@ function setVariantViews(vm, isPage) {
     vm.copySuffix = "";
   }
   vm.variantViews = vm.variants.map(function (variant, index) { return getVariantView(vm, variant, kind, valueKind, index); });
+  // The title of a type that is a class in some frameworks and an interface in others names what is shown.
+  vm.titleDiffers = !!isPage && vm.variantViews.some(function (view) { return !!view.inClass !== !!vm.inClass; });
 }
 
 // The value of a field, property or event is labelled as in the API's own section, not as a return value.
@@ -322,6 +324,18 @@ function getVariantView(vm, variant, kind, valueKind, index) {
   ['inheritance', 'example', 'exceptions', 'seealso'].forEach(function (field) {
     if (variant[field].length > 0) view[field] = variant[field];
   });
+  // A type that is an interface in the variant's frameworks and a class in the others, or the other way round, is
+  // shown as what it is there: an interface has no base types, and lists the types that implement it.
+  if (variant.noInheritance) {
+    view.inheritance = [];
+    view.inClass = false;
+    view.inInterface = true;
+    view.showImplementingTypes = !!(vm.derivedClasses && vm.derivedClasses.length > 0);
+  } else if (kind === 'interface' && variant.inheritance.length > 0) {
+    view.inClass = true;
+    view.inInterface = false;
+    view.showImplementingTypes = false;
+  }
   if (variant.syntax) {
     var own = vm.syntax || {};
     var syntax = {

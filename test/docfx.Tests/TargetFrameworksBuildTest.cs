@@ -72,6 +72,12 @@ public class TargetFrameworksBuildTest : TestBase
                 public class Switches { }
             #endif
 
+            #if NET8_0
+                public class Shape : Base { }
+            #else
+                public interface Shape { }
+            #endif
+
                 public class Shared
                 {
                     public int Everywhere { get; set; }
@@ -684,6 +690,25 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Fact]
     [Trait("Related", "docfx")]
+    public async Task TheCopyOfAClassThatIsAnInterfaceInItsFrameworksShowsNoBaseTypes()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Shape.html");
+
+        // the title names the kind each copy shows, for the picker to swap with it
+        Assert.Matches("<h1 [^>]*>\\s*<span class=\"api-contents\"><span class=\"api-content\" data-applies-to=\"net8.0\">Class Shape</span><span class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>Interface Shape</span></span>", page);
+        // and so does only the title of such a type
+        Assert.DoesNotMatch("<h1 [^>]*>\\s*<span class=\"api-contents\">", await RawPage(site, "Lib.Shared.html"));
+
+        var own = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"net8.0\">(?:(?!<div class=\"api-content)[\\s\\S])*").Value;
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.Contains("typelist inheritance", own);
+        Assert.Contains("public interface Shape", copy);
+        Assert.DoesNotContain("typelist inheritance", copy);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
     public async Task ThePickerIsOffWithoutTheNavbar()
     {
         // The picker is in the navbar: without it, a link or an earlier pick would choose a selection the reader
@@ -709,6 +734,9 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>Switches</a>", await RawPage(site, "Lib.Base.html"));
         Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>ISource</a>", await RawPage(site, "Lib.SometimesSource.html"));
         Assert.Matches("<div><a [^>]*>ISource</a>", await RawPage(site, "Lib.AlwaysSource.html"));
+        // an extension method by where it extends the type: the interface it extends is implemented in .NET 8 only
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>SourceExtensions\\.Reopen\\(ISource\\)</a>", await RawPage(site, "Lib.SometimesSource.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0 netstandard2.0\">\\s*<a [^>]*>SourceExtensions\\.Reopen\\(ISource\\)</a>", await RawPage(site, "Lib.AlwaysSource.html"));
         Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Base\\.OnlyNet8Base\\(\\)</a>", await RawPage(site, "Lib.Child.html"));
 
         var shared = await RawPage(site, "Lib.Shared.html");

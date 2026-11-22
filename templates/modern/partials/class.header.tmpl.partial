@@ -1,7 +1,7 @@
 {{!Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license.}}
 
 <h1 id="{{id}}" data-uid="{{uid}}" class="text-break"{{#appliesToData}} data-applies-to="{{appliesToData}}"{{/appliesToData}}>
-  {{>partials/title}}
+  {{^titleDiffers}}{{>partials/title}}{{/titleDiffers}}{{#titleDiffers}}<span class="api-contents"><span class="api-content" data-applies-to="{{primaryAppliesToData}}">{{>partials/title}}</span>{{#variantViews}}<span class="api-content" data-applies-to="{{appliesToData}}" data-search-ignore hidden>{{>partials/title}}</span>{{/variantViews}}</span>{{/titleDiffers}}
   {{#sourceurl}}<a class="header-action link-secondary" title="View source" href="{{sourceurl}}"><i class="bi bi-code-slash"></i></a>{{/sourceurl}}
 </h1>
 
