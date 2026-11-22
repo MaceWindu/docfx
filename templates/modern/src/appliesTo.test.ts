@@ -6,7 +6,7 @@ import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
   Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, articleEntries, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, parseUnits, rank, scrollToShownTarget, select, shownEntries,
+  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, keepLinkSelection, memberElements, narrowSelection, parseUnits, rank, scrollToShownTarget, select, shownEntries,
   shownTarget, sortFrameworks, unitsOf, validFramework, withSelectionCache
 } from './appliesTo'
 import { installDom } from './fakeDom'
@@ -136,6 +136,14 @@ test('one dimension picked keeps what differs in the other', () => {
   assert.deepStrictEqual(chooseGroups([parseUnits('d1:netstandard2.0'), parseUnits('d2:net8.0')], { framework: 'net8.0' }), [0, 1])
 })
 
+test('a group kept beside the one in place is shown for the selection narrowed to it', () => {
+  // the other dimension from the unit that stands in best: .NET 10 has the net8.0 build of Driver 2
+  assert.deepStrictEqual(narrowSelection(parseUnits('d2:netstandard2.0 d2:net8.0'), { framework: 'net10.0' }), { framework: 'net10.0', value: 'd2' })
+  assert.deepStrictEqual(narrowSelection(parseUnits('d1:netstandard2.0'), { value: 'd1' }), { framework: 'netstandard2.0', value: 'd1' })
+  // a group the selection does not have is shown for the selection
+  assert.deepStrictEqual(narrowSelection(parseUnits('d2:net8.0'), { value: 'd1' }), { value: 'd1' })
+})
+
 test('frameworks in picker order', () => {
   assert.deepStrictEqual(
     sortFrameworks(['net462', 'netstandard2.0', 'net8.0', 'net10.0', 'net9.0', 'net8.0']),
@@ -153,6 +161,11 @@ test('framework labels', () => {
   assert.strictEqual(frameworkLabel('net462', { net462: '.NET Framework 4.6.2+' }), '.NET Framework 4.6.2+')
   // as the page's own Applies to line, which ManagedReference.common.js writes
   assert.strictEqual(frameworkLabel('net8.0', { 'NET8.0': 'Modern' }), 'Modern')
+  // a link spells a framework in any case, which is its label until the table of contents spells it
+  assert.strictEqual(frameworkLabel('NETSTANDARD2.0'), '.NET Standard 2.0')
+  assert.strictEqual(frameworkLabel('NetCoreApp3.1'), '.NET Core 3.1')
+  assert.strictEqual(frameworkLabel('NET8.0'), '.NET 8')
+  assert.strictEqual(frameworkLabel('NET462'), '.NET Framework 4.6.2')
 })
 
 test('axis keys', () => {
@@ -595,6 +608,57 @@ test('a variant shown in place shows the others whole, and a link goes to the on
   applySelection({})
   assert.deepStrictEqual(document.querySelector('.api-contents').children.map(e => e.children[0].id), ['text', 'text_variant1', 'text_variant2'])
   assert.deepStrictEqual(hidden('text', 'text_variant1', 'text_variant2', 'variant1', 'diff1', 'variant2'), [false, true, true, false, false, false])
+})
+
+test('a copy shown whole shows what it holds as it is in the frameworks of its variant', () => {
+  // An enum whose description differs for Driver 1 between .NET 8 and .NET Standard 2.0, and whose copy for Driver 2
+  // lists the values again, as the API has them: Fast is described for each driver, Slow exists for Driver 1 only.
+  const type = (suffix: string) => `
+    <p id="own${suffix}">own</p>
+    <dl class="parameters">
+      <dt id="Lib_Mode_Fast${suffix}" data-applies-to="d1:net8.0 d1:netstandard2.0 d2:netstandard2.0">Fast</dt>
+      <dd>
+        <div class="api-contents">
+          <div class="api-content" data-applies-to="d1:net8.0 d1:netstandard2.0"><p id="fast${suffix}">Driver 1</p></div>
+          <div class="api-content" data-applies-to="d2:netstandard2.0" data-search-ignore hidden><p id="fast${suffix}_d2">Driver 2</p></div>
+        </div>
+        <h5 class="api-variants-heading">In other frameworks</h5>
+        <div class="api-variant" id="fastEntry${suffix}" data-applies-to="d2:netstandard2.0"><h6 class="api-variant-label">Driver 2</h6><div>summary</div></div>
+      </dd>
+      <dt id="Lib_Mode_Slow${suffix}" data-applies-to="d1:net8.0 d1:netstandard2.0">Slow</dt>
+      <dd>slow</dd>
+    </dl>`
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Mode" data-applies-to="d1:net8.0 d1:netstandard2.0 d2:netstandard2.0">Mode</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d1:net8.0">${type('')}</div>
+      <div class="api-content" data-applies-to="d1:netstandard2.0" data-search-ignore hidden>${type('_variant1')}</div>
+      <div class="api-content" data-applies-to="d2:netstandard2.0" data-search-ignore hidden>${type('_variant2')}</div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="d1:netstandard2.0"><h6 class="api-variant-label">Driver 1</h6><div>summary</div></div>
+    <div class="api-variant" id="variant2" data-applies-to="d2:netstandard2.0"><h6 class="api-variant-label">Driver 2</h6><div>summary</div></div>
+  </article>`)
+  const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
+  const badge = (id: string) => document.getElementById(id).querySelector('.applies-to-unavailable-badge')?.textContent
+
+  // Driver 1 on .NET Standard 2.0 in place, Driver 2 whole in its entry
+  applySelection({ framework: 'netstandard2.0' }, driver)
+  assert.strictEqual(document.getElementById('own_variant2').closest('.api-variant').id, 'variant2')
+  // in place, Fast keeps Driver 2's description under its own "In other frameworks"
+  assert.deepStrictEqual(hidden('own_variant1', 'fast_variant1', 'fast_variant1_d2', 'fastEntry_variant1'), [false, false, true, false])
+  assert.strictEqual(badge('Lib_Mode_Slow_variant1'), undefined)
+  // in Driver 2's copy, Fast is described for Driver 2, and Slow, which Driver 2 lacks, is dimmed for it
+  assert.deepStrictEqual(hidden('own_variant2', 'fast_variant2', 'fast_variant2_d2', 'fastEntry_variant2'), [false, true, false, true])
+  assert.strictEqual(badge('Lib_Mode_Slow_variant2'), 'Not available in Driver 2, .NET Standard 2.0')
+  assert.ok(document.getElementById('Lib_Mode_Slow_variant2').classList.contains('applies-to-unavailable'))
+
+  applySelection({}, driver)
+  assert.deepStrictEqual(document.querySelector('.api-contents').children.map(e => e.children[0].id), ['own', 'own_variant1', 'own_variant2'])
+  assert.deepStrictEqual(hidden('fast', 'fast_d2', 'fastEntry'), [false, true, false])
+  assert.strictEqual(document.querySelectorAll('.applies-to-unavailable').length, 0)
 })
 
 test('the id a fragment points to', () => {

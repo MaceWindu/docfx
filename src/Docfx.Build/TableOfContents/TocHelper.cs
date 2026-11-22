@@ -9,6 +9,7 @@ using Docfx.DataContracts.Common;
 using Docfx.Plugins;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
+using YamlDotNet.RepresentationModel;
 using Constants = Docfx.DataContracts.Common.Constants;
 
 namespace Docfx.Build.TableOfContents;
@@ -68,7 +69,7 @@ public static class TocHelper
                         var yaml = EnvironmentContext.FileAbstractLayer.ReadAllText(file);
                         var toc = DeserializeYamlToc(yaml)
                             ?? throw new NotSupportedException($"{file} is not a valid TOC file.");
-                        KeepIdsAsText(toc, file);
+                        KeepIdsAsText(toc, file, yaml);
                         return toc;
                     }
                 default:
@@ -92,24 +93,65 @@ public static class TocHelper
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
     /// names the axis value `3.10` would name 3.1, which pages do not match; `true` and `false`, also as `True`,
     /// `TRUE`, `False` and `FALSE`, are read as booleans.
-    /// What it holds is used as text, `3.1` or `true`, with a warning to quote it: `docfx metadata` quotes such
-    /// ids itself.
+    /// What it holds is used as text, `3.1` or `true`, with a warning to quote it that names what the file says:
+    /// `docfx metadata` quotes such ids itself.
     /// </summary>
-    private static void KeepIdsAsText(TocItemViewModel item, string file)
+    private static void KeepIdsAsText(TocItemViewModel toc, string file, string yaml)
     {
-        foreach (var key in IdKeys)
+        // The path of each value from the root: the indexes of the entries, the key, then the positions in what it
+        // holds, by which the file is read again for what it says, only when there is such a value.
+        var unquoted = new List<(string Key, object Value, string Text, List<object> Path)>();
+        var path = new List<object>();
+        Visit(toc);
+        if (unquoted.Count == 0)
         {
-            if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+            return;
+        }
+
+        var root = LoadYamlRoot(yaml);
+        foreach (var (key, value, text, at) in unquoted)
+        {
+            var written = FindWrittenScalar(root, at, value);
+            if (value is bool)
             {
-                item.Metadata[key] = AsText(value, key);
+                // YAML reads three spellings of each as a boolean and keeps none of them: without the file, all are named
+                var spellings = written ?? (text == "true" ? "true, True or TRUE" : "false, False or FALSE");
+                Logger.LogWarning(
+                    $"'{key}' of table of contents '{file}' holds {spellings} unquoted, which YAML reads as a boolean, so it is used as '{text}': " +
+                    "quote it to keep it as written.",
+                    file: file,
+                    code: WarningCodes.Build.UnquotedTocValue);
+            }
+            else
+            {
+                Logger.LogWarning(
+                    $"'{key}' of table of contents '{file}' holds {written ?? text} unquoted, which YAML reads as a number, so it is used as '{text}': " +
+                    "quote a value that looks like a number, such as \"3.10\", to keep it as written.",
+                    file: file,
+                    code: WarningCodes.Build.UnquotedTocValue);
             }
         }
-        // an empty entry, `-` alone, is null
-        foreach (var child in item.Items ?? [])
+
+        void Visit(TocItemViewModel item)
         {
-            if (child is not null)
+            foreach (var key in IdKeys)
             {
-                KeepIdsAsText(child, file);
+                if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+                {
+                    path.Add(key);
+                    item.Metadata[key] = AsText(value, key);
+                    path.RemoveAt(path.Count - 1);
+                }
+            }
+            // an empty entry, `-` alone, is null
+            for (var i = 0; i < (item.Items?.Count ?? 0); i++)
+            {
+                if (item.Items[i] is { } child)
+                {
+                    path.Add(i);
+                    Visit(child);
+                    path.RemoveAt(path.Count - 1);
+                }
             }
         }
 
@@ -117,30 +159,19 @@ public static class TocHelper
         {
             switch (value)
             {
-                case int or long or ulong or double:
-                    var text = Convert.ToString(value, CultureInfo.InvariantCulture)!;
-                    Logger.LogWarning(
-                        $"'{key}' of table of contents '{file}' holds {text} unquoted, which YAML reads as a number, so it is used as '{text}': " +
-                        "quote a value that looks like a number, such as \"3.10\", to keep it as written.",
-                        file: file,
-                        code: WarningCodes.Build.UnquotedTocValue);
+                case int or long or ulong or double or bool:
+                    var text = value is bool flag ? (flag ? "true" : "false") : Convert.ToString(value, CultureInfo.InvariantCulture)!;
+                    unquoted.Add((key, value, text, [.. path]));
                     return text;
-                case bool flag:
-                    // YAML reads three spellings of each as a boolean and keeps none of them, so all are named
-                    var word = flag ? "true" : "false";
-                    var spellings = flag ? "true, True or TRUE" : "false, False or FALSE";
-                    Logger.LogWarning(
-                        $"'{key}' of table of contents '{file}' holds {spellings} unquoted, which YAML reads as a boolean, so it is used as '{word}': " +
-                        "quote it to keep it as written.",
-                        file: file,
-                        code: WarningCodes.Build.UnquotedTocValue);
-                    return word;
                 case IDictionary map:
-                    foreach (var name in map.Keys.Cast<object>().ToList())
+                    var names = map.Keys.Cast<object>().ToList();
+                    for (var i = 0; i < names.Count; i++)
                     {
-                        if (map[name] is { } entry)
+                        if (map[names[i]] is { } entry)
                         {
-                            map[name] = AsText(entry, key);
+                            path.Add(i);
+                            map[names[i]] = AsText(entry, key);
+                            path.RemoveAt(path.Count - 1);
                         }
                     }
                     return map;
@@ -149,7 +180,9 @@ public static class TocHelper
                     {
                         if (list[i] is { } entry)
                         {
+                            path.Add(i);
                             list[i] = AsText(entry, key);
+                            path.RemoveAt(path.Count - 1);
                         }
                     }
                     return list;
@@ -157,6 +190,72 @@ public static class TocHelper
                     return value;
             }
         }
+    }
+
+    private static YamlNode LoadYamlRoot(string yaml)
+    {
+        try
+        {
+            var stream = new YamlStream();
+            stream.Load(new StringReader(yaml));
+            return stream.Documents.Count > 0 ? stream.Documents[0].RootNode : null;
+        }
+        catch (YamlException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// What the file says for a value YAML read as a number or a boolean, at its path from the root; nothing where
+    /// the file does not have it there as it was read, such as through a merge key.
+    /// </summary>
+    private static string FindWrittenScalar(YamlNode root, List<object> path, object value)
+    {
+        var node = root;
+        // the entries: those of a file that is a list are the list itself
+        var isList = root is YamlSequenceNode;
+        var step = 0;
+        for (; step < path.Count && path[step] is int index; step++)
+        {
+            var items = isList
+                ? node as YamlSequenceNode
+                : node is YamlMappingNode entry && entry.Children.TryGetValue(new YamlScalarNode("items"), out var children) ? children as YamlSequenceNode : null;
+            if (items is null || index >= items.Children.Count)
+            {
+                return null;
+            }
+            node = items.Children[index];
+            isList = false;
+        }
+
+        if (step >= path.Count || path[step] is not string key ||
+            node is not YamlMappingNode mapping || !mapping.Children.TryGetValue(new YamlScalarNode(key), out node))
+        {
+            return null;
+        }
+
+        for (step++; step < path.Count; step++)
+        {
+            var position = (int)path[step];
+            node = node switch
+            {
+                YamlMappingNode map when position < map.Children.Count => map.Children.ElementAt(position).Value,
+                YamlSequenceNode list when position < list.Children.Count => list.Children[position],
+                _ => null,
+            };
+        }
+
+        if (node is not YamlScalarNode { Style: ScalarStyle.Plain, Value: { } written })
+        {
+            return null;
+        }
+        return value switch
+        {
+            bool flag => string.Equals(written, flag ? "true" : "false", StringComparison.OrdinalIgnoreCase) ? written : null,
+            _ => double.TryParse(written, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) &&
+                number == Convert.ToDouble(value, CultureInfo.InvariantCulture) ? written : null,
+        };
     }
 
     private static TocItemViewModel DeserializeYamlToc(string yaml)

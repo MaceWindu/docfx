@@ -214,6 +214,23 @@ export function chooseGroups(groups: Unit[][], selection: Selection): number[] {
   return [first, ...Array.from(shown).filter(i => i !== first).sort((a, b) => a - b)]
 }
 
+/**
+ * The selection a group that `chooseGroups` keeps beside the one in place is shown for: with one dimension picked,
+ * the other one from the unit of the group that stands in best for it, e.g. Driver 2 on .NET 8 for .NET 8.
+ */
+export function narrowSelection(units: Unit[], selection: Selection): Selection {
+  let best: Unit | undefined
+  let bestRank = Infinity
+  for (const unit of units.filter(u => matches(u, selection))) {
+    const r = selection.framework ? rank(selection.framework, unit.framework) : 0
+    if (!best || r < bestRank) {
+      best = unit
+      bestRank = r
+    }
+  }
+  return best ? { framework: selection.framework || best.framework, value: selection.value || best.value } : selection
+}
+
 /** Frameworks in the order a picker lists them: .NET, then .NET Standard, then .NET Framework, newest first. */
 export function sortFrameworks(frameworks: string[]): string[] {
   const order = (f: string): [number, number[]] => {
@@ -782,9 +799,26 @@ export function applySelection(selection: Selection, axis?: Axis) {
   const listed = new Set<Element>()
   const kept = new Set<Element>()
   const whole: { entry: HTMLElement, block: HTMLElement, previous: HTMLElement }[] = []
+  // A copy an entry shows whole is the API as it is in the frameworks of its variant, so what the copy holds that
+  // differs again, such as the values of an enum, is shown for the selection narrowed to the copy.
+  const copySelections = new Map<Element, Selection>()
+  const selectionOf = (e: Element): Selection => {
+    for (let block = e.closest('.api-content'); block; block = block.parentElement?.closest('.api-content')) {
+      if (copySelections.has(block)) {
+        return copySelections.get(block)
+      }
+    }
+    return selection
+  }
+  const labelOf = (e: Element) => {
+    const own = selectionOf(e)
+    return own === selection ? label : selectionLabel(own, axis)
+  }
+  // a container comes before the containers in it on the page
   document.querySelectorAll('.api-contents').forEach(container => {
+    const own = selectionOf(container)
     const blocks = blocksOf(container)
-    const shown = any ? chooseGroups(blocks.map(b => parseUnits(b.dataset.appliesTo)), selection) : blocks.map((_, i) => i)
+    const shown = any ? chooseGroups(blocks.map(b => parseUnits(b.dataset.appliesTo)), own) : blocks.map((_, i) => i)
     const inPlace = shown.length > 0 ? shown[0] : 0
     blocks.forEach((block, i) => { block.hidden = i !== inPlace })
     // the copy of each variant follows the API's own content, in the order "In other frameworks" lists them
@@ -796,6 +830,7 @@ export function applySelection(selection: Selection, axis?: Axis) {
       // the entry shows its variant whole instead.
       if (inPlace !== 0) {
         whole.push({ entry: variants[i - 1], block: blocks[i], previous: blocks[i - 1] })
+        copySelections.set(blocks[i], narrowSelection(parseUnits(blocks[i].dataset.appliesTo), own))
       }
     }
   })
@@ -821,10 +856,10 @@ export function applySelection(selection: Selection, axis?: Axis) {
 
   // members, and the values of an enum, which are a list of their own
   document.querySelectorAll<HTMLElement>('article h3[data-applies-to], article dt[data-applies-to]').forEach(heading => {
-    if (isAvailable(parseUnits(heading.dataset.appliesTo), selection)) {
+    if (isAvailable(parseUnits(heading.dataset.appliesTo), selectionOf(heading))) {
       return
     }
-    heading.appendChild(unavailableBadge(label, false))
+    heading.appendChild(unavailableBadge(labelOf(heading), false))
     for (const e of memberElements(heading)) {
       e.classList.add('applies-to-unavailable')
     }
@@ -834,9 +869,9 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // apart, or does not see them, would miss.
   // the types a namespace page lists, and the members of a type with a page each
   document.querySelectorAll<HTMLElement>('article dl.jumplist[data-applies-to]').forEach(entry => {
-    if (!isAvailable(parseUnits(entry.dataset.appliesTo), selection)) {
+    if (!isAvailable(parseUnits(entry.dataset.appliesTo), selectionOf(entry))) {
       entry.classList.add('applies-to-unavailable')
-      entry.querySelector('dt')?.appendChild(unavailableBadge(label, true))
+      entry.querySelector('dt')?.appendChild(unavailableBadge(labelOf(entry), true))
     }
   })
 
@@ -845,9 +880,9 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // extension methods declared in only some, which can be in another part of the docs, with another axis or none
   document.querySelectorAll<HTMLElement>('article dl.typelist').forEach(list => {
     list.querySelectorAll<HTMLElement>('dd div[data-applies-to]').forEach(entry => {
-      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selection)) {
+      if (!isAvailable(unitsOnAxis(parseUnits(entry.dataset.appliesTo), axis), selectionOf(entry))) {
         entry.classList.add('applies-to-unavailable')
-        entry.appendChild(unavailableBadge(label, true))
+        entry.appendChild(unavailableBadge(labelOf(entry), true))
       }
     })
   })
@@ -1088,11 +1123,11 @@ export function frameworkLabel(framework: string, names?: Record<string, string>
   if (names && key !== undefined) {
     return names[key]
   }
-  let match = /^netstandard(\d+\.\d+)$/.exec(framework)
+  let match = /^netstandard(\d+\.\d+)$/i.exec(framework)
   if (match) {
     return `.NET Standard ${match[1]}`
   }
-  match = /^netcoreapp(\d+\.\d+)$/.exec(framework)
+  match = /^netcoreapp(\d+\.\d+)$/i.exec(framework)
   if (match) {
     return `.NET Core ${match[1]}`
   }
@@ -1101,7 +1136,7 @@ export function frameworkLabel(framework: string, names?: Record<string, string>
     const name = `.NET ${match[1]}${match[2] === '0' ? '' : '.' + match[2]}`
     return match[3] ? `${name} for ${platformLabel(match[3])}${match[4] ? ' ' + match[4] : ''}` : name
   }
-  match = /^net(\d)(\d)(\d)?$/.exec(framework)
+  match = /^net(\d)(\d)(\d)?$/i.exec(framework)
   if (match) {
     return `.NET Framework ${match[1]}.${match[2]}${match[3] ? '.' + match[3] : ''}`
   }
