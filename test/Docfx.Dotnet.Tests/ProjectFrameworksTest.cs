@@ -101,6 +101,120 @@ public class ProjectFrameworksTest : TestBase
     }
 
     [Fact]
+    public async Task APropertyIsReadEscapedAsTheWorkspaceReadsIt()
+    {
+        // the workspace's global properties are escaped values: `%3B` is a `;`
+        var project = CreateProject("Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework Condition="'$(Choice)' == 'a;b'">net8.0</TargetFramework>
+                <TargetFramework Condition="'$(Choice)' != 'a;b'">netstandard2.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var evaluation = await new ProjectFrameworks(new Dictionary<string, string> { ["Choice"] = "a%3Bb" }).Evaluate(project, null);
+
+        evaluation.Failure.Should().BeNull();
+        evaluation.Framework?.Name.Should().Be("net8.0");
+    }
+
+    [Fact]
+    public async Task ASingleTargetProjectIsEvaluatedWithoutItsFrameworkAsAGlobalProperty()
+    {
+        // as the workspace loads it: `TargetFramework` is not yet set where `Directory.Build.props` is imported
+        var project = CreateProject("Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>modern</TargetFramework>
+                <TargetFrameworkIdentifier>.NETCoreApp</TargetFrameworkIdentifier>
+                <TargetFrameworkVersion Condition="'$(EarlyFramework)' == ''">v8.0</TargetFrameworkVersion>
+                <TargetFrameworkVersion Condition="'$(EarlyFramework)' != ''">v9.0</TargetFrameworkVersion>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Directory.Build.props"), """
+            <Project>
+              <PropertyGroup Condition="'$(TargetFramework)' != ''">
+                <EarlyFramework>$(TargetFramework)</EarlyFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var evaluation = await new ProjectFrameworks(new Dictionary<string, string>()).EvaluateAsLoaded(project, "modern");
+
+        evaluation.Failure.Should().BeNull();
+        evaluation.Framework.Should().Be(new ProjectFramework("modern", "net8.0"));
+    }
+
+    [Fact]
+    public async Task AProjectWhoseTargetFrameworksListsOneFrameworkIsEvaluatedForIt()
+    {
+        // the workspace loads it with the framework as a global property, as it loads several
+        var project = CreateProject("Lib.csproj", AliasProject.Replace("modern;legacy", "modern"));
+
+        var evaluation = await new ProjectFrameworks(new Dictionary<string, string>()).EvaluateAsLoaded(project, "modern");
+
+        evaluation.Failure.Should().BeNull();
+        evaluation.Framework.Should().Be(new ProjectFramework("modern", "net8.0"));
+    }
+
+    [Fact]
+    public void AnEvaluationThatWritesNothingSaysSo()
+    {
+        var evaluation = ProjectFrameworks.ReadEvaluation("Lib.csproj", null, "", "", 0);
+
+        evaluation.Framework.Should().BeNull();
+        evaluation.Failure.Should().EndWith("is not known: it wrote nothing, and exited with code 0");
+    }
+
+    [Fact]
+    public void AnEvaluationWithoutAFrameworkOfAProjectThatListsThemSaysSo()
+    {
+        var output = """{ "Properties": { "TargetFramework": "", "TargetFrameworks": "modern" } }""";
+
+        ProjectFrameworks.ReadEvaluation("Lib.csproj", null, output, "", 0).ListsFrameworks.Should().BeTrue();
+        // evaluated for a framework, it is no longer the project that lists them
+        ProjectFrameworks.ReadEvaluation("Lib.csproj", "modern", output, "", 0).ListsFrameworks.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TheDotnetOfDotnetRootIsTheOneEvaluated()
+    {
+        var root = Path.Combine(_projectFolder, "dotnet-root");
+        Directory.CreateDirectory(root);
+        var dotnet = Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+
+        // without one there, it is the `dotnet` the workspace's build host starts as
+        ProjectFrameworks.GetDotnet(root).Should().Be("dotnet");
+        ProjectFrameworks.GetDotnet(null).Should().Be("dotnet");
+
+        File.WriteAllText(dotnet, "");
+        ProjectFrameworks.GetDotnet(root).Should().Be(dotnet);
+    }
+
+    [Fact]
+    public void AProjectIsEvaluatedWithTheSdkOfTheProjectTheWorkspaceOpenedIt()
+    {
+        var frameworks = new ProjectFrameworks(new Dictionary<string, string>());
+        var app = Path.Combine(_projectFolder, "App", "App.csproj");
+        var lib = Path.Combine(_projectFolder, "Lib", "Lib.csproj");
+        var other = Path.Combine(_projectFolder, "Other", "Other.csproj");
+
+        frameworks.Opening(app);
+        frameworks.AddLoaded(app, "net8.0");
+        // loaded as a reference of `App`, and opened again later
+        frameworks.AddLoaded(lib, "net8.0");
+        frameworks.Opening(lib);
+        frameworks.AddLoaded(lib, "net8.0");
+
+        frameworks.GetSdkDirectory(app).Should().Be(Path.GetDirectoryName(app));
+        frameworks.GetSdkDirectory(lib).Should().Be(Path.GetDirectoryName(app));
+        // one never loaded has the SDK of its own folder
+        frameworks.GetSdkDirectory(other).Should().Be(Path.GetDirectoryName(other));
+    }
+
+    [Fact]
     public async Task AnEvaluationThatDoesNotAnswerInTimeIsAFailure()
     {
         var project = CreateProject("Lib.csproj", AliasProject);

@@ -201,6 +201,32 @@ public class TargetFrameworkTest : TestBase
         Assert.True(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
     }
 
+    [Theory]
+    [InlineData("net8.0-windows", false)]
+    [InlineData("net8.0-windows7.0", false)]
+    [InlineData("net8.0-windows10.0.19041.0", true)]
+    [InlineData("net8.0", true)]
+    public async Task TargetFrameworkWithAPlatformOfAProjectWhoseTargetFrameworksListsOne(string targetFramework, bool expectWarning)
+    {
+        // loaded for its framework alone, as a `TargetFramework` is, but with the framework as a global property
+        var project = CreatePlatformProject("<TargetFrameworks>net8.0-windows</TargetFrameworks>");
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = targetFramework });
+
+        if (expectWarning)
+        {
+            var warning = AssertWarnings(listener, WarningCodes.Metadata.TargetFrameworkNotFound);
+            Assert.Contains($"does not target '{targetFramework}'", warning.Message);
+        }
+        else
+        {
+            AssertWarnings(listener);
+        }
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Platform.OnlyWindows.yml")));
+    }
+
     [Fact]
     public async Task TargetFrameworkWithAPlatformVersionAMultiTargetedProjectDoesNotTargetWarns()
     {

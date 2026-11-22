@@ -225,6 +225,7 @@ partial class DotnetApiCatalog
                         throw new DocfxException($"dotnet restore failed for '{path}' with exit code {process.ExitCode}.");
                     }
                 }
+                projectFrameworks?.Opening(path);
                 project = await workspace.OpenProjectAsync(path, msbuildLogger, projectFrameworks);
             }
 

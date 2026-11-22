@@ -113,10 +113,11 @@ internal static partial class TargetFrameworkHelper
                 return false;
             }
 
-            // The framework is given also for a project loaded for it alone: one whose `TargetFrameworks` lists a
-            // single framework is loaded with it as a global property, as several are, and a `TargetFramework` of
-            // the project has the same value either way.
-            var evaluation = await frameworks.Evaluate(candidate.FilePath, name);
+            // A project loaded for its framework alone is evaluated as the workspace loaded it, with the framework
+            // as a global property only when its `TargetFrameworks` lists it.
+            var evaluation = candidates.Count <= 1
+                ? await frameworks.EvaluateAsLoaded(candidate.FilePath, name)
+                : await frameworks.Evaluate(candidate.FilePath, name);
             if (evaluation.Failure is { } failure)
             {
                 failures.Add(failure);
@@ -161,8 +162,9 @@ internal static partial class TargetFrameworkHelper
             return "a list of frameworks, while it selects a single one";
         }
 
+        // An alias, which may hold a dash and digits as any name may, is selected by itself.
         var dash = targetFramework.IndexOf('-');
-        if (dash < 0)
+        if (dash < 0 || !IsFrameworkName(targetFramework))
         {
             return null;
         }
