@@ -81,6 +81,26 @@ public class ProjectFrameworksTest : TestBase
     }
 
     [Fact]
+    public async Task TheEvaluationReadsNoDirectoryBuildRsp()
+    {
+        // the workspace reads none, so the evaluation follows what it loaded
+        var project = CreateProject("Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework Condition="'$(Choice)' == 'rsp'">net8.0</TargetFramework>
+                <TargetFramework Condition="'$(Choice)' != 'rsp'">netstandard2.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Directory.Build.rsp"), "-property:Choice=rsp");
+
+        var evaluation = await new ProjectFrameworks(new Dictionary<string, string>()).Evaluate(project, null);
+
+        evaluation.Failure.Should().BeNull();
+        evaluation.Framework?.Name.Should().Be("netstandard2.0");
+    }
+
+    [Fact]
     public async Task AnEvaluationThatDoesNotAnswerInTimeIsAFailure()
     {
         var project = CreateProject("Lib.csproj", AliasProject);

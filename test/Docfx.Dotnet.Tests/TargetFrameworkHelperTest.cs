@@ -375,11 +375,41 @@ public class TargetFrameworkHelperTest
     public async Task ProjectFrameworksNamesAProjectAfterItsFrameworkWhenItsFileIsLoadedForSeveral()
     {
         var (_, projects) = CreateProjects("Lib(net8.0)", "Lib(netstandard2.0)");
+        var frameworks = NotEvaluated();
+        frameworks.AddLoaded(LibPath, "net8.0");
+        frameworks.AddLoaded(LibPath, "netstandard2.0");
 
-        var (name, failure) = await NotEvaluated().GetName(projects[1]);
+        var (name, failure) = await frameworks.GetName(projects[1]);
 
         name.Should().Be("netstandard2.0");
         failure.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(false, true, LogLevel.Warning)]
+    [InlineData(true, true, LogLevel.Info)]
+    [InlineData(true, false, null)]
+    public async Task SelectProjectReportsASingleTargetProjectMSBuildCannotEvaluateWithTheFrameworkRequested(bool fromSolution, bool report, LogLevel? expected)
+    {
+        // a non-SDK project, for which the workspace reports no framework, and whose evaluation fails
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib");
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], "net8.0", NotEvaluated(), fromSolution, report);
+
+        selected.Should().BeSameAs(projects[0]);
+        matched.Should().BeFalse();
+        if (expected is { } level)
+        {
+            var item = listener.Items.Should().ContainSingle().Which;
+            item.LogLevel.Should().Be(level);
+            item.Message.Should().StartWith($"Project '{LibPath}' is not known to target 'net8.0', documenting the framework it is loaded for.")
+                .And.Contain($"MSBuild cannot evaluate project '{LibPath}' for '': test.");
+        }
+        else
+        {
+            listener.Items.Should().BeEmpty();
+        }
     }
 
     [Fact]

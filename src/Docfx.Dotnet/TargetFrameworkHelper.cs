@@ -52,9 +52,10 @@ internal static partial class TargetFrameworkHelper
             {
                 if (failure is not null)
                 {
-                    Report(failure);
+                    failures.Add(failure);
                 }
 
+                Report($"Project '{project.FilePath}' is not known to target '{targetFramework}', documenting the framework it is loaded for.");
                 return (project, false);
             }
 

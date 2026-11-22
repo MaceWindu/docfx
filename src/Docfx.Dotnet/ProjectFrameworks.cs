@@ -94,8 +94,7 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             return (loaded.Keys.First(), null);
         }
 
-        if ((loaded is { Count: > 1 } || project.Solution.Projects.Count(p => FilePathComparer.OSPlatformSensitiveRelativePathComparer.Equals(p.FilePath, path)) > 1)
-            && TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
+        if (loaded is { Count: > 1 } && TargetFrameworkHelper.GetTargetFrameworkFromName(project) is { } name)
         {
             return (name, null);
         }
@@ -134,6 +133,10 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         start.ArgumentList.Add(path);
         start.ArgumentList.Add("-nologo");
         start.ArgumentList.Add("-nodeReuse:false");
+
+        // The workspace reads no `Directory.Build.rsp`, whose switches, such as `-bl` or `-p:`, would write files next
+        // to the project or evaluate it otherwise.
+        start.ArgumentList.Add("-noAutoResponse");
         foreach (var property in s_properties)
         {
             start.ArgumentList.Add($"-getProperty:{property}");
