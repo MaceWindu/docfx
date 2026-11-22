@@ -1440,6 +1440,21 @@ public class TargetFrameworkTest : TestBase
     }
 
     [Fact]
+    public async Task WhatTargetFrameworkOverridesIsIgnoredWhateverItsValue()
+    {
+        var project = CreateMultiTargetedProject();
+
+        using var listener = new TestListenerScope();
+
+        await Exec(new() { Src = Src(project), TargetFramework = "net8.0", TargetFrameworks = ["net8.0;netstandard2.0"], DefaultFramework = "net8.0-" });
+
+        Assert.Empty(listener.GetItemsByLogLevel(LogLevel.Error));
+        var warning = AssertWarnings(listener, WarningCodes.Metadata.ConflictingTargetFramework, WarningCodes.Metadata.ConflictingTargetFramework);
+        Assert.Equal("'defaultFramework' applies to 'targetFrameworks' and 'axes' only, and 'targetFramework' overrides 'targetFrameworks', so it is ignored.", warning.Message);
+        Assert.True(File.Exists(Path.Combine(_outputFolder, "Lib.OnlyNet8.yml")));
+    }
+
+    [Fact]
     public async Task EnumValuesOfAnotherFrameworkKeepTheDeclaringOrder()
     {
         var project = CreateProject("Enums", "<TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>", """

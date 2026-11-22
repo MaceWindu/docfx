@@ -258,6 +258,8 @@ public class TargetFrameworkMergeTest
     [InlineData("CSharp", "[Obsolete(\"use a -> b\")]\npublic class T : IB, IA", "[Obsolete(\"use a -> b\")]\npublic class T : IA, IB")]
     [InlineData("CSharp", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IB, IA", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IA, IB")]
     [InlineData("CSharp", "[Sep(')')]\npublic class T : IB, IA", "[Sep(')')]\npublic class T : IA, IB")]
+    // nor is a `where` in one a constraint
+    [InlineData("CSharp", "[Obsolete(\"Use it where possible\")]\npublic class T : IB, IA", "[Obsolete(\"Use it where possible\")]\npublic class T : IA, IB")]
     [InlineData("VB", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IB, IA", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IA, IB")]
     // nor is a `<` or `(` an argument of an attribute holds outside a string
     [InlineData("CSharp", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IB, IA", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IA, IB")]

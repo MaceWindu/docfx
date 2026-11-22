@@ -229,7 +229,7 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
         tree.Add(treeItem);
     }
 
-    private static ItemViewModel GenerateOverloadPage(PageViewModel page, IGrouping<string, ItemViewModel> overload)
+    internal static ItemViewModel GenerateOverloadPage(PageViewModel page, IGrouping<string, ItemViewModel> overload)
     {
         var primaryItem = page.Items[0];
 
@@ -242,10 +242,13 @@ public class SplitClassPageToMemberLevel : BaseDocumentBuildStep
             Uid = key,
             Children = overload.Select(s => s.Uid).ToList(),
             Type = firstMember.Type,
-            // the assemblies of every overload, which can differ between frameworks, in the order of the type
-            AssemblyNameList = MergeInOrder(overload, s => s.AssemblyNameList)?
-                .OrderBy(assembly => primaryItem.AssemblyNameList?.IndexOf(assembly) is int index and >= 0 ? index : int.MaxValue)
-                .ToList() ?? firstMember.AssemblyNameList,
+            // The assemblies of every overload, which can differ between frameworks, in the order of the type. Without
+            // frameworks, the first overload's, as before.
+            AssemblyNameList = primaryItem.AppliesTo is null
+                ? firstMember.AssemblyNameList
+                : MergeInOrder(overload, s => s.AssemblyNameList)?
+                    .OrderBy(assembly => primaryItem.AssemblyNameList?.IndexOf(assembly) is int index and >= 0 ? index : int.MaxValue)
+                    .ToList() ?? firstMember.AssemblyNameList,
             NamespaceName = firstMember.NamespaceName,
             Metadata = new Dictionary<string, object>
             {

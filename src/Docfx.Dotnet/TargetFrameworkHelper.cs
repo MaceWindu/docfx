@@ -350,7 +350,7 @@ internal static partial class TargetFrameworkHelper
                     failures.Add(failure);
                 }
 
-                Report(null);
+                Report($"Project '{project.FilePath}' is not known to target '{targetFramework}', documenting the framework it is loaded for.");
                 return (project, false);
             }
 

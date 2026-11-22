@@ -91,13 +91,13 @@ public static partial class DotnetApiCatalog
             }
 
             // Both apply to what several frameworks or values of an axis merge into, which nothing else gives.
-            if ((config.TargetFrameworks is null || config.TargetFramework is not null) && config.Axis is null &&
-                (config.DefaultFramework is not null || config.VariantIgnore is not VariantIgnore.None))
+            if (!MergesFrameworks(config) && (config.DefaultFramework is not null || config.VariantIgnore is not VariantIgnore.None))
             {
                 var unused = new[] { config.DefaultFramework is null ? null : "'defaultFramework'", config.VariantIgnore is VariantIgnore.None ? null : "'variantIgnore'" }.OfType<string>().ToList();
                 var both = unused.Count > 1;
+                var why = config.TargetFrameworks is null ? "which this metadata item does not set" : "and 'targetFramework' overrides 'targetFrameworks'";
                 Logger.LogWarning(
-                    $"{string.Join(" and ", unused)} {(both ? "apply" : "applies")} to 'targetFrameworks' and 'axes' only, which this metadata item does not set, so {(both ? "they are" : "it is")} ignored.",
+                    $"{string.Join(" and ", unused)} {(both ? "apply" : "applies")} to 'targetFrameworks' and 'axes' only, {why}, so {(both ? "they are" : "it is")} ignored.",
                     code: WarningCodes.Metadata.ConflictingTargetFramework);
             }
 
@@ -200,6 +200,13 @@ public static partial class DotnetApiCatalog
         }
 
         return result;
+    }
+
+    // Whether the metadata item merges several frameworks or values of an axis, which `targetFramework` makes it not
+    // do unless it has an axis.
+    private static bool MergesFrameworks(ExtractMetadataConfig config)
+    {
+        return (config.TargetFrameworks is not null && config.TargetFramework is null) || config.Axis is not null;
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)

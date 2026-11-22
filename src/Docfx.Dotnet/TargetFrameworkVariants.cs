@@ -392,8 +392,9 @@ internal static partial class TargetFrameworkVariants
             {
                 if (string.CompareOrdinal(declaration, i, separator, 0, separator.Length) == 0)
                 {
-                    // A `where` before the first colon makes it a constraint, not a base list.
-                    if (!isVisualBasic && declaration.AsSpan(0, i).Contains(" where ", StringComparison.Ordinal))
+                    // A `where` before the first colon makes it a constraint, not a base list; one in an attribute
+                    // line is an argument's.
+                    if (!isVisualBasic && declaration.AsSpan(first, i - first).Contains(" where ", StringComparison.Ordinal))
                     {
                         return declaration;
                     }

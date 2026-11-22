@@ -41,8 +41,10 @@ partial class DotnetApiCatalog
         }
 
         // A framework no project can target would select nothing, or, as a platform version that is not one, anything.
-        List<(string Option, string? Framework, string? Reason)> invalid = !hasProjectInput ? [] : new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", config.DefaultFramework) }
-            .Concat((config.TargetFrameworks ?? []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
+        // What `targetFramework` overrides, and is warned about as ignored, selects nothing either.
+        var merges = MergesFrameworks(config);
+        List<(string Option, string? Framework, string? Reason)> invalid = !hasProjectInput ? [] : new List<(string Option, string? Framework)> { ("targetFramework", config.TargetFramework), ("defaultFramework", merges ? config.DefaultFramework : null) }
+            .Concat((config.TargetFramework is null ? config.TargetFrameworks ?? [] : []).Select(framework => (Option: "targetFrameworks", Framework: (string?)framework)))
             .Select(option => (option.Option, option.Framework, Reason: option.Framework is { } framework ? TargetFrameworkHelper.GetInvalidReason(framework) : null))
             .Where(option => option.Reason is not null)
             .ToList();
