@@ -248,12 +248,22 @@ partial class DotnetApiCatalog
             }
         }
 
-        if (item.Implements is { Count: > 0 } implemented)
+        // An interface extends what a class implements, for a type that is a class in another framework.
+        if ((item.Implements ?? item.BaseInterfaces) is { Count: > 0 } implemented)
         {
             item.ImplementsAppliesTo = [];
             foreach (var uid in implemented)
             {
                 item.ImplementsAppliesTo.TryAdd(uid, [framework]);
+            }
+        }
+
+        if (item.ExtensionMethods is { Count: > 0 } extensions)
+        {
+            item.ExtensionMethodsAppliesTo = [];
+            foreach (var uid in extensions)
+            {
+                item.ExtensionMethodsAppliesTo.TryAdd(uid, [framework]);
             }
         }
 

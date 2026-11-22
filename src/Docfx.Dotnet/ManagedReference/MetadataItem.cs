@@ -194,6 +194,24 @@ internal class MetadataItem : ICloneable
     public Dictionary<string, List<string>> ImplementsAppliesTo { get; set; }
 
     /// <summary>
+    /// The interfaces an interface extends, which <see cref="Implements"/> does not list for an interface: in a
+    /// framework where the type is an interface and a class elsewhere, it implements them there as well.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> BaseInterfaces { get; set; }
+
+    /// <summary>
+    /// The target frameworks of this item each of its <see cref="ExtensionMethods"/> extends it in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> ExtensionMethodsAppliesTo { get; set; }
+
+    /// <summary>
     /// What differs in the frameworks that do not share the content of this item.
     /// </summary>
     [YamlIgnore]

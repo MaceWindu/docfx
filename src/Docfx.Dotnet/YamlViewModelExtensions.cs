@@ -375,6 +375,7 @@ internal static class YamlViewModelExtensions
             InheritedMembers = model.InheritedMembers,
             InheritedMembersAppliesTo = ToInheritedMembersAppliesTo(model, config.Axis),
             ExtensionMethods = model.ExtensionMethods,
+            ExtensionMethodsAppliesTo = ToPartialAppliesTo(model.ExtensionMethods, model.ExtensionMethodsAppliesTo, model.AppliesTo, config.Axis),
             Attributes = model.Attributes,
         };
 
@@ -438,6 +439,7 @@ internal static class YamlViewModelExtensions
             Syntax = content.Syntax.ToSyntaxDetailViewModel(),
             Overridden = content.Overridden,
             NoOverridden = variant.NoOverridden ? true : null,
+            NoInheritance = variant.NoInheritance ? true : null,
             Exceptions = content.Exceptions,
             SeeAlsos = content.SeeAlsos,
             Inheritance = content.Inheritance,

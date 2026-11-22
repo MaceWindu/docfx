@@ -865,6 +865,7 @@
     "variants",
     "inheritedMembersAppliesTo",
     "implementsAppliesTo",
+    "extensionMethodsAppliesTo",
     "derivedClassesAppliesTo",
     "attributes",
     "additionalNotes"

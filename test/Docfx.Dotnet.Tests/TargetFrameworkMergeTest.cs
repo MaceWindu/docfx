@@ -258,8 +258,9 @@ public class TargetFrameworkMergeTest
     [InlineData("CSharp", "[Obsolete(\"use a -> b\")]\npublic class T : IB, IA", "[Obsolete(\"use a -> b\")]\npublic class T : IA, IB")]
     [InlineData("CSharp", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IB, IA", "[Obsolete(\"say \\\"(\\\" \")]\npublic class T : IA, IB")]
     [InlineData("CSharp", "[Sep(')')]\npublic class T : IB, IA", "[Sep(')')]\npublic class T : IA, IB")]
-    // nor is a `where` in one a constraint
+    // nor is a `where` in one a constraint, or in a string of the declaration
     [InlineData("CSharp", "[Obsolete(\"Use it where possible\")]\npublic class T : IB, IA", "[Obsolete(\"Use it where possible\")]\npublic class T : IA, IB")]
+    [InlineData("CSharp", "public record R(string Separator = \" where \") : IB, IA", "public record R(string Separator = \" where \") : IA, IB")]
     [InlineData("VB", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IB, IA", "<Obsolete(\"use a -> \"\"b\"\"\")>\nPublic Class T Implements IA, IB")]
     // nor is a `<` or `(` an argument of an attribute holds outside a string
     [InlineData("CSharp", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IB, IA", "[Range(0, 1 < 2 ? 1 : 2)]\npublic class T : IA, IB")]
@@ -293,6 +294,25 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void AnExtensionMethodThatExtendsATypeInSomeFrameworksIsRecordedWithThem()
+    {
+        const string Extensions = "public static class E { public static void OfI(this I i) { } public static void OfObject(this object o) { } }";
+        var result = Merge(
+            ($"namespace N {{ public interface I {{ }} public class T : I {{ }} {Extensions} }}", First),
+            ($"namespace N {{ public interface I {{ }} public class T {{ }} {Extensions} }}", Second));
+
+        var type = result["N.T"];
+        type.ExtensionMethods.Should().HaveCount(2);
+        var ofI = type.ExtensionMethods.Single(uid => uid.Contains("OfI"));
+        type.ExtensionMethodsAppliesTo[ofI].Should().Equal(First);
+
+        // only the one that extends it in some frameworks is marked
+        var view = type.ToItemViewModel(new());
+        view.ExtensionMethodsAppliesTo.Should().ContainSingle().Which.Key.Should().Be(ofI);
+        view.ExtensionMethodsAppliesTo[ofI].Should().ContainSingle().Which.Frameworks.Should().Equal(First);
+    }
+
+    [Fact]
     public void AKindThatDiffersWarnsAndTheFirstFrameworkWins()
     {
         using var listener = new TestListenerScope();
@@ -317,12 +337,50 @@ public class TargetFrameworkMergeTest
         // the variant's unset base would read as the same one
         var variant = result["N.K"].Variants.Should().ContainSingle().Subject;
         variant.NoInheritance.Should().BeTrue();
+        // and so would the page's, which shows the variant whole where it is picked
+        result["N.K"].ToItemViewModel(new()).Variants.Should().ContainSingle().Which.NoInheritance.Should().BeTrue();
 
         var model = new MetadataModel { Members = [result["N.B"], result["N.K"]] };
         new SetDerivedClass().Run(model, new ResolverContext { References = [] });
 
         result["N.B"].DerivedClasses.Should().Equal("N.K");
         result["N.B"].DerivedClassesAppliesTo.Should().ContainKey("N.K").WhoseValue.Should().Equal(First);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnInterfaceThatIsAClassInAnotherFrameworkImplementsWhatItExtends(bool classFirst)
+    {
+        using var listener = new TestListenerScope();
+
+        var asClass = ("namespace N { public interface I { } public class K : I { } }", classFirst ? First : Second);
+        var asInterface = ("namespace N { public interface I { } public interface K : I { } }", classFirst ? Second : First);
+        var result = classFirst ? Merge(asClass, asInterface) : Merge(asInterface, asClass);
+
+        // an interface lists no `Implements` of its own, but implements what it extends in its framework
+        var type = result["N.K"];
+        type.Implements.Should().Equal("N.I");
+        type.ImplementsAppliesTo["N.I"].Should().BeEquivalentTo(First, Second);
+        type.ToItemViewModel(new()).ImplementsAppliesTo.Should().BeNull();
+
+        var model = new MetadataModel { Members = [result["N.I"], type] };
+        new SetDerivedClass().Run(model, new ResolverContext { References = [] });
+
+        result["N.I"].DerivedClasses.Should().Equal("N.K");
+        result["N.I"].ToItemViewModel(new()).DerivedClassesAppliesTo.Should().BeNull();
+    }
+
+    [Fact]
+    public void AnInterfaceInEveryFrameworkStillListsNoImplements()
+    {
+        var result = Merge(
+            ("namespace N { public interface I { } public interface K : I { } }", First),
+            ("namespace N { public interface I { } public interface K : I { } }", Second));
+
+        var view = result["N.K"].ToItemViewModel(new());
+        view.Implements.Should().BeNull();
+        view.ImplementsAppliesTo.Should().BeNull();
     }
 
     [Fact]
@@ -376,6 +434,39 @@ public class TargetFrameworkMergeTest
     }
 
     [Fact]
+    public void AValueDescriptionIsNotTakenFromAnotherType()
+    {
+        // milliseconds as an `int` say nothing of a `TimeSpan?`
+        var result = Merge(
+            ("namespace N { public class T { public System.TimeSpan? Timeout { get; set; } } }", First),
+            ("namespace N { public class T { /// <value>The timeout in milliseconds.</value>\npublic int Timeout { get; set; } } }", Second));
+
+        var item = result["N.T.Timeout"];
+        item.Syntax.Return.Description.Should().BeNullOrEmpty();
+        item.Variants.Should().ContainSingle().Which.Content.Syntax.Return.Description.Should().Contain("milliseconds");
+    }
+
+    [Fact]
+    public void AVariantsParametersTakeTheDescriptionsOfTheApisOwn()
+    {
+        // The second framework names a parameter otherwise, so its variant lists its parameters, and documents none;
+        // the third documents `x`, after the variant is recorded.
+        var result = Merge(
+            ("namespace N { public class T { /// <param name=\"a\">the a</param>\npublic void M(int a, int x) { } } }", First),
+            ("namespace N { public class T { public void M(int b, int x) { } } }", Second),
+            ("namespace N { public class T { /// <param name=\"x\">the x</param>\npublic void M(int a, int x) { } } }", Third));
+
+        var item = result["N.T.M(System.Int32,System.Int32)"];
+        item.Syntax.Parameters.Select(p => p.Description).Should().SatisfyRespectively(
+            a => a.Should().Contain("the a"),
+            x => x.Should().Contain("the x"));
+        var parameters = item.Variants.Should().ContainSingle().Which.Content.Syntax.Parameters;
+        parameters.Select(p => p.Name).Should().Equal("b", "x");
+        parameters[0].Description.Should().BeNullOrEmpty();
+        parameters[1].Description.Should().Contain("the x");
+    }
+
+    [Fact]
     public void AFrameworkSharesAVariantOnlyWithTheSameDocumentation()
     {
         // The third framework differs from the first in its signature only, the second in its signature and
@@ -410,6 +501,28 @@ public class TargetFrameworkMergeTest
             ("namespace N { public class T { /// <summary>\n/// one\n///     two\n/// </summary><param name=\"x\">the\n/// x</param>\npublic int M(int x) => x; } }", Second));
 
         result["N.T.M(System.Int32)"].Variants.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("one two", "one\n    two", true)]
+    [InlineData("<p>one</p>\n<p>two</p>", "<p>one</p><p>two</p>", true)]
+    [InlineData("<p>\none\n</p>", "<p>one</p>", true)]
+    // a space that parts two words, or a word from code, is part of the text
+    [InlineData("set up", "setup", false)]
+    [InlineData("call <code>M</code> once", "call<code>M</code>once", false)]
+    public void DocumentationTextIsComparedAsItReads(string left, string right, bool expectSame)
+    {
+        (TargetFrameworkVariants.NormalizeWhitespace(left) == TargetFrameworkVariants.NormalizeWhitespace(right)).Should().Be(expectSame);
+    }
+
+    [Fact]
+    public void DocumentationThatDiffersInAWordIsADifference()
+    {
+        var result = Merge(
+            ("namespace N { public class T { /// <summary>Set up the reader.</summary>\npublic void M() { } } }", First),
+            ("namespace N { public class T { /// <summary>Setup the reader.</summary>\npublic void M() { } } }", Second));
+
+        result["N.T.M"].Variants.Should().ContainSingle();
     }
 
     [Fact]
@@ -842,7 +955,8 @@ public class TargetFrameworkMergeTest
         var items = units.Select(unit =>
         {
             var compilation = CompilationHelper.CreateCompilationFromCSharpCode(unit.Code, new Dictionary<string, string>(), "Lib");
-            var item = compilation.Assembly.GenerateMetadataItem(compilation, new() { VariantIgnore = ignore })!;
+            var extensionMethods = compilation.Assembly.FindExtensionMethods(new(new(), new())).ToArray();
+            var item = compilation.Assembly.GenerateMetadataItem(compilation, new() { VariantIgnore = ignore }, extensionMethods: extensionMethods)!;
             DotnetApiCatalog.TagAppliesTo(item, unit.Framework);
             return item;
         }).ToList();

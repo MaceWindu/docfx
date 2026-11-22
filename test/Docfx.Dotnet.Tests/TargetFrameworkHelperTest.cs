@@ -374,10 +374,17 @@ public class TargetFrameworkHelperTest
     public async Task GetFrameworkLabelOfASingleTargetProject(string loaded, string expected)
     {
         var (_, projects) = CreateProjects("Lib");
-        var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(new ProjectFramework(tfm, tfm == "modern" ? "net8.0" : "net8.0-windows7.0")));
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework(loaded, loaded == "modern" ? "net8.0" : "net8.0-windows7.0"));
+        });
         frameworks.AddLoaded(LibPath, loaded);
 
         (await TargetFrameworkHelper.GetFrameworkLabel(projects[0], frameworks, [])).Should().Be(expected);
+        // as the workspace loaded a `TargetFramework`: without it as a global property
+        evaluated.Should().OnlyContain(tfm => tfm == null);
     }
 
     [Theory]
@@ -495,8 +502,10 @@ public class TargetFrameworkHelperTest
     public async Task SelectProjectsOfASingleTargetProjectReadsTheFrameworkTheWorkspaceLoaded(string targetFramework, string expected)
     {
         var (solution, projects) = CreateProjects("Lib");
-        var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(new ProjectFramework(tfm, tfm == "net8.0-windows" ? "net8.0-windows7.0" : tfm)));
-        frameworks.AddLoaded(LibPath, targetFramework.StartsWith("net8.0-windows") ? "net8.0-windows" : "net8.0");
+        var loaded = targetFramework.StartsWith("net8.0-windows") ? "net8.0-windows" : "net8.0";
+        // evaluated as the workspace loaded its `TargetFramework`: without it as a global property
+        var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(tfm is null ? new ProjectFramework(loaded, loaded == "net8.0-windows" ? "net8.0-windows7.0" : loaded) : null));
+        frameworks.AddLoaded(LibPath, loaded);
 
         var selected = await TargetFrameworkHelper.SelectProjects(solution, projects[0], [targetFramework], frameworks);
 

@@ -46,5 +46,6 @@
   {{^definition}}
     <xref uid="{{uid}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/>
   {{/definition}}
+  {{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
 </div>
 {{/extensionMethods}}

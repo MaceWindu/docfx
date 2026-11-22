@@ -603,6 +603,13 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
             {
                 AddInheritedMembers(symbol, symbol.AllInterfaces[i], dict, typeParameterNames);
             }
+
+            // Named as `Implements` names them, but referenced by nothing: only a framework where the type is a
+            // class lists them, which references them itself.
+            var unreferenced = new Dictionary<string, ReferenceItem>();
+            item.BaseInterfaces = (from t in symbol.AllInterfaces
+                                   where _filter.IncludeApi(t)
+                                   select _generator.AddSpecReference(t, typeParameterNames, null, unreferenced, _filter)).ToList();
         }
         if (dict != null)
         {

@@ -20,6 +20,7 @@
   {{^definition}}
     <xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/>
   {{/definition}}
+  {{#showAppliesToBadge}}<span class="applies-to">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}
 </div>
 {{/extensionMethods}}
 {{#seealso.0}}

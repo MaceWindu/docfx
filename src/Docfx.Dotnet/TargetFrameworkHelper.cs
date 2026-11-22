@@ -268,7 +268,7 @@ internal static partial class TargetFrameworkHelper
             return name;
         }
 
-        var evaluation = await frameworks.Evaluate(path, name);
+        var evaluation = await frameworks.EvaluateAsLoaded(path, name);
         if (evaluation.Failure is not null)
         {
             failures.Add(evaluation.Failure);
@@ -309,7 +309,7 @@ internal static partial class TargetFrameworkHelper
 
         // A project documented under a name another one gives too is one framework named twice on its pages: worth
         // a warning whichever input the project comes from.
-        var evaluation = await projectFrameworks.Evaluate(projectPath, framework);
+        var evaluation = await projectFrameworks.EvaluateAsLoaded(projectPath, framework);
         if (evaluation.Framework is not { } evaluated)
         {
             if (evaluation.Failure is not null)

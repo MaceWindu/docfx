@@ -137,7 +137,7 @@
   {{^definition}}
     <xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/>
   {{/definition}}
-</div>
+  {{#showAppliesToBadge}}<span class="applies-to ms-2 text-body-secondary">{{>partials/appliesTo}}</span>{{/showAppliesToBadge}}</div>
 {{/extensionMethods}}
 {{#extensionMethods.0}}
 </dl>

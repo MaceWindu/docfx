@@ -223,6 +223,14 @@ function handleInheritedMembers(model, options) {
     member.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
   });
   handleImplements(model, options);
+  // an extension method that extends the type in only some of its frameworks, as the interface it extends is
+  // implemented in only some
+  var extendedIn = model.extensionMethodsAppliesTo || {};
+  (model.extensionMethods || []).forEach(function (method) {
+    var appliesTo = Object.prototype.hasOwnProperty.call(extendedIn, method.uid) ? extendedIn[method.uid] : [];
+    method.appliesToGroups = getAppliesToGroups({ appliesTo: appliesTo }, options);
+    method.showAppliesToBadge = !options.hideLabels && appliesTo.length > 0;
+  });
   // in the order of the derived classes, which carry no uid
   var derivedIn = model.derivedClassesAppliesTo || [];
   (model.derivedClasses || []).forEach(function (derived, index) {

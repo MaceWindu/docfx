@@ -56,6 +56,8 @@ public class TargetFrameworksBuildTest : TestBase
 
                 public class AlwaysSource : ISource { public void Open() { } }
 
+                public static class SourceExtensions { public static void Reopen(this ISource source) { } }
+
                 public class SometimesSource
             #if NET8_0
                     : ISource
@@ -128,6 +130,12 @@ public class TargetFrameworksBuildTest : TestBase
                     public new virtual string ToString() => "";
             #endif
                 }
+
+            #if NET8_0
+                public class Pipe : ISource { public void Open() { } }
+            #else
+                public interface Pipe : ISource { }
+            #endif
 
                 public enum Mode
                 {
@@ -212,6 +220,19 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Matches("SometimesSource</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", page);
         Assert.Matches("AlwaysSource</a>\\s*</div>", page);
+        // an interface in .NET Standard that extends it, and a class implementing it in .NET 8, does so in both
+        Assert.Matches("Pipe</a>\\s*</div>", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AClassThatIsAnInterfaceElsewhereImplementsWhatTheInterfaceExtendsInEveryFramework(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+
+        Assert.Matches("ISource</a>\\s*</div>", await Page(site, "Lib.Pipe.html"));
     }
 
     [Theory]
@@ -238,6 +259,19 @@ public class TargetFrameworksBuildTest : TestBase
 
         Assert.Matches("ISource</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", await Page(site, "Lib.SometimesSource.html"));
         Assert.Matches("ISource</a>\\s*</div>", await Page(site, "Lib.AlwaysSource.html"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("\"default\"")]
+    [InlineData("\"default\", \"modern\"")]
+    public async Task AnExtensionMethodThatExtendsATypeInSomeFrameworksIsMarkedWithThem(string template)
+    {
+        var site = await Build(template, targetFrameworks: "\"*\"");
+
+        // the interface it extends is implemented in .NET 8 only
+        Assert.Matches("Reopen\\([^)]*\\)</a>\\s*<span class=\"applies-to[^\"]*\">\\.NET 8</span>\\s*</div>", await Page(site, "Lib.SometimesSource.html"));
+        Assert.Matches("Reopen\\([^)]*\\)</a>\\s*</div>", await Page(site, "Lib.AlwaysSource.html"));
     }
 
     [Theory]
@@ -345,7 +379,7 @@ public class TargetFrameworksBuildTest : TestBase
     {
         var site = await Build("\"default\"", targetFrameworks: "\"*\"", extraBuild: "\"exportRawModel\": true,");
 
-        foreach (var (page, key) in new[] { ("Lib.Child.raw.json", "inheritedMembersAppliesTo"), ("Lib.Base.raw.json", "derivedClassesAppliesTo"), ("Lib.SometimesSource.raw.json", "implementsAppliesTo") })
+        foreach (var (page, key) in new[] { ("Lib.Child.raw.json", "inheritedMembersAppliesTo"), ("Lib.Base.raw.json", "derivedClassesAppliesTo"), ("Lib.SometimesSource.raw.json", "implementsAppliesTo"), ("Lib.SometimesSource.raw.json", "extensionMethodsAppliesTo") })
         {
             var raw = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, page), TestContext.Current.CancellationToken));
             Assert.NotNull(raw[key]);

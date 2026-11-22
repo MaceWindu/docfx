@@ -196,6 +196,11 @@ public class ApiBuildOutput
     [JsonPropertyName("implementsAppliesTo")]
     public Dictionary<string, List<AppliesToViewModel>> ImplementsAppliesTo { get; set; }
 
+    [YamlMember(Alias = "extensionMethodsAppliesTo")]
+    [JsonProperty("extensionMethodsAppliesTo")]
+    [JsonPropertyName("extensionMethodsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ExtensionMethodsAppliesTo { get; set; }
+
     /// <summary>
     /// The frameworks of each of <see cref="DerivedClasses"/>, in their order and empty where it needs no mark:
     /// a derived class is rendered as a type reference, which carries no uid to look it up by.
@@ -298,6 +303,7 @@ public class ApiBuildOutput
             Variants = model.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, references, model.SupportedLanguages)).ToList(),
             InheritedMembersAppliesTo = model.InheritedMembersAppliesTo,
             ImplementsAppliesTo = model.ImplementsAppliesTo,
+            ExtensionMethodsAppliesTo = model.ExtensionMethodsAppliesTo,
             DerivedClassesAppliesTo = model.DerivedClassesAppliesTo is { } derivedIn
                 ? model.DerivedClasses?.Select(uid => derivedIn.TryGetValue(uid, out var appliesTo) ? appliesTo : []).ToList()
                 : null,

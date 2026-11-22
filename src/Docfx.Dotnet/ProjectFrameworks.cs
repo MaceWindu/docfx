@@ -192,6 +192,12 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     /// </summary>
     public async Task<ProjectEvaluation> EvaluateAsLoaded(string path, string targetFramework)
     {
+        // a file it loaded for several frameworks, each as a global property
+        if (_loaded.TryGetValue(path, out var loaded) && loaded.Count > 1)
+        {
+            return await Evaluate(path, targetFramework);
+        }
+
         var evaluation = await Evaluate(path, null);
         return evaluation.ListsFrameworks ? await Evaluate(path, targetFramework) : evaluation;
     }

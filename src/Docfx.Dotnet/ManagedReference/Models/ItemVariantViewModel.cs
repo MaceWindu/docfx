@@ -57,6 +57,15 @@ public class ItemVariantViewModel
     [JsonPropertyName("noOverridden")]
     public bool? NoOverridden { get; set; }
 
+    /// <summary>
+    /// Whether the API has no base type in these frameworks, as an interface has not, while it has one in the
+    /// others: an unset <see cref="Inheritance"/> means the same as the rest of the item.
+    /// </summary>
+    [YamlMember(Alias = "noInheritance")]
+    [JsonProperty("noInheritance")]
+    [JsonPropertyName("noInheritance")]
+    public bool? NoInheritance { get; set; }
+
     [YamlMember(Alias = "exceptions")]
     [JsonProperty("exceptions")]
     [JsonPropertyName("exceptions")]

@@ -393,6 +393,16 @@ public class ItemViewModel : IOverwriteDocumentViewModel, IItemWithMetadata
     [UniqueIdentityReference]
     public List<string> ExtensionMethods { get; set; }
 
+    /// <summary>
+    /// The target frameworks each of <see cref="ExtensionMethods"/> extends this item in, for those that extend
+    /// it in only some of the frameworks of this item, as the interface they extend is implemented in only some.
+    /// </summary>
+    [YamlMember(Alias = "extensionMethodsAppliesTo")]
+    [MergeOption(MergeOption.Ignore)]
+    [JsonProperty("extensionMethodsAppliesTo")]
+    [JsonPropertyName("extensionMethodsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ExtensionMethodsAppliesTo { get; set; }
+
     [YamlMember(Alias = Constants.PropertyName.Conceptual)]
     [JsonProperty(Constants.PropertyName.Conceptual)]
     [JsonPropertyName(Constants.PropertyName.Conceptual)]

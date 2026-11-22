@@ -95,6 +95,10 @@ internal static partial class TargetFrameworkVariants
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
+    // A tag of an element that starts a block, before or after which whitespace shows nothing.
+    [GeneratedRegex(@"\s*(</?(?:p|para|br|ul|ol|li|list|item|listheader|term|description|table|thead|tbody|tr|td|th|pre|div|blockquote|h[1-6])\b[^>]*>)\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex BlockTagRegex();
+
     /// <summary>
     /// Adds what <paramref name="other"/> has in <paramref name="framework"/> to <paramref name="primary"/>.
     /// </summary>
@@ -126,7 +130,9 @@ internal static partial class TargetFrameworkVariants
         // A member inherited in only some frameworks, as its base type differs, is marked with them on the page,
         // and so is a type implementing an interface in only some, on the page of the interface.
         primary.InheritedMembersAppliesTo = AddFramework(primary.InheritedMembersAppliesTo, other.InheritedMembers, framework);
-        primary.ImplementsAppliesTo = AddFramework(primary.ImplementsAppliesTo, other.Implements, framework);
+        primary.ImplementsAppliesTo = AddFramework(primary.ImplementsAppliesTo, other.Implements ?? other.BaseInterfaces, framework);
+        // and an extension method that extends it in only some, as the interface it extends is implemented in only some
+        primary.ExtensionMethodsAppliesTo = AddFramework(primary.ExtensionMethodsAppliesTo, other.ExtensionMethods, framework);
 
         if (string.IsNullOrWhiteSpace(primary.Summary))
         {
@@ -164,9 +170,18 @@ internal static partial class TargetFrameworkVariants
         {
             FillDescriptions(ownSyntax.Parameters, otherSyntax.Parameters);
             FillDescriptions(ownSyntax.TypeParameters, otherSyntax.TypeParameters);
-            if (ownSyntax.Return is { } ownReturn && string.IsNullOrWhiteSpace(ownReturn.Description))
+
+            // A UID does not hold the type of a property, field or return value: a description of another type, such
+            // as milliseconds for an `int` that is a `TimeSpan` here, is not this one's.
+            if (ownSyntax.Return is { } ownReturn && string.IsNullOrWhiteSpace(ownReturn.Description) && ownReturn.Type == otherSyntax.Return?.Type)
             {
                 ownReturn.Description = otherSyntax.Return?.Description;
+            }
+
+            // and what a variant's parameters lack, as they were recorded before
+            foreach (var variant in primary.Variants ?? [])
+            {
+                FillDescriptions(variant.Content?.Syntax, ownSyntax);
             }
         }
 
@@ -194,6 +209,10 @@ internal static partial class TargetFrameworkVariants
         if (content.Syntax is { } syntax && primary.Syntax is { } own)
         {
             content.Syntax = SyntaxThatDiffers(own, syntax, ignore, baseLists);
+
+            // A variant lists parameters where one differs, such as by its name: one it leaves undocumented is
+            // described as the API's own parameter of that name and type is.
+            FillDescriptions(content.Syntax, own);
         }
 
         // Shared with the ignore every framework has, not the one widened for this framework, which a framework
@@ -260,10 +279,19 @@ internal static partial class TargetFrameworkVariants
         foreach (var parameter in own)
         {
             if (string.IsNullOrWhiteSpace(parameter.Description) &&
-                other.FirstOrDefault(o => o.Name == parameter.Name) is { Description: { } description } && !string.IsNullOrWhiteSpace(description))
+                other.FirstOrDefault(o => o.Name == parameter.Name && o.Type == parameter.Type) is { Description: { } description } && !string.IsNullOrWhiteSpace(description))
             {
                 parameter.Description = description;
             }
+        }
+    }
+
+    private static void FillDescriptions(SyntaxDetail variant, SyntaxDetail own)
+    {
+        if (variant is not null)
+        {
+            FillDescriptions(variant.Parameters, own.Parameters);
+            FillDescriptions(variant.TypeParameters, own.TypeParameters);
         }
     }
 
@@ -332,8 +360,8 @@ internal static partial class TargetFrameworkVariants
                     // which is rewrapped between versions without changing what it says.
                     if (DocumentationText.Contains(name))
                     {
-                        var leftText = WhitespaceRegex().Replace(left.GetValue<string>(), "");
-                        var rightText = WhitespaceRegex().Replace(right.GetValue<string>(), "");
+                        var leftText = NormalizeWhitespace(left.GetValue<string>());
+                        var rightText = NormalizeWhitespace(right.GetValue<string>());
                         return leftText == rightText || (!strict && (leftText.Length == 0 || rightText.Length == 0));
                     }
                 }
@@ -343,6 +371,16 @@ internal static partial class TargetFrameworkVariants
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Documentation text as it reads: a run of whitespace is one space, as rewrapping a comment moves a line break
+    /// between two words, and none is next to the tag of a block, such as a <c>&lt;p&gt;</c> a comment writes on a
+    /// line of its own or not. "set up" and "setup" stay apart.
+    /// </summary>
+    internal static string NormalizeWhitespace(string text)
+    {
+        return WhitespaceRegex().Replace(BlockTagRegex().Replace(text, "$1"), " ").Trim();
     }
 
     /// <summary>
@@ -393,15 +431,15 @@ internal static partial class TargetFrameworkVariants
 
             if (start < 0)
             {
+                // A `where` before the first colon makes it a constraint, not a base list; one in an attribute line,
+                // or in a string such as the default of a record's parameter, is a value's.
+                if (!isVisualBasic && string.CompareOrdinal(declaration, i, " where ", 0, 7) == 0)
+                {
+                    return declaration;
+                }
+
                 if (string.CompareOrdinal(declaration, i, separator, 0, separator.Length) == 0)
                 {
-                    // A `where` before the first colon makes it a constraint, not a base list; one in an attribute
-                    // line is an argument's.
-                    if (!isVisualBasic && declaration.AsSpan(first, i - first).Contains(" where ", StringComparison.Ordinal))
-                    {
-                        return declaration;
-                    }
-
                     start = i + separator.Length;
                     i = start - 1;
                 }

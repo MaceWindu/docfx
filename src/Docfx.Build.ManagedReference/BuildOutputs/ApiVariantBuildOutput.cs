@@ -49,6 +49,11 @@ public class ApiVariantBuildOutput
     [JsonPropertyName("noOverridden")]
     public bool? NoOverridden { get; set; }
 
+    [YamlMember(Alias = "noInheritance")]
+    [JsonProperty("noInheritance")]
+    [JsonPropertyName("noInheritance")]
+    public bool? NoInheritance { get; set; }
+
     [YamlMember(Alias = "exceptions")]
     [JsonProperty("exceptions")]
     [JsonPropertyName("exceptions")]
@@ -86,6 +91,7 @@ public class ApiVariantBuildOutput
             Syntax = ApiSyntaxBuildOutput.FromModel(model.Syntax, supportedLanguages),
             Overridden = ApiNames.FromUid(model.Overridden),
             NoOverridden = model.NoOverridden,
+            NoInheritance = model.NoInheritance,
             Exceptions = model.Exceptions?.Select(ApiExceptionInfoBuildOutput.FromModel).ToList(),
             SeeAlsos = model.SeeAlsos?.Select(ApiLinkInfoBuildOutput.FromModel).ToList(),
             Inheritance = model.Inheritance?.Select(uid => new ApiReferenceBuildOutput { Uid = uid }).ToList(),
