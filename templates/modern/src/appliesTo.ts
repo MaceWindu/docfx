@@ -281,8 +281,9 @@ export function narrowSelection(units: Unit[], selection: Selection): Selection 
   }
   const bestRank = Math.min(...ranked.map(r => r.rank))
   const best = ranked.filter(r => r.rank === bestRank).map(r => r.unit)
+  // the ids of the axis of the value, which a PDF sets, still apply in the copy
   return best.length === 1
-    ? { framework: selection.framework || best[0].framework, value: selection.value || best[0].value, ...(selection.part ? { part: selection.part } : {}) }
+    ? { ...selection, framework: selection.framework || best[0].framework, value: selection.value || best[0].value }
     : { ...selection, within: best }
 }
 

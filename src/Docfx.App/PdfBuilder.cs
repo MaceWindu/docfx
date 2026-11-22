@@ -179,7 +179,7 @@ static class PdfBuilder
                 outline.tocPath = path;
             }
             // An empty entry, `appliesTo: [~]` written by hand, would stop every PDF where the selection reads it.
-            if (selects && outline is not null && EmptyEntry(outline) is { } empty)
+            if (selects && outline is not null && EmptyEntry(outline, "the root") is { } empty)
             {
                 Logger.LogError($"Table of contents '{path}' cannot be read for its PDF: {empty} has an empty entry.");
                 return null;
@@ -289,23 +289,24 @@ static class PdfBuilder
         }
 
         // Where the selection reads a list that has an empty entry: `items`, `appliesTo`, its `frameworks`, or the
-        // `values` of an axis.
-        static string? EmptyEntry(Outline node)
+        // `values` of an axis. `name` names the node: by its name or link, else by its place below the one above it.
+        static string? EmptyEntry(Outline node, string name)
         {
-            var name = node.name is { Length: > 0 } ? node.name : node.href ?? "the root";
             if (node.items?.Any(item => item is null) is true)
             {
-                return $"'items' of '{name}'";
+                return $"'items' of {name}";
             }
             if (node.appliesTo?.Any(group => group is null || group.frameworks?.Any(f => f is null) is true) is true)
             {
-                return $"'appliesTo' of '{name}'";
+                return $"'appliesTo' of {name}";
             }
             if (node.axis?.values?.Any(v => v is null) is true)
             {
-                return $"'axis' of '{name}'";
+                return $"'axis' of {name}";
             }
-            return (node.items ?? []).Select(EmptyEntry).FirstOrDefault(found => found is not null);
+            return (node.items ?? [])
+                .Select((item, i) => EmptyEntry(item, item.name is { Length: > 0 } ? $"'{item.name}'" : item.href is { Length: > 0 } ? $"'{item.href}'" : $"item {i + 1} of {name}"))
+                .FirstOrDefault(found => found is not null);
         }
 
         static void WithoutAppliesTo(JsonNode? node)
@@ -359,6 +360,12 @@ static class PdfBuilder
             Logger.LogWarning($"'pdfAxisValue' of '{outline.Label}' is '{value}', which is not a value of an axis of its API.");
             warned = true;
         }
+        else if (value is not null && valueOnAnAxis && groups.Count > 0 && !groups.Any(group => group.version == value))
+        {
+            // `docfx metadata` writes every value an axis declares, also one that no project was built for
+            Logger.LogWarning($"'pdfAxisValue' of '{outline.Label}' is '{value}', which none of its API exists in: no project of its axis was built for it.");
+            warned = true;
+        }
 
         // Pages carry the ids of axis values, not their axis, so a value of several axes is picked in each.
         List<string> axesOfValue = value is null ? [] : axes.Where(axis => HasValue(axis, value)).Select(axis => axis.name ?? "").Distinct().ToList();
@@ -401,8 +408,11 @@ static class PdfBuilder
                 var available = IsAvailable(item, itemAxis);
                 if (framework is not null && value is not null && ValueApplies(itemAxis) && item.appliesTo?.Any(group => group.version == value) is true)
                 {
+                    // by the group of the value only: a group without a value, written by hand, can keep the item in the framework
                     var key = itemAxis?.name ?? "";
-                    keptOfValue[key] = keptOfValue.GetValueOrDefault(key) || available;
+                    var keptOfIt = item.appliesTo.Any(group => group.version == value &&
+                        (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f)));
+                    keptOfValue[key] = keptOfValue.GetValueOrDefault(key) || keptOfIt;
                 }
                 if (!available)
                 {

@@ -168,7 +168,7 @@ public class PdfFrameworkTest
         using var listener = new TestListenerScope();
 
         Assert.Null(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes($$"""{ "pdf": true, "pdfFramework": "net8.0", "items": {{items}} }"""), "api/toc.json"));
-        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'") && x.Message.Contains("empty entry"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains("'api/toc.json'") && x.Message.Contains("of 'A' has an empty entry"));
 
         // a PDF that selects nothing does not read them
         if (!items.Contains("\"items\": [ null ]", StringComparison.Ordinal))
@@ -176,6 +176,18 @@ public class PdfFrameworkTest
             Assert.NotNull(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes($$"""{ "pdf": true, "items": {{items}} }"""), "toc.json"));
         }
         // the error count is global, and later tests check it
+        Logger.ResetCount();
+    }
+
+    [Theory]
+    [InlineData("""[ { "items": [ null ] } ]""", "'items' of item 1 of the root")]
+    [InlineData("""[ { "name": "A", "items": [ { "href": "b.html" }, { "items": [ { "appliesTo": [ null ] } ] } ] } ]""", "'appliesTo' of item 1 of item 2 of 'A'")]
+    public void AnEmptyEntryIsNamedByItsPlace(string items, string expected)
+    {
+        using var listener = new TestListenerScope();
+
+        Assert.Null(PdfBuilder.ReadPdfOutline(Encoding.UTF8.GetBytes($$"""{ "pdf": true, "pdfFramework": "net8.0", "items": {{items}} }"""), "toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Error), x => x.Message.Contains($"{expected} has an empty entry"));
         Logger.ResetCount();
     }
 
@@ -220,6 +232,48 @@ public class PdfFrameworkTest
         PdfBuilder.LeaveOutUnavailable(Parse(framework, value));
 
         Assert.Contains(listener.GetItemsByLogLevel(LogLevel.Warning), x => x.Message.Contains(option));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("net8.0")]
+    public void AValueTheAxisDeclaresButNoApiHasWarns(string framework)
+    {
+        using var listener = new TestListenerScope();
+        // `docfx metadata` writes every value of `axes`, also EF Core 10, which no project was built for
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoAxesToc
+            .Replace("{ \"id\": \"ef8\" }", "{ \"id\": \"ef8\" }, { \"id\": \"ef10\" }")
+            .Replace("\"pdf\": true,", framework is null ? "\"pdf\": true," : $"\"pdf\": true, \"pdfFramework\": \"{framework}\",")
+            .Replace("{value}", "ef10"));
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.Contains("'pdfAxisValue'", warning.Message);
+        Assert.Contains("'ef10'", warning.Message);
+    }
+
+    [Fact]
+    public void AFrameworkAndValueThatNeverMeetWarnWhereAGroupWithoutAValueKeepsTheEntry()
+    {
+        using var listener = new TestListenerScope();
+        // written by hand: the group without a value keeps the entry for .NET Framework 4.6.2, EF Core 8 is on .NET 8 only
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>("""
+            {
+              "pdf": true, "pdfFramework": "net462", "pdfAxisValue": "ef8",
+              "items": [
+                { "name": "EF", "axis": { "name": "EF Core", "values": [ { "id": "ef8" } ] }, "items": [
+                  { "name": "Mixed", "href": "ef/Mixed.html", "appliesTo": [ { "frameworks": [ "net462" ] }, { "version": "ef8", "frameworks": [ "net8.0" ] } ] }
+                ] }
+              ]
+            }
+            """);
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal("EF, Mixed", string.Join(", ", Names(outline.items)));
+        var warning = Assert.Single(listener.GetItemsByLogLevel(LogLevel.Warning));
+        Assert.Contains("none of it exists in both", warning.Message);
     }
 
     [Fact]
