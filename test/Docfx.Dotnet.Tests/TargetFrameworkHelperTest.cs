@@ -504,6 +504,39 @@ public class TargetFrameworkHelperTest
         listener.Items.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("net8.O")]
+    [InlineData("net")]
+    public async Task SelectProjectEvaluatesNoAliasForAValueThatNamesNoFramework(string targetFramework)
+    {
+        // what an alias stands for is a framework, which such a value never is
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib(modern)", "Lib(legacy)");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework(tfm, "net8.0"));
+        });
+
+        var (selected, matched) = await TargetFrameworkHelper.SelectProject(solution, projects[0], targetFramework, frameworks);
+
+        matched.Should().BeFalse();
+        selected.Should().BeSameAs(projects[0]);
+        evaluated.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("{\n  \"Properties\": {\n    \"TargetFramework\": \"net8.0\"\n  }\n}\n")]
+    // a notice of a first run, or a warning that quotes a `{`, before it, and text after it
+    [InlineData("Welcome to .NET!\r\nwarning MSB4011: 'C:\\{x}\\a.props' cannot be imported again.\r\n{\r\n  \"Properties\": {\r\n    \"TargetFramework\": \"net8.0\"\r\n  }\r\n}\r\nBuild succeeded.\r\n")]
+    public void ProjectFrameworksReadsTheJsonOfTheEvaluationWhateverIsAroundIt(string output)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(ProjectFrameworks.ReadJson(output));
+
+        document.RootElement.GetProperty("Properties").GetProperty("TargetFramework").GetString().Should().Be("net8.0");
+    }
+
     private static Task<ProjectEvaluation> Evaluated(ProjectFramework framework) =>
         Task.FromResult(new ProjectEvaluation(framework, framework is null ? "MSBuild cannot evaluate project 'Lib.csproj': test" : null));
 

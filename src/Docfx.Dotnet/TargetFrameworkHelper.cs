@@ -106,11 +106,16 @@ internal static partial class TargetFrameworkHelper
                 }
             }
 
-            if (candidate.FilePath is null)
+            // What an alias stands for is a framework, which a value that names none, such as a typo, never matches:
+            // only the name itself can, and it does not.
+            if (candidate.FilePath is null || !IsFrameworkName(targetFramework))
             {
                 return false;
             }
 
+            // The framework is given also for a project loaded for it alone: one whose `TargetFrameworks` lists a
+            // single framework is loaded with it as a global property, as several are, and a `TargetFramework` of
+            // the project has the same value either way.
             var evaluation = await frameworks.Evaluate(candidate.FilePath, name);
             if (evaluation.Failure is { } failure)
             {

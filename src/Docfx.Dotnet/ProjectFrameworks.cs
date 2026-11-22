@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using Docfx.Common;
@@ -42,6 +43,9 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     internal static readonly TimeSpan EvaluationTimeout = TimeSpan.FromMinutes(2);
 
     private static readonly string[] s_properties = ["TargetFramework", "TargetFrameworkMoniker", "TargetPlatformIdentifier", "TargetPlatformVersion"];
+
+    // What MSBuildLocator sets in a process to point MSBuild at an SDK.
+    private static readonly string[] s_locatedSdkVariables = ["MSBuildSDKsPath", "MSBuildExtensionsPath", "MSBUILD_EXE_PATH"];
 
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _loaded = new(FilePathComparer.OSPlatformSensitiveStringComparer);
     private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new(EvaluationKeyComparer.Instance);
@@ -129,6 +133,14 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
         start.Environment["DOTNET_NOLOGO"] = "1";
         start.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
         start.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+
+        // The SDK a parent MSBuild, such as one that runs docfx from an `Exec` task, located: the workspace's build
+        // host locates its own, which these would otherwise override for the evaluation.
+        foreach (var variable in s_locatedSdkVariables)
+        {
+            start.Environment.Remove(variable);
+        }
+
         start.ArgumentList.Add("msbuild");
         start.ArgumentList.Add(path);
         start.ArgumentList.Add("-nologo");
@@ -184,9 +196,7 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
 
         try
         {
-            // whatever the SDK writes before the JSON, such as a notice of a first run
-            var json = output.IndexOf('{') is var brace and >= 0 ? output[brace..] : output;
-            using var document = JsonDocument.Parse(json);
+            using var document = JsonDocument.Parse(ReadJson(output));
             var values = document.RootElement.GetProperty("Properties");
             string Get(string property) => values.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
             return Create(Get("TargetFramework"), Get("TargetFrameworkMoniker"), Get("TargetPlatformIdentifier"), Get("TargetPlatformVersion"))
@@ -202,6 +212,28 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             var framework = targetFramework is null ? "" : $" for '{targetFramework}'";
             return new(null, $"MSBuild cannot evaluate project '{path}'{framework}, so which framework it targets is not known: {reason}");
         }
+    }
+
+    /// <summary>
+    /// Reads the JSON <c>-getProperty</c> writes out of the output of <c>dotnet msbuild</c>, which can have text
+    /// around it, such as a notice of a first run or a warning, that may hold a <c>{</c> as well.
+    /// </summary>
+    internal static string ReadJson(string output)
+    {
+        // The JSON starts a line, and only its first line starts with `{`: the lines within it are indented.
+        var start = output.StartsWith('{') ? 0 : -1;
+        if (output.LastIndexOf("\n{", StringComparison.Ordinal) is var line and >= 0)
+        {
+            start = line + 1;
+        }
+
+        if (start < 0)
+        {
+            return output;
+        }
+
+        var end = output.LastIndexOf('}');
+        return end > start ? output[start..(end + 1)] : output[start..];
     }
 
     /// <summary>
@@ -230,9 +262,10 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
             {
                 process.Kill(entireProcessTree: true);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or AggregateException or Win32Exception or NotSupportedException)
             {
-                // it ended meanwhile
+                // It ended meanwhile, or a process of its tree cannot be stopped: the evaluation did not answer
+                // either way, which is what is reported.
             }
 
             // The output ends with the processes that hold it; read it before the process is disposed.
