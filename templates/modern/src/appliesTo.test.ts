@@ -142,6 +142,13 @@ test('a group kept beside the one in place is shown for the selection narrowed t
   assert.deepStrictEqual(narrowSelection(parseUnits('d1:netstandard2.0'), { value: 'd1' }), { framework: 'netstandard2.0', value: 'd1' })
   // a group the selection does not have is shown for the selection
   assert.deepStrictEqual(narrowSelection(parseUnits('d2:net8.0'), { value: 'd1' }), { value: 'd1' })
+  // units that stand in equally well are all kept: the selection is limited to them, not to the first one
+  const d1Old = narrowSelection(parseUnits('d1:netstandard2.0 d1:net462'), { value: 'd1' })
+  assert.deepStrictEqual(d1Old, { value: 'd1', within: parseUnits('d1:netstandard2.0 d1:net462') })
+  assert.deepStrictEqual(narrowSelection(parseUnits('d1:net8.0 d2:net8.0'), { framework: 'net10.0' }), { framework: 'net10.0', within: parseUnits('d1:net8.0 d2:net8.0') })
+  assert.ok(isAvailable(parseUnits('d1:net462'), d1Old))
+  assert.ok(!isAvailable(parseUnits('d1:net8.0'), d1Old))
+  assert.ok(isAvailable(parseUnits('net462'), d1Old))
 })
 
 test('frameworks in picker order', () => {
@@ -659,6 +666,100 @@ test('a copy shown whole shows what it holds as it is in the frameworks of its v
   assert.deepStrictEqual(document.querySelector('.api-contents').children.map(e => e.children[0].id), ['own', 'own_variant1', 'own_variant2'])
   assert.deepStrictEqual(hidden('fast', 'fast_d2', 'fastEntry'), [false, true, false])
   assert.strictEqual(document.querySelectorAll('.applies-to-unavailable').length, 0)
+})
+
+test('a copy shown whole for units the pick cannot tell apart shows what it holds for all of them', () => {
+  // Driver 1 has one copy for .NET Standard 2.0 and .NET Framework 4.6.2: Old exists only on .NET Framework 4.6.2,
+  // New only on .NET 8, which the copy is not for
+  const type = (suffix: string) => `
+    <dl class="parameters">
+      <dt id="Lib_Mode_Old${suffix}" data-applies-to="d1:net462">Old</dt><dd>old</dd>
+      <dt id="Lib_Mode_New${suffix}" data-applies-to="d1:net8.0 d2:net8.0">New</dt><dd>new</dd>
+    </dl>`
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Mode" data-applies-to="d2:net8.0 d1:net8.0 d1:netstandard2.0 d1:net462">Mode</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d2:net8.0">${type('')}</div>
+      <div class="api-content" data-applies-to="d1:net8.0" data-search-ignore hidden>${type('_variant1')}</div>
+      <div class="api-content" data-applies-to="d1:netstandard2.0 d1:net462" data-search-ignore hidden>${type('_variant2')}</div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="d1:net8.0"><h6 class="api-variant-label">Driver 1</h6><div>summary</div></div>
+    <div class="api-variant" id="variant2" data-applies-to="d1:netstandard2.0 d1:net462"><h6 class="api-variant-label">Driver 1</h6><div>summary</div></div>
+  </article>`)
+  const badge = (id: string) => document.getElementById(id).querySelector('.applies-to-unavailable-badge')?.textContent
+
+  applySelection({ value: 'd1' }, driver)
+  assert.strictEqual(document.getElementById('Lib_Mode_Old_variant2').closest('.api-variant').id, 'variant2')
+  assert.strictEqual(badge('Lib_Mode_Old_variant2'), undefined)
+  assert.strictEqual(badge('Lib_Mode_New_variant2'), 'Not available in Driver 1, .NET Standard 2.0, .NET Framework 4.6.2')
+})
+
+test('a value of an enum shown whole shows its declaration with its description', () => {
+  // X is 0 for Driver 2, 1 for Driver 1 on .NET 8, and 2 for Driver 1 on .NET Standard 2.0
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Mode" data-applies-to="d2:net8.0 d1:net8.0 d1:netstandard2.0">Mode</h1>
+    <div class="facts"></div>
+    <dl class="parameters">
+      <dt id="Lib_Mode_X" data-applies-to="d2:net8.0 d1:net8.0 d1:netstandard2.0"><span class="api-contents"><span class="api-content" data-applies-to="d2:net8.0"><code id="x">X = 0</code></span><span class="api-content" data-applies-to="d1:net8.0" data-search-ignore hidden><code id="x1">X = 1</code></span><span class="api-content" data-applies-to="d1:netstandard2.0" data-search-ignore hidden><code id="x2">X = 2</code></span></span></dt>
+      <dd>
+        <div class="api-contents"><div class="api-content" data-applies-to="d2:net8.0"><p id="s">zero</p></div><div class="api-content" data-applies-to="d1:net8.0" data-search-ignore hidden><p id="s1">one</p></div><div class="api-content" data-applies-to="d1:netstandard2.0" data-search-ignore hidden><p id="s2">two</p></div></div>
+        <h5 class="api-variants-heading">In other frameworks</h5>
+        <div class="api-variant" id="variant1" data-applies-to="d1:net8.0"><h6 class="api-variant-label">Driver 1 (.NET 8)</h6><div id="diff1">X = 1</div></div>
+        <div class="api-variant" id="variant2" data-applies-to="d1:netstandard2.0"><h6 class="api-variant-label">Driver 1 (.NET Standard 2.0)</h6><div id="diff2">X = 2</div></div>
+      </dd>
+    </dl>
+  </article>`)
+  const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
+  const entry = (id: string) => document.getElementById(id).closest('.api-variant')?.id
+
+  // Driver 1 on .NET 8 in place, Driver 1 on .NET Standard 2.0 whole in its entry: its declaration, then its description
+  applySelection({ value: 'd1' }, driver)
+  assert.deepStrictEqual(hidden('x', 'x1', 's1', 'x2', 's2', 'diff2'), [true, false, false, false, false, true])
+  assert.deepStrictEqual([entry('x2'), entry('s2')], ['variant2', 'variant2'])
+  assert.deepStrictEqual(document.getElementById('variant2').children.map(e => e.id || e.children[0]?.id || e.tagName), ['H6', 'x2', 's2', 'diff2'])
+
+  applySelection({}, driver)
+  assert.deepStrictEqual(document.getElementById('Lib_Mode_X').children[0].children.map(e => e.children[0].id), ['x', 'x1', 'x2'])
+  assert.deepStrictEqual(hidden('x', 'x1', 'x2', 's', 's2', 'diff2'), [false, true, true, false, true, false])
+})
+
+test('a type shown whole shows its see-also links with it', () => {
+  // Driver 1 on .NET 10 differs from the API's own content, Driver 1 on .NET 8; Driver 2 has see-also links of its own
+  const { document } = installDom(`${site}
+  <article>
+    <h1 id="Lib_Reader" data-applies-to="d1:net8.0 d2:netstandard2.0 d1:net10.0">Reader</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d1:net8.0"><p id="text">own</p></div>
+      <div class="api-content" data-applies-to="d2:netstandard2.0" data-search-ignore hidden><p id="text_variant1">Driver 2</p></div>
+      <div class="api-content" data-applies-to="d1:net10.0" data-search-ignore hidden><p id="text_variant2">Driver 1 on .NET 10</p></div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="d2:netstandard2.0"><h6 class="api-variant-label">Driver 2</h6><h6>See also</h6><div id="listed1">Array</div></div>
+    <div class="api-variant" id="variant2" data-applies-to="d1:net10.0"><h6 class="api-variant-label">Driver 1</h6><div id="diff2">declaration</div></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="d1:net8.0"><h2 id="seealso">See Also</h2><div id="span">Span</div></div>
+      <div class="api-content" data-applies-to="d2:netstandard2.0" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2><div id="array">Array</div></div>
+      <div class="api-content" data-applies-to="d1:net10.0" data-search-ignore hidden><h2 id="seealso_variant2">See Also</h2><div id="memory">Memory</div></div>
+    </div>
+  </article>`)
+  const hidden = (...ids: string[]) => ids.map(id => !!document.getElementById(id).closest('[hidden]'))
+  const outline = () => document.querySelectorAll('article h2').filter(h => !isHiddenBySelection(h as unknown as Element)).map(h => h.id)
+
+  applySelection({ framework: 'net10.0' })
+  assert.deepStrictEqual(hidden('span', 'memory', 'text_variant1', 'array', 'listed1'), [true, false, false, false, true])
+  assert.deepStrictEqual(document.getElementById('variant1').children.map(e => e.id || e.children[0]?.id || e.tagName), ['H6', 'text_variant1', 'seealso_variant1', 'H6', 'listed1'])
+  // the copy's headings stay out of In this article, which has those of the page once
+  assert.deepStrictEqual(outline(), ['seealso_variant2'])
+
+  applySelection({})
+  assert.deepStrictEqual(document.querySelectorAll('.api-contents')[1].children.map(e => e.children[0].id), ['seealso', 'seealso_variant1', 'seealso_variant2'])
+  assert.deepStrictEqual(hidden('span', 'array', 'listed1'), [false, true, false])
+  assert.deepStrictEqual(outline(), ['seealso'])
 })
 
 test('the id a fragment points to', () => {

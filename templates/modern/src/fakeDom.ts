@@ -87,6 +87,11 @@ export class FakeElement {
     return siblings[siblings.indexOf(this) + 1] || null
   }
 
+  get previousElementSibling(): FakeElement | null {
+    const siblings = this.parentElement?.children || []
+    return siblings[siblings.indexOf(this) - 1] || null
+  }
+
   getAttribute(name: string): string | null {
     return this.attributes.has(name) ? this.attributes.get(name) : null
   }

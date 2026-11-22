@@ -10,8 +10,11 @@ import { isExternalHref, isSameURL, loc, meta } from './helper'
  */
 export type Unit = { value?: string, framework: string }
 
-/** What the reader picked. A missing part is "all". */
-export type Selection = { value?: string, framework?: string }
+/**
+ * What the reader picked. A missing part is "all". `within` limits it to some units, those of the copy of a variant
+ * shown whole that the pick cannot tell apart, as `narrowSelection` reads them.
+ */
+export type Selection = { value?: string, framework?: string, within?: Unit[] }
 
 /** One entry of `appliesTo` in the table of contents, as written by `docfx metadata`. */
 export type AppliesToGroup = { version?: string, label?: string, frameworks?: string[] }
@@ -160,7 +163,9 @@ export function rank(target: string, framework: string): number {
 export function matches(unit: Unit, selection: Selection): boolean {
   // a value picked for the axis of one part of the docs says nothing about a part without that axis
   return (!selection.value || unit.value === undefined || unit.value === selection.value) &&
-    (!selection.framework || rank(selection.framework, unit.framework) < Infinity)
+    (!selection.framework || rank(selection.framework, unit.framework) < Infinity) &&
+    (!selection.within || selection.within.some(w =>
+      (w.value === undefined || unit.value === undefined || w.value === unit.value) && isSameFramework(w.framework, unit.framework)))
 }
 
 export function isAvailable(units: Unit[], selection: Selection): boolean {
@@ -216,19 +221,20 @@ export function chooseGroups(groups: Unit[][], selection: Selection): number[] {
 
 /**
  * The selection a group that `chooseGroups` keeps beside the one in place is shown for: with one dimension picked,
- * the other one from the unit of the group that stands in best for it, e.g. Driver 2 on .NET 8 for .NET 8.
+ * the other one from the unit of the group that stands in best for it, e.g. Driver 2 on .NET 8 for .NET 8. Units
+ * that stand in equally well, such as Driver 1 on .NET Standard 2.0 and on .NET Framework 4.6.2 for Driver 1, are
+ * all kept: the selection is limited to them.
  */
 export function narrowSelection(units: Unit[], selection: Selection): Selection {
-  let best: Unit | undefined
-  let bestRank = Infinity
-  for (const unit of units.filter(u => matches(u, selection))) {
-    const r = selection.framework ? rank(selection.framework, unit.framework) : 0
-    if (!best || r < bestRank) {
-      best = unit
-      bestRank = r
-    }
+  const ranked = units.filter(u => matches(u, selection)).map(unit => ({ unit, rank: selection.framework ? rank(selection.framework, unit.framework) : 0 }))
+  if (ranked.length === 0) {
+    return selection
   }
-  return best ? { framework: selection.framework || best.framework, value: selection.value || best.value } : selection
+  const bestRank = Math.min(...ranked.map(r => r.rank))
+  const best = ranked.filter(r => r.rank === bestRank).map(r => r.unit)
+  return best.length === 1
+    ? { framework: selection.framework || best[0].framework, value: selection.value || best[0].value }
+    : { ...selection, within: best }
 }
 
 /** Frameworks in the order a picker lists them: .NET, then .NET Standard, then .NET Framework, newest first. */
@@ -779,9 +785,14 @@ function frameworkNames(): Record<string, string> {
 
 /** Describes a selection in a banner or a badge, e.g. `EF Core 3.1, .NET Framework 4.6.2`. */
 function selectionLabel(selection: Selection, axis?: Axis): string {
-  const value = axis?.values.find(v => v.id === selection.value)?.label
-  const framework = selection.framework ? frameworkLabel(selection.framework, frameworkNames()) : undefined
-  return [value, framework].filter(s => s).join(', ')
+  // a selection limited to some units names each of their values and frameworks the pick leaves open
+  const within = selection.within || []
+  const values = selection.value ? [selection.value] : [...new Set(within.map(u => u.value).filter(v => v))]
+  const frameworks = selection.framework ? [selection.framework] : [...new Set(within.map(u => u.framework))]
+  return [
+    ...values.map(value => axis?.values.find(v => v.id === value)?.label),
+    ...frameworks.map(framework => frameworkLabel(framework, frameworkNames()))
+  ].filter(s => s).join(', ')
 }
 
 /**
@@ -798,7 +809,7 @@ export function applySelection(selection: Selection, axis?: Axis) {
   // the variants under "In other frameworks" that follow the content of an API, and those of them still shown
   const listed = new Set<Element>()
   const kept = new Set<Element>()
-  const whole: { entry: HTMLElement, block: HTMLElement, previous: HTMLElement }[] = []
+  const whole: { entry: HTMLElement, blocks: { block: HTMLElement, previous: HTMLElement }[] }[] = []
   // A copy an entry shows whole is the API as it is in the frameworks of its variant, so what the copy holds that
   // differs again, such as the values of an enum, is shown for the selection narrowed to the copy.
   const copySelections = new Map<Element, Selection>()
@@ -829,7 +840,16 @@ export function applySelection(selection: Selection, axis?: Axis) {
       // An entry lists what its variant differs in from the API's own content, which a variant shown in place hides:
       // the entry shows its variant whole instead.
       if (inPlace !== 0) {
-        whole.push({ entry: variants[i - 1], block: blocks[i], previous: blocks[i - 1] })
+        const { before, after } = companionsOf(container)
+        const copyOf = (c: Element) => {
+          const b = blocksOf(c)
+          // a companion has a copy for each variant, as the API's own content has
+          return b[i]?.dataset.appliesTo === blocks[i].dataset.appliesTo ? [{ block: b[i], previous: b[i - 1] }] : []
+        }
+        whole.push({
+          entry: variants[i - 1],
+          blocks: [...before.flatMap(copyOf), { block: blocks[i], previous: blocks[i - 1] }, ...after.flatMap(copyOf)]
+        })
         copySelections.set(blocks[i], narrowSelection(parseUnits(blocks[i].dataset.appliesTo), own))
       }
     }
@@ -957,7 +977,8 @@ function shownLine(units: Unit[], selection: Selection, axis: Axis | undefined, 
  * Content hidden otherwise, such as a tab not picked, is not the selection's.
  */
 export function isHiddenBySelection(element: Element): boolean {
-  return !!element.closest('.api-content[hidden], .api-variant[hidden], .api-variants-heading[hidden]')
+  // a copy an entry shows whole repeats the API's own headings, which the outline has once
+  return !!element.closest('.api-content[hidden], .api-variant[hidden], .api-variants-heading[hidden], .api-variant .api-content')
 }
 
 /** The badge of something that does not exist in the selection; smaller in a list than in a heading. */
@@ -985,19 +1006,45 @@ function blocksOf(container: Element): HTMLElement[] {
 // copies are on the page.
 let wholeCopies: { block: HTMLElement, previous: HTMLElement, hidden: HTMLElement[] }[] = []
 
-/** Shows the copy of a variant in its entry of "In other frameworks", below its label, in place of what it lists. */
-function showWholeCopy({ entry, block, previous }: { entry: HTMLElement, block: HTMLElement, previous: HTMLElement }) {
+/**
+ * Shows the copy of a variant in its entry of "In other frameworks", below its label, in place of what it lists: the
+ * copies of its companions with it, in the order of the page.
+ */
+function showWholeCopy({ entry, blocks }: { entry: HTMLElement, blocks: { block: HTMLElement, previous: HTMLElement }[] }) {
   const children = Array.from(entry.children) as HTMLElement[]
   const label = children.find(e => e.classList.contains('api-variant-label'))
   const hidden = children.filter(e => e !== label && !e.hidden)
   hidden.forEach(e => { e.hidden = true })
-  if (label) {
-    label.after(block)
-  } else {
-    entry.prepend(block)
+  let last: HTMLElement | undefined = label
+  blocks.forEach(({ block, previous }, i) => {
+    if (last) {
+      last.after(block)
+    } else {
+      entry.prepend(block)
+    }
+    last = block
+    block.hidden = false
+    wholeCopies.push({ block, previous, hidden: i === 0 ? hidden : [] })
+  })
+}
+
+/**
+ * The containers that hold more of the API whose content `container` holds, with a copy for each variant and no "In
+ * other frameworks" of their own: the declaration of an enum value, in the term before the description that the
+ * variants follow, and the see-also links of a type page, after the content of the type. An entry that shows the copy
+ * of a variant whole shows theirs with it.
+ */
+function companionsOf(container: Element): { before: Element[], after: Element[] } {
+  const contentsIn = (e: Element | null | undefined) => Array.from(e?.children || []).filter(c => c.classList.contains('api-contents'))
+  const term = container.parentElement?.tagName === 'DD' ? container.parentElement.previousElementSibling : null
+  const before = term?.tagName === 'DT' ? contentsIn(term) : []
+  // the content of a type follows its facts, and the banner of a selection that lacks it
+  let previous = container.previousElementSibling
+  while (previous?.classList.contains('applies-to-banner')) {
+    previous = previous.previousElementSibling
   }
-  block.hidden = false
-  wholeCopies.push({ block, previous, hidden })
+  const after = previous?.classList.contains('facts') ? contentsIn(container.parentElement).filter(isSeeAlsoContents) : []
+  return { before, after }
 }
 
 function putBackWholeCopies() {
