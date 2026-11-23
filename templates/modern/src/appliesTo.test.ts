@@ -5,9 +5,10 @@ import test from 'node:test'
 import assert from 'node:assert'
 import { TemplateResult } from 'lit-html'
 import {
-  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applySelection, appliesToPicker, articleEntries, axisKey, canReference, chooseGroup, chooseGroups, distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel,
-  getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection, isNavEntryShown, keepLinkSelection, memberElements, narrowSelection, parseUnits, rank, scrollToShownTarget, select, shownEntries,
-  shownTarget, sortFrameworks, unitsOf, validFramework, withSelectionCache
+  Axis, Selection, Toc, TocEntry, addHeadingAnchors, applyPrintSelection, applySelection, appliesToPicker, articleEntries, axisKey, canReference, chooseGroup, chooseGroups,
+  distinguishCopies, entryDisplay, entryHref, findPath, frameworkLabel, getChoices, getSelection, hashId, initAppliesTo, isAvailable, isEntryShown, isHiddenBySelection,
+  isNavEntryShown, keepLinkSelection, memberElements, narrowSelection, parseUnits, rank, scrollToShownTarget, select, shownEntries, shownTarget, sortFrameworks, unitsOf, validFramework,
+  withSelectionCache
 } from './appliesTo'
 import { installDom } from './fakeDom'
 
@@ -175,6 +176,11 @@ test('a group kept beside the one in place is shown for the selection narrowed t
   assert.ok(isAvailable(parseUnits('d1:net462'), d1Old))
   assert.ok(!isAvailable(parseUnits('d1:net8.0'), d1Old))
   assert.ok(isAvailable(parseUnits('net462'), d1Old))
+  // a copy within one narrowed to one unit is shown for that unit, with the ids of the axis of a PDF and the part
+  const part = parseUnits('d1:netstandard2.0 d1:net462')
+  assert.deepStrictEqual(
+    narrowSelection(parseUnits('d1:net462'), { value: 'd1', axisValues: ['d1', 'd2'], within: part, part }),
+    { framework: 'net462', value: 'd1', axisValues: ['d1', 'd2'], part })
 })
 
 test('frameworks in picker order', () => {
@@ -900,6 +906,57 @@ test('the see-also of a page that differs between frameworks is not part of the 
   assert.strictEqual(document.getElementById('seealso_variant1').closest('.applies-to-unavailable'), null)
 })
 
+// A type page as docfx writes it: the example of a member is its markdown as it is, headings included.
+const exampleHeadingsPage = `${site}<body><article>
+    <h1 id="Lib" data-uid="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 class="section" id="methods">Methods</h2>
+    <h3 id="Lib_Stop" data-uid="Lib.Stop" data-applies-to="net8.0">Stop</h3>
+    <h4 class="section" id="Lib_Stop_examples">Examples</h4>
+    <h2 id="usage">Usage</h2><p>Stop it.</p>
+    <h3 id="notes">Notes</h3><p>Only on .NET 8.</p>
+    <h3 id="Lib_Run" data-uid="Lib.Run" data-applies-to="net8.0 net462">Run</h3><p>Everywhere.</p>
+    <h2 id="seealso">See Also</h2><div class="seealso"><div>Lib</div></div>
+  </article></body>`
+
+test('a heading of a member\'s example does not end the member', () => {
+  const { document } = installDom(exampleHeadingsPage)
+  const ids = (id: string) => memberElements(document.getElementById(id) as unknown as Element).map(e => e.tagName + (e.id ? '#' + e.id : ''))
+
+  assert.deepStrictEqual(ids('Lib_Stop'), ['H3#Lib_Stop', 'H4#Lib_Stop_examples', 'H2#usage', 'P', 'H3#notes', 'P'])
+  // nor do the see-also links of the page belong to the last member
+  assert.deepStrictEqual(ids('Lib_Run'), ['H3#Lib_Run', 'P'])
+
+  // in print, the member goes whole, and the section keeps the member left
+  applySelection({ framework: 'net462' }, undefined, true)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+  assert.ok(hidden('Lib_Stop') && hidden('usage') && hidden('notes'))
+  assert.ok(!hidden('methods') && !hidden('Lib_Run') && !hidden('seealso'))
+
+  // nor do they when a variant has links of its own, which the page swaps in
+  const swapped = installDom(exampleHeadingsPage.replace('<h2 id="seealso">See Also</h2><div class="seealso"><div>Lib</div></div>',
+    '<div class="api-contents"><div class="api-content" data-applies-to="net8.0"><h2 id="seealso">See Also</h2></div>' +
+    '<div class="api-content" data-applies-to="net462" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2></div></div>')).document
+  assert.deepStrictEqual(memberElements(swapped.getElementById('Lib_Run') as unknown as Element).map(e => e.tagName), ['H3', 'P'])
+})
+
+test('in print, the see-also links of variants are not part of the last section', () => {
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib" data-uid="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 class="section" id="events">Events</h2>
+    <h3 id="Lib_Stopped" data-uid="Lib.Stopped" data-applies-to="net8.0">Stopped</h3><p>Only on .NET 8.</p>
+    <div class="api-contents" id="links">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="seealso">See Also</h2><div class="seealso"><div>Span</div></div></div>
+      <div class="api-content" data-applies-to="net462" data-search-ignore hidden><h2 id="seealso_variant1">See Also</h2><div class="seealso"><div>Array</div></div></div>
+    </div>
+  </article></body>`)
+  applySelection({ framework: 'net462' }, undefined, true)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+  // the section goes with its only member, the links of the type stay, as the selection has them
+  assert.ok(hidden('events') && hidden('Lib_Stopped'))
+  assert.ok(!hidden('links') && !hidden('seealso_variant1'))
+  assert.strictEqual(document.getElementById('links').closest('[data-applies-to-left-out]'), null)
+})
+
 test('a link to content hidden for the selection goes to the content shown', () => {
   installDom(page)
   applySelection({ framework: 'netstandard2.0' })
@@ -1382,4 +1439,256 @@ test('the dropdowns are named with what they pick', () => {
   assert.deepStrictEqual(names(appliesToPicker({ frameworks, axis: ef, key: 'ef-core' })), ['EF Core: All', 'Framework: .NET 8'])
   installDom(locs, 'https://example.org/docs/api/A.html?ef-core=ef3')
   assert.deepStrictEqual(names(appliesToPicker({ frameworks, axis: ef, key: 'ef-core' })), ['EF Core: EF Core 3.1', 'Framework: All frameworks'])
+})
+
+// An API of an axis whose own content is for EF Core 8; EF Core 3.1 builds for .NET Standard 2.0, and differently for
+// .NET Framework 4.6.2.
+const efPage = `${site}
+  <article>
+    <h1 id="Lib_Query" data-applies-to="ef8:net8.0 ef3:netstandard2.0 ef3:net462">Query</h1>
+    <div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="ef8:net8.0"><p id="own">EF Core 8</p></div>
+      <div class="api-content" data-applies-to="ef3:netstandard2.0" data-search-ignore hidden><p id="ef3">EF Core 3.1</p></div>
+      <div class="api-content" data-applies-to="ef3:net462" data-search-ignore hidden><p id="ef3net462">EF Core 3.1 on .NET Framework</p></div>
+    </div>
+    <h5 class="api-variants-heading">In other frameworks</h5>
+    <div class="api-variant" id="variant1" data-applies-to="ef3:netstandard2.0"></div>
+    <div class="api-variant" id="variant2" data-applies-to="ef3:net462"></div>
+  </article>`
+
+test('a value picked alone keeps what differs in the other frameworks of that value', () => {
+  const { document } = installDom(efPage)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+
+  applySelection({ value: 'ef3' })
+  // the content of EF Core 3.1 is shown in place, and its .NET Framework variant listed under it
+  assert.ok(hidden('own'))
+  assert.ok(!hidden('ef3'))
+  assert.ok(hidden('variant1'))
+  assert.ok(!hidden('variant2'))
+  assert.ok(!document.querySelector('.api-variants-heading').hidden)
+
+  // EF Core 8 has nothing in other frameworks
+  applySelection({ value: 'ef8' })
+  assert.ok(!hidden('own'))
+  assert.ok(hidden('variant1') && hidden('variant2'))
+  assert.ok(document.querySelector('.api-variants-heading').hidden)
+
+  // a framework picked shows its content only
+  applySelection({ value: 'ef3', framework: 'net462' })
+  assert.ok(!hidden('ef3net462'))
+  assert.ok(hidden('variant1') && hidden('variant2'))
+})
+
+test('a value of another axis says nothing about the page', () => {
+  installDom(efPage)
+  // a PDF of the driver `d1` over the API of two axes is told the values of the driver axis
+  const driver = { value: 'd1', axisValues: ['d1', 'd2'] }
+  assert.ok(isAvailable(parseUnits('ef8:net8.0'), driver))
+  assert.ok(!isAvailable(parseUnits('d2:net8.0'), driver))
+  assert.ok(isAvailable(parseUnits('d1:net8.0'), driver))
+})
+
+const printPage = `${site}
+  <body>
+    <article>
+      <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1>
+      <div class="facts"></div>
+      <dl class="typelist implements"><dt>Implements</dt><dd><div id="Implements_All">IAll</div><div id="Implements_Net8" data-applies-to="net8.0">INet8</div></dd></dl>
+      <dl class="typelist derived"><dt>Derived</dt><dd><div id="Derived_All">All</div><div id="Derived_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
+      <dl class="typelist inheritedMembers" id="inherited"><dt>Inherited Members</dt><dd><div id="Inherited_Net8" data-applies-to="net8.0">Net8</div></dd></dl>
+      <dl class="typelist extensionMethods" id="extensions"><dt>Extension Methods</dt><dd><div id="Extension_Net8" data-applies-to="net8.0">Ext.Twice()</div></dd></dl>
+      <h2 id="events">Events</h2>
+      <a id="Lib_Changed_" data-overload></a>
+      <h3 id="Lib_Changed" data-applies-to="net8.0">Changed</h3>
+      <p>Only on .NET 8.</p>
+      <h2 id="methods">Methods</h2>
+      <h3 id="Lib_Run" data-applies-to="net8.0 net462">Run</h3>
+      <p>Everywhere.</p>
+      <h3 id="Lib_Stop" data-applies-to="net8.0">Stop</h3>
+      <p>Only on .NET 8.</p>
+      <h3 id="classes">Classes</h3>
+      <dl class="jumplist" data-applies-to="net8.0 net462"><dt>Everywhere</dt></dl>
+      <h3 id="interfaces">Interfaces</h3>
+      <dl class="jumplist" data-applies-to="net8.0"><dt>IOnlyNet8</dt></dl>
+    </article>
+  </body>`
+
+test('in print, what does not exist in the selection is left out', () => {
+  const { document } = installDom(printPage)
+  const hidden = (id: string) => !!document.getElementById(id).closest('[hidden]')
+
+  applySelection({ framework: 'net462' }, undefined, true)
+  // members, and a section with none left
+  assert.ok(hidden('Lib_Changed') && hidden('events'))
+  assert.ok(!hidden('Lib_Run') && !hidden('methods'))
+  assert.ok(hidden('Lib_Stop'))
+  // the types of a namespace page, and a group of them with none left
+  assert.ok(!hidden('classes'))
+  assert.ok(hidden('interfaces'))
+  assert.ok(document.querySelectorAll('dl.jumplist')[1].hidden)
+  // the interfaces implemented, the classes derived, the members inherited and the extension methods, in other
+  // frameworks only, and a list with none left
+  assert.ok(!hidden('Implements_All') && hidden('Implements_Net8'))
+  assert.ok(!hidden('Derived_All') && hidden('Derived_Net8'))
+  assert.ok(hidden('Inherited_Net8') && hidden('inherited'))
+  assert.ok(hidden('Extension_Net8') && hidden('extensions'))
+  // what is left out is marked for `docfx pdf`, which makes the links to it text
+  assert.deepStrictEqual(
+    document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]').map(e => e.id),
+    ['Implements_Net8', 'Derived_Net8', 'inherited', 'Inherited_Net8', 'extensions', 'Extension_Net8', 'events', 'Lib_Changed_', 'Lib_Changed', 'Lib_Stop', 'interfaces'])
+  // nothing is marked, as nothing is left to mark
+  assert.deepStrictEqual(document.querySelectorAll('.applies-to-unavailable-badge, .applies-to-banner'), [])
+  assert.ok(!document.body.hasAttribute('data-applies-to-unavailable'))
+
+  // the page of an API that does not exist in the selection says so to `docfx pdf`
+  applySelection({ framework: 'netcoreapp1.0' }, undefined, true)
+  assert.ok(document.body.hasAttribute('data-applies-to-unavailable'))
+  assert.strictEqual(document.querySelector('.applies-to-banner'), null)
+})
+
+test('in print, an overload group goes with the last of its members', () => {
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>
+    <h2 id="methods">Methods</h2>
+    <h3 id="Lib_Run" data-applies-to="net8.0 net462">Run</h3><p>Everywhere.</p>
+    <a id="Lib_Retry_" data-overload></a><h3 id="Lib_Retry" data-applies-to="net8.0">Retry()</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Retry_" data-overload></a><h3 id="Lib_Retry_int" data-applies-to="net8.0">Retry(int)</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Do_" data-overload></a><h3 id="Lib_Do" data-applies-to="net8.0">Do()</h3><p>Only on .NET 8.</p>
+    <a id="Lib_Do_" data-overload></a><h3 id="Lib_Do_int" data-applies-to="net8.0 net462">Do(int)</h3><p>Everywhere.</p>
+  </article></body>`)
+
+  applySelection({ framework: 'net462' }, undefined, true)
+  // which a link to the group is text for, as for a member left out
+  const anchors = document.querySelectorAll('a[data-overload]')
+  assert.deepStrictEqual(anchors.map(a => `${a.id} ${a.hasAttribute('data-applies-to-left-out')}`),
+    ['Lib_Retry_ true', 'Lib_Retry_ true', 'Lib_Do_ false', 'Lib_Do_ false'])
+  assert.ok(!document.getElementById('methods').hidden)
+})
+
+test('in print, a section hidden for the copy shown in its place is not left out', () => {
+  // the enum is described differently on .NET Standard 2.0, and Fast is on .NET 8 only
+  const { document } = installDom(`${site}<body><article>
+    <h1 id="Lib_Mode" data-applies-to="net8.0 netstandard2.0">Mode</h1><div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="fields">Fields</h2><dl class="parameters">
+        <dt id="Lib_Mode_Plain" data-applies-to="net8.0 netstandard2.0"><code>Plain = 0</code></dt><dd></dd>
+      </dl></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="fields_variant1">Fields</h2><dl class="parameters">
+        <dt id="Lib_Mode_Plain_variant1" data-applies-to="net8.0 netstandard2.0"><code>Plain = 0</code></dt><dd></dd>
+      </dl></div>
+    </div>
+  </article></body>`)
+
+  applySelection({ framework: 'netstandard2.0' }, undefined, true)
+  // the values are printed, in the copy, so the links to them are kept
+  assert.ok(!document.getElementById('Lib_Mode_Plain_variant1').closest('[hidden]'))
+  assert.deepStrictEqual(document.querySelectorAll('[data-applies-to-left-out][id], [data-applies-to-left-out] [id]'), [])
+})
+
+test('in print, the value of another axis says nothing about a page whose axis has the same ids', () => {
+  // EF Core has ef8 and ef9, the drivers have ef8 too; a PDF of ef9 prints a page of the drivers
+  const markup = `${site}<body><article>
+    <h1 id="Driver" data-applies-to="ef8:net8.0 x:net8.0">Driver</h1><div class="facts"></div>
+    <h3 id="Driver_Ef8" data-applies-to="ef8:net8.0">Ef8</h3><p>ef8 of the drivers</p>
+  </article></body>`
+  const print = (otherAxisPages?: string[]) => {
+    const { document, window } = installDom(markup, 'https://example.org/docs/api/Driver.html')
+    const docfxAppliesTo: Window['docfxAppliesTo'] = { value: 'ef9', axisValues: ['ef8', 'ef9'], otherAxisPages }
+    Object.assign(window, { docfxAppliesTo })
+    applyPrintSelection()
+    // which `docfx pdf` reads, to warn about a template that does not
+    assert.ok(docfxAppliesTo.applied)
+    return !!document.getElementById('Driver_Ef8').closest('[hidden]')
+  }
+
+  assert.ok(!print(['/docs/api/Driver.html']))
+  // on a page `docfx pdf` does not know the axis of, the values of the axes that have the value count
+  assert.ok(print(undefined))
+})
+
+test('in print, a framework stands for the build of the part of the docs a project targeting it gets', () => {
+  // a member only the .NET Standard 2.0 build of a part for .NET 8 and .NET Standard 2.0 has
+  const markup = `${site}<body><article>
+    <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1><div class="facts"></div>
+    <h3 id="Lib_Shared_Legacy" data-applies-to="netstandard2.0">Legacy</h3><p>only on .NET Standard 2.0</p>
+  </article></body>`
+  const print = (docfxAppliesTo: Window['docfxAppliesTo']) => {
+    const { document, window } = installDom(markup, 'https://example.org/docs/api/Lib.Shared.html')
+    Object.assign(window, { docfxAppliesTo })
+    applyPrintSelection()
+    return !!document.getElementById('Lib_Shared_Legacy').closest('[hidden]')
+  }
+
+  assert.ok(print({ framework: 'net10.0', parts: [['net8.0', 'netstandard2.0']] }))
+  // in a part built for .NET Standard 2.0 only, it is that build
+  assert.ok(!print({ framework: 'net10.0', parts: [['netstandard2.0'], ['net8.0', 'netstandard2.0']], pageParts: { '/docs/api/Lib.Shared.html': 0 } }))
+  assert.ok(print({ framework: 'net10.0', parts: [['netstandard2.0'], ['net8.0', 'netstandard2.0']], pageParts: { '/docs/api/Lib.Shared.html': 1 } }))
+  // a page `docfx pdf` does not name the part of: what its own APIs are documented for
+  assert.ok(print({ framework: 'net8.0' }))
+})
+
+test('in print, a page that fails to apply the selection says why, and goes on', () => {
+  const { document, window } = installDom(`${site}<body><article><h1 id="A" data-applies-to="net8.0">A</h1></article></body>`)
+  const docfxAppliesTo: Window['docfxAppliesTo'] = { framework: 'net8.0' }
+  Object.assign(window, { docfxAppliesTo })
+  Object.assign(document, { querySelectorAll: () => { throw new Error('broken page') } })
+  const error = console.error
+  console.error = () => { }
+  try {
+    // which would otherwise stop the page short of ready, and `docfx pdf` wait until it times out
+    applyPrintSelection()
+  } finally {
+    console.error = error
+  }
+  assert.ok(!docfxAppliesTo.applied)
+  assert.strictEqual(docfxAppliesTo.error, 'broken page')
+})
+
+test('in print, the copy shown in place of the content of an API has the ids of its headings to itself', () => {
+  // the remarks of .NET Standard 2.0 have a heading of their own, which markdown names as that of the API's own
+  const { document, window } = installDom(`${site}<body><article>
+    <h1 id="Lib_Size" data-applies-to="net8.0 netstandard2.0">Size</h1><div class="facts"></div>
+    <div class="api-contents">
+      <div class="api-content" data-applies-to="net8.0"><h2 id="example">Example</h2></div>
+      <div class="api-content" data-applies-to="netstandard2.0" data-search-ignore hidden><h2 id="example">Example</h2></div>
+    </div>
+  </article></body>`)
+  Object.assign(window, { docfxAppliesTo: { framework: 'netstandard2.0' } })
+  applyPrintSelection()
+
+  const printed = document.querySelectorAll('h2').filter(h => !h.closest('[hidden]'))
+  assert.deepStrictEqual(printed.map(h => h.id), ['example_variant1'])
+  assert.ok(document.getElementById('example').closest('[hidden]'))
+})
+
+test('in print, a section keeps what a hidden tab has', () => {
+  // the second tab of a tab group is hidden until picked, and has terms of its own
+  const tabs = `<h2 id="install">Install</h2>
+    <div class="tabGroup"><section id="tab1"><p>dotnet add package</p></section><section id="tab2" hidden="hidden"><dl><dt>Term</dt><dd>x</dd></dl></section></div>`
+  const shown = (document: { getElementById: (id: string) => { closest: (s: string) => unknown } }) =>
+    ['install', 'tab1'].every(id => !document.getElementById(id).closest('[hidden]'))
+
+  // an article in an API PDF
+  const article = installDom(`${site}<body><article><h1 id="Guide">Guide</h1>${tabs}</article></body>`).document
+  applySelection({ framework: 'net462' }, undefined, true)
+  assert.ok(shown(article))
+
+  // the remarks of an API page
+  const api = installDom(`${site}<body><article><h1 id="Lib" data-applies-to="net8.0 net462">Lib</h1><div class="facts"></div>${tabs}</article></body>`).document
+  applySelection({ framework: 'net462' }, undefined, true)
+  assert.ok(shown(api))
+})
+
+test('a class derived, or a member inherited, in other frameworks only is dimmed on the page', () => {
+  const { document } = installDom(printPage)
+  const dimmed = (id: string) => document.getElementById(id).classList.contains('applies-to-unavailable')
+
+  applySelection({ framework: 'net462' })
+  assert.ok(!dimmed('Derived_All') && dimmed('Derived_Net8') && dimmed('Inherited_Net8'))
+  assert.ok(!document.getElementById('inherited').hidden)
+
+  applySelection({})
+  assert.ok(!dimmed('Derived_Net8') && !dimmed('Inherited_Net8'))
 })

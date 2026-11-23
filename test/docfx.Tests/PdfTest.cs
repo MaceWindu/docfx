@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
+using Docfx.Common;
 using Docfx.Pdf;
 using Docfx.Tests.Common;
 using Microsoft.AspNetCore.Builder;
@@ -241,6 +243,173 @@ public class PdfTest : TestBase
         // the tab that is not selected is hidden, and not printed either
         Assert.DoesNotContain("On Linux", toc);
         Assert.All(pdf.GetPages(), page => Assert.DoesNotContain("On Linux", page.Text));
+    }
+
+    [Fact]
+    public async Task APdfOfOneFrameworkLeavesOutWhatItLacksAndWarnsAboutPagesThatDoNotApplyIt()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "resource": [{ "files": [ "*.html", "public/*.css" ] }],
+                    "template": ["default"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("toc.yml",
+            """
+            pdf: true
+            pdfFramework: net462
+            items:
+            - name: Everywhere
+              href: everywhere.md
+              appliesTo: [ { frameworks: [ net8.0, net462 ] } ]
+            - name: OnlyNet8
+              href: only-net8.md
+              appliesTo: [ { frameworks: [ net8.0 ] } ]
+            - name: Unlisted
+              href: unlisted.html
+            - name: Static
+              href: static.html
+            """, directory);
+        CreateFile("public/main.css", "", directory);
+        CreateFile("public/docfx.min.css", "", directory);
+        // pages of a template that does not apply the selection
+        CreateFile("everywhere.md", "# Everywhere\n\nEverywhere body", directory);
+        CreateFile("only-net8.md", "# OnlyNet8\n\nOnly net8 body", directory);
+        // a page that does, as the modern template marks it, for an API the selection does not have
+        CreateFile("unlisted.html", Html("Unlisted body",
+            "<script>window.docfxAppliesTo.applied = true; document.body.setAttribute('data-applies-to-unavailable', '')</script>"), directory);
+        // and one copied as it is, which has no template
+        CreateFile("static.html", Html("Static body", ""), directory);
+
+        await Docset.Build(configPath);
+        // Docset.Pdf disposes every listener when it ends, which a TestListenerScope cannot outlive
+        var collector = new WarningCollector();
+        Logger.RegisterListener(collector);
+        await Docset.Pdf(configPath);
+
+        using var pdf = PdfDocument.Open(Path.Combine(directory, "_site", "toc.pdf"));
+        var text = string.Concat(pdf.GetPages().Select(page => page.Text));
+        Assert.Contains("Everywhere body", text);
+        Assert.Contains("Unlisted body", text);
+        Assert.Contains("Static body", text);
+        Assert.DoesNotContain("Only net8 body", text);
+
+        var warnings = collector.Messages;
+        Assert.Single(warnings, message => message.Contains("'/everywhere.html'") && message.Contains("only the 'modern' template"));
+        Assert.Single(warnings, message => message.Contains("'/unlisted.html'") && message.Contains("does not exist in its 'pdfFramework'"));
+        Assert.DoesNotContain(warnings, message => message.Contains("'/static.html'"));
+
+        static string Html(string body, string script) =>
+            $$"""<!DOCTYPE html><html><head><link rel="stylesheet" href="public/main.css"></head><body>{{body}}{{script}}</body></html>""";
+    }
+
+    [Fact]
+    public async Task TheModernTemplatePrintsAPageForTheFrameworkOfItsPdf()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "template": ["default", "modern"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("toc.yml",
+            """
+            pdf: true
+            pdfFramework: net462
+            items:
+            - name: Members
+              href: members.md
+              appliesTo: [ { frameworks: [ net8.0, net462 ] } ]
+            - name: Links
+              href: links.md
+            """, directory);
+        // members as an API page marks them
+        CreateFile("members.md",
+            """
+            # Members
+
+            [Within to the member gone](#only-net8)
+
+            [Within to the member staying](#everywhere)
+
+            <h3 id="only-net8" data-applies-to="net8.0">OnlyNet8Member</h3>
+
+            Only net8 member body
+
+            <h3 id="everywhere" data-applies-to="net8.0 net462">EverywhereMember</h3>
+
+            Everywhere member body
+            """, directory);
+        CreateFile("links.md",
+            """
+            # Links
+
+            [Link to the member left out](members.md#only-net8)
+
+            [Link to the member kept](members.md#everywhere)
+            """, directory);
+
+        await Docset.Build(configPath);
+        var collector = new WarningCollector();
+        Logger.RegisterListener(collector);
+        await Docset.Pdf(configPath);
+
+        using var pdf = PdfDocument.Open(Path.Combine(directory, "_site", "toc.pdf"));
+        var text = string.Concat(pdf.GetPages().Select(page => page.Text));
+        Assert.Contains("Everywhere member body", text);
+        Assert.DoesNotContain("Only net8 member body", text);
+        Assert.DoesNotContain("OnlyNet8Member", text);
+        Assert.DoesNotContain(collector.Messages, message => message.Contains("'pdfFramework'"));
+
+        // a link to the member kept goes to it; one to the member left out stays as text, as a link to a page left out
+        var linksPage = pdf.GetPages().Single(page => page.Text.Contains("Link to the member kept"));
+        var membersPage = pdf.GetPages().Single(page => page.Text.Contains("Everywhere member body"));
+        PdfAction LinkOf(Page page, string words)
+        {
+            var word = page.GetWords().First(w => w.Text == words);
+            var center = word.BoundingBox.Centroid;
+            return page.GetAnnotations().SingleOrDefault(a =>
+                a.Rectangle.Left <= center.X && center.X <= a.Rectangle.Right && a.Rectangle.Bottom <= center.Y && center.Y <= a.Rectangle.Top)?.Action;
+        }
+
+        var kept = Assert.IsType<GoToAction>(LinkOf(linksPage, "kept"));
+        Assert.Equal(membersPage.Number, kept.Destination.PageNumber);
+        Assert.NotEqual(membersPage.MediaBox.Bounds.Top, kept.Destination.Coordinates.Top);
+        Assert.False(LinkOf(linksPage, "out") is GoToAction);
+
+        // so does one on the page itself, which Chromium would print as a link to a destination the page has none of
+        Assert.Equal(membersPage.Number, Assert.IsType<GoToAction>(LinkOf(membersPage, "staying")).Destination.PageNumber);
+        Assert.False(LinkOf(membersPage, "gone") is GoToAction);
+    }
+
+    private sealed class WarningCollector : ILoggerListener
+    {
+        private readonly ConcurrentQueue<string> _messages = new();
+
+        public List<string> Messages => [.. _messages];
+
+        public void WriteLine(ILogItem item)
+        {
+            if (item.LogLevel == Docfx.Common.LogLevel.Warning)
+            {
+                _messages.Enqueue(item.Message);
+            }
+        }
+
+        public void Flush() { }
+
+        public void Dispose() { }
     }
 
     [Fact]

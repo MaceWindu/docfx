@@ -1011,6 +1011,93 @@ items:
         Assert.Contains(listener.Items, item => item.Message.StartsWith("'axis' of table of contents 'toc.yml' holds False unquoted, which YAML reads as a boolean, so it is used as 'false'"));
     }
 
+    [Fact]
+    public void APdfFrameworkOrAxisValueThatYamlReadsAsANumberIsUsedAsTextAndWarns()
+    {
+        var content = """
+            pdf: true
+            pdfAxisValue: 3.10
+            pdfFramework: net8.0
+            items:
+            - name: EF Core 10
+              pdfAxisValue: 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.Equal("3.1", model.Metadata["pdfAxisValue"]);
+        Assert.Equal("net8.0", model.Metadata["pdfFramework"]);
+        // only the root's are options of its PDF: one below it has no effect, which a warning would not say
+        Assert.IsNotType<string>(model.Items[0].Metadata["pdfAxisValue"]);
+        var warning = Assert.Single(listener.Items);
+        Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.10 unquoted, which YAML reads as a number, so it is used as '3.1'", warning.Message);
+    }
+
+    [Fact]
+    public void APdfOptionOfATableOfContentsWithoutPdfDoesNotWarn()
+    {
+        // such as the API's own table of contents, which that of the PDF includes: its options have no PDF to apply to
+        var content = """
+            pdfAxisValue: 3.10
+            items:
+            - name: EF Core 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.IsNotType<string>(model.Metadata["pdfAxisValue"]);
+        Assert.Empty(listener.Items);
+    }
+
+    [Theory]
+    [InlineData("pdfFramework", "true")]
+    [InlineData("pdfAxisValue", "False")]
+    public void APdfFrameworkOrAxisValueThatYamlReadsAsABooleanIsUsedAsTextAndWarns(string key, string written)
+    {
+        var content = $"""
+            pdf: true
+            {key}: {written}
+            items:
+            - name: EF Core 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.Equal(written.ToLowerInvariant(), model.Metadata[key]);
+        var warning = Assert.Single(listener.Items);
+        Assert.StartsWith($"'{key}' of table of contents 'toc.yml' holds {written} unquoted, which YAML reads as a boolean, so it is used as '{written.ToLowerInvariant()}'", warning.Message);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("# comment only\n")]

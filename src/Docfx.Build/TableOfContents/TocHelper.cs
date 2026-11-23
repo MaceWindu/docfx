@@ -85,9 +85,12 @@ public static class TocHelper
     }
 
     /// <summary>
-    /// The keys whose values name frameworks and axis values by id, which pages compare as text.
+    /// The keys whose values name frameworks and axis values by id, which pages and PDFs compare as text.
     /// </summary>
-    internal static readonly string[] IdKeys = ["appliesTo", "axis"];
+    internal static readonly string[] IdKeys = ["appliesTo", "axis", "pdfFramework", "pdfAxisValue"];
+
+    // The options of the PDF of a table of contents, which only its root has, with `pdf: true`: `docfx pdf` reads no others.
+    private static readonly string[] RootIdKeys = ["pdfFramework", "pdfAxisValue"];
 
     /// <summary>
     /// YAML reads an unquoted id that looks like a number as one, so a table of contents written by hand that
@@ -102,7 +105,10 @@ public static class TocHelper
         // holds, by which the file is read again for what it says, only when there is such a value.
         var unquoted = new List<(string Key, object Value, string Text, List<object> Path)>();
         var path = new List<object>();
-        Visit(toc);
+        // The options of a PDF are read on the root of a table of contents with `pdf: true` only: one without it, such
+        // as the API's own, included in the table of contents of the PDF, has no PDF of its own to read them for.
+        var hasPdf = toc.Metadata.TryGetValue("pdf", out var pdf) && pdf is true;
+        Visit(toc, hasPdf);
         if (unquoted.Count == 0)
         {
             return;
@@ -132,11 +138,11 @@ public static class TocHelper
             }
         }
 
-        void Visit(TocItemViewModel item)
+        void Visit(TocItemViewModel item, bool readsPdfOptions)
         {
             foreach (var key in IdKeys)
             {
-                if (item.Metadata.TryGetValue(key, out var value) && value is not null)
+                if ((readsPdfOptions || !RootIdKeys.Contains(key)) && item.Metadata.TryGetValue(key, out var value) && value is not null)
                 {
                     path.Add(key);
                     item.Metadata[key] = AsText(value, key);
@@ -149,7 +155,7 @@ public static class TocHelper
                 if (item.Items[i] is { } child)
                 {
                     path.Add(i);
-                    Visit(child);
+                    Visit(child, readsPdfOptions: false);
                     path.RemoveAt(path.Count - 1);
                 }
             }

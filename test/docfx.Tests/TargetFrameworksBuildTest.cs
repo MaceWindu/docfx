@@ -339,7 +339,8 @@ public class TargetFrameworksBuildTest : TestBase
     [Trait("Related", "docfx")]
     public async Task ANamespacePageNamesTheFrameworksOfItsNamespace()
     {
-        // so that the picker says so on a namespace page whose namespace does not exist in the selection
+        // so that the picker says so on a namespace page whose namespace does not exist in the selection, and a PDF of
+        // one framework warns about a namespace page it prints although none of its types exists in it
         var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
 
         Assert.Matches("<h1 id=\"Lib\" data-uid=\"Lib\" class=\"text-break\" data-applies-to=\"net8.0 netstandard2.0\">", await Page(site, "Lib.html"));
