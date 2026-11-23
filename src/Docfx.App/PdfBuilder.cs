@@ -257,8 +257,21 @@ static class PdfBuilder
             try
             {
                 Uri beforeUri = new(page.Url);
-                var response = await page.GotoAsync(url.ToString(), new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-                if (response?.Status is 404)
+                IResponse? response = null;
+                try
+                {
+                    response = await page.GotoAsync(url.ToString(), new() { WaitUntil = WaitUntilState.DOMContentLoaded });
+                }
+                catch (TimeoutException)
+                {
+                    // A page whose own script keeps it busy before its content has loaded is treated as one that
+                    // times out after: what it shows by then is printed, or it is given up on if it does not answer,
+                    // rather than stopping every PDF.
+                    timedOut = true;
+                    Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
+                }
+
+                if (!timedOut && response?.Status is 404)
                     return (null, headings);
 
                 bool isSameUrlNavigation = response == null && beforeUri == url;
@@ -266,7 +279,11 @@ static class PdfBuilder
                     && beforeUri.GetLeftPart(UriPartial.Path) == url.GetLeftPart(UriPartial.Path)
                     && beforeUri.Fragment != url.Fragment;
 
-                if (isSameUrlNavigation)
+                if (timedOut)
+                {
+                    // the navigation has no response to check
+                }
+                else if (isSameUrlNavigation)
                 {
                     // Specified page content is already loaded.
                 }

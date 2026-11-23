@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics;
 using Docfx.Pdf;
 using Docfx.Tests.Common;
 using UglyToad.PdfPig;
@@ -27,6 +28,58 @@ public class PdfTest : TestBase
 
         Assert.Equal((true, "state"), await PdfBuilder.WaitOrGiveUp(Task.FromResult("state"), TimeSpan.FromMilliseconds(10), CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(() => PdfBuilder.WaitOrGiveUp(Task.FromException<string>(new InvalidOperationException()), TimeSpan.FromSeconds(1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task APageBusyBeforeItsContentLoadedDoesNotStopThePdf()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "template": ["default"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("toc.yml",
+            """
+            pdf: true
+            items:
+            - name: Busy
+              href: busy.md
+            - name: Calm
+              href: calm.md
+            """, directory);
+        // keeps the page busy before its content has loaded, for far longer than the timeout
+        CreateFile("busy.md",
+            """
+            # Busy
+
+            <script>const end = Date.now() + 60000; while (Date.now() < end) { }</script>
+            """, directory);
+        CreateFile("calm.md", "# Calm page", directory);
+
+        await Docset.Build(configPath);
+
+        var timeout = Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT");
+        Environment.SetEnvironmentVariable("DOCFX_PDF_TIMEOUT", "2000");
+        try
+        {
+            var started = Stopwatch.StartNew();
+            await Docset.Pdf(configPath);
+
+            // the busy page is given up on after the timeout, and the other pages are printed
+            Assert.True(started.Elapsed < TimeSpan.FromSeconds(40), $"took {started.Elapsed}");
+            using var pdf = PdfDocument.Open(Path.Combine(directory, "_site", "toc.pdf"));
+            Assert.Contains(pdf.GetPages(), page => page.Text.Contains("Calm page"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOCFX_PDF_TIMEOUT", timeout);
+        }
     }
 
     [Theory]
