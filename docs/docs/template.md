@@ -62,6 +62,7 @@ Name         | Type    | Description
 `_appFaviconPath`       | string  | Favicon URL path.
 `_enableSearch`         | bool    | Whether to show the search box.
 `_enableNewTab`         | bool    | Whether to open external links in a new tab.
+`_enableApiImplementingTypes` | bool | Whether the page of an interface lists the types that implement it.
 `_noindex`              | bool  | Whether to include in search results
 `_disableContribution`  | bool    | Whether to show the _"Improve this Doc"_ and _"View Source"_ buttons.
 `_gitContribute`        | object  | Defines the `repo` and `branch` property of git links.

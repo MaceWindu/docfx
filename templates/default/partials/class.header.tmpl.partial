@@ -15,6 +15,14 @@
   {{/derivedClasses}}
 </div>
 {{/inClass}}
+{{#showImplementingTypes}}
+<div class="derivedClasses">
+  <h5>{{__global.derived}}</h5>
+  {{#derivedClasses}}
+  <div>{{{specName.0.value}}}</div>
+  {{/derivedClasses}}
+</div>
+{{/showImplementingTypes}}
 {{#implements.0}}
 <div class="implements">
   <h5>{{__global.implements}}</h5>
