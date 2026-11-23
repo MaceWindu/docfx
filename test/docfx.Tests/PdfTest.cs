@@ -3,6 +3,11 @@
 
 using Docfx.Pdf;
 using Docfx.Tests.Common;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Playwright;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Actions;
 using UglyToad.PdfPig.Content;
@@ -236,6 +241,56 @@ public class PdfTest : TestBase
         // the tab that is not selected is hidden, and not printed either
         Assert.DoesNotContain("On Linux", toc);
         Assert.All(pdf.GetPages(), page => Assert.DoesNotContain("On Linux", page.Text));
+    }
+
+    [Fact]
+    public async Task LoadsPagesFromAPortChromiumRestricts()
+    {
+        await using var server = await ServeOnRestrictedPort();
+        var url = server.Urls.First();
+
+        PlaywrightHelper.EnsurePlaywrightNodeJsPath();
+        Microsoft.Playwright.Program.Main(["install", "chromium", "--only-shell"]);
+        using var playwright = await Playwright.CreateAsync();
+
+        await using (var browser = await playwright.Chromium.LaunchAsync())
+        {
+            var page = await browser.NewPageAsync();
+            var error = await Assert.ThrowsAsync<PlaywrightException>(() => page.GotoAsync(url));
+            Assert.Contains("ERR_UNSAFE_PORT", error.Message);
+        }
+
+        await using (var browser = await playwright.Chromium.LaunchAsync(new() { Args = PdfBuilder.GetBrowserArgs(new(url)) }))
+        {
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(url);
+            Assert.Equal("Served", await page.TextContentAsync("body"));
+        }
+
+        static async Task<WebApplication> ServeOnRestrictedPort()
+        {
+            foreach (var port in new[] { 1723, 6000, 6665, 10080, 5060 })
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.Logging.ClearProviders();
+                builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+                var app = builder.Build();
+                app.MapGet("/", () => Results.Content("<html><body>Served</body></html>", "text/html"));
+                try
+                {
+                    await app.StartAsync();
+                    return app;
+                }
+                catch (IOException)
+                {
+                    // the port is taken on this machine: another restricted one shows the same
+                    await app.DisposeAsync();
+                }
+            }
+
+            Assert.Skip("Every restricted port tried is taken.");
+            return null;
+        }
     }
 
     private static void AssertPageDestination(PdfDocument pdf, ExplicitDestination destination, int pageNumber)
