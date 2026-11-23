@@ -150,22 +150,34 @@ To troubleshoot MSBuild load problems, run `docfx metadata --logLevel verbose` t
 
 Docfx build the project using `Release` config by default, additional MSBuild properties can be specified with `properties`.
 
-If your project targets multiple target frameworks, docfx internally builds each target framework of the project. Try specify the `TargetFramework` MSBuild property to speed up project build:
+### Projects that target multiple frameworks
+
+When a project targets multiple frameworks, docfx loads every one of them but documents only one: the first framework in `TargetFrameworks`. Use [`targetFramework`](../reference/docfx-json-reference.md#targetframework) to choose another:
 
 ```json
 {
-  "metadata": {
-    "src": [{
-      "files": ["**/bin/Release/**.dll"],
-      "src": "../"
-    }],
-    "dest": "api",
-    "properties": {
-      "TargetFramework": "net8.0"
+  "metadata": [
+    {
+      "src": [{
+        "files": ["src/MyLib/MyLib.csproj"],
+        "src": "../"
+      }],
+      "dest": "api",
+      "targetFramework": "net8.0"
     }
-  },
+  ]
 }
 ```
+
+`targetFramework` picks a framework among the ones the project was loaded with. The projects it references are left alone, and each one is built for the framework MSBuild resolves for that reference, exactly as in a normal build.
+
+A project that targets a single framework is matched by the `TargetFramework` MSBuild loads it for.
+
+If a project listed in `src` does not target the requested framework, or MSBuild cannot evaluate it, docfx logs a `TargetFrameworkNotFound` warning and documents the framework the project selects by default. For the projects of a solution that is logged as information, and the warning is logged once per solution none of whose projects is known to target the framework, unless an earlier solution already reported all of them; see [`targetFramework`](../reference/docfx-json-reference.md#targetframework).
+
+The `TargetFramework` MSBuild property in [`properties`](../reference/docfx-json-reference.md#properties) documents another framework too, and loads only that one, which is faster. MSBuild applies a global property to every project it loads, though, including the projects the documented ones reference. A project that references a `netstandard2.0` library then loads that library for `net8.0` as well, which no longer matches the reference MSBuild resolved for it: docfx logs `Found project reference without a matching metadata reference` and `Unresolved metadata reference removed from project`, and drops the reference, so links to the library's types are lost. A library that cannot build for that framework fails to load. To keep a referenced project at its own framework, add `TreatAsLocalProperty="TargetFramework"` to its `<Project>` element.
+
+`properties` and `targetFramework` have no effect on assemblies: when the input is `.dll` files, list the ones built for the framework to document.
 
 ## Generate from source code
 

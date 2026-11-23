@@ -4,6 +4,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -85,6 +86,31 @@ static class PdfBuilder
         return CreatePdf(outputFolder, cancellationToken);
     }
 
+    /// <summary>
+    /// What <paramref name="task"/> gives, or <c>(false, null)</c> when it does not finish within
+    /// <paramref name="timeout"/>, which it is given up on after.
+    /// </summary>
+    internal static async Task<(bool Answered, T? Answer)> WaitOrGiveUp<T>(Task<T> task, TimeSpan timeout, CancellationToken cancellationToken) where T : class
+    {
+        Observe(task);
+        try
+        {
+            return (true, await task.WaitAsync(timeout, cancellationToken));
+        }
+        catch (TimeoutException)
+        {
+            return (false, null);
+        }
+    }
+
+    // A call given up on can still fail once its page is closed, which says nothing of the PDF.
+    private static void Observe(Task task)
+    {
+        _ = task.ContinueWith(
+            static task => _ = task.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
     public static async Task CreatePdf(string outputFolder, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -125,13 +151,18 @@ static class PdfBuilder
         baseUrl = new Uri(app.Urls.First());
 
         using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new() { Args = GetBrowserArgs(baseUrl) });
         await using var context = await browser.NewContextAsync(new() { UserAgent = "docfx/pdf" });
 
-        if (Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT") is { } timeout)
+        var timeout = Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT") is { } value
+            ? int.Parse(value, CultureInfo.InvariantCulture)
+            : (int?)null;
+        if (timeout is { } defaultTimeout)
         {
-            context.SetDefaultTimeout(int.Parse(timeout));
+            context.SetDefaultTimeout(defaultTimeout);
         }
+        // as long as Playwright waits by default, for what it waits for without a timeout; 0 disables it, as for Playwright
+        var scriptTimeout = (timeout ?? 30_000) is > 0 and var ms ? TimeSpan.FromMilliseconds(ms) : Timeout.InfiniteTimeSpan;
 
         using var pageLimiter = new SemaphoreSlim(Environment.ProcessorCount, Environment.ProcessorCount);
         var pagePool = new ConcurrentBag<IPage>();
@@ -219,6 +250,9 @@ static class PdfBuilder
             await pageLimiter.WaitAsync(cancellationToken);
             var page = pagePool.TryTake(out var pooled) ? pooled : await context.NewPageAsync();
             var headings = new List<HeadingInfo>();
+            var timedOut = false;
+            // whether a page that timed out loading still answers what it is asked
+            var responsive = true;
 
             try
             {
@@ -256,6 +290,7 @@ static class PdfBuilder
                     }
                     catch (TimeoutException)
                     {
+                        timedOut = true;
                         Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
                     }
                 }
@@ -263,21 +298,52 @@ static class PdfBuilder
                 // Extract headings from the page if needed
                 if (outline.pdfTocSource == "headings" && headingDepth > 0 && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage))
                 {
-                    headings = await ExtractHeadingsFromPage(page, url, headingDepth);
+                    headings = await Ask(() => ExtractHeadingsFromPage(page, url, headingDepth)) ?? [];
                 }
 
-                var bytes = await page.PdfAsync(new PagePdfOptions
+                var bytes = await Ask(() => page.PdfAsync(new PagePdfOptions
                 {
                     PreferCSSPageSize = true,
                     PrintBackground = outline.pdfPrintBackground,
-                });
+                }));
 
+                if (!responsive)
+                {
+                    Logger.LogWarning($"Page does not respond after it timed out loading, and is left out of the PDF: {url}");
+                    return (null, new List<HeadingInfo>());
+                }
                 return (bytes, headings);
             }
             finally
             {
-                pagePool.Add(page);
+                if (responsive)
+                {
+                    pagePool.Add(page);
+                }
+                else
+                {
+                    // asked anything more, it would not answer either, so it is not reused
+                    Observe(page.CloseAsync());
+                }
                 pageLimiter.Release();
+            }
+
+            // After a page timed out loading, what it is asked next is given up on after the timeout too: Playwright
+            // waits for the result of a script and the PDF of a page without a timeout, and a page whose own script
+            // keeps it busy would hold the PDF up for good. Given up on once, it is asked nothing more.
+            async Task<T?> Ask<T>(Func<Task<T>> call) where T : class
+            {
+                if (!timedOut)
+                {
+                    return await call();
+                }
+                if (!responsive)
+                {
+                    return null;
+                }
+                var (answered, answer) = await WaitOrGiveUp(call(), scriptTimeout, cancellationToken);
+                responsive = answered;
+                return answer;
             }
         }
 
@@ -288,13 +354,17 @@ static class PdfBuilder
 
             try
             {
-                var elements = await page.QuerySelectorAllAsync(selector);
+                // One call per page: a call per heading costs a round trip to the browser each, which adds up on
+                // the thousands of headings of an API PDF. Content the page hides, such as a tab that is not
+                // selected, is not printed, so its headings are left out.
+                var elements = await page.EvaluateAsync<string[][]>(
+                    "selector => Array.from(document.querySelectorAll(selector)).filter(e => !e.closest('[hidden]')).map(e => [e.tagName, e.getAttribute('id') || '', e.innerText])",
+                    selector);
                 foreach (var element in elements)
                 {
-                    var tagName = await element.EvaluateAsync<string>("e => e.tagName");
-                    var level = int.Parse(tagName[1].ToString());
-                    var id = await element.GetAttributeAsync("id") ?? "";
-                    var text = (await element.InnerTextAsync()).Trim();
+                    var level = int.Parse(element[0][1].ToString());
+                    var id = element[1];
+                    var text = element[2].Trim();
 
                     // Skip headings without id or text
                     if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(text))
@@ -309,7 +379,8 @@ static class PdfBuilder
                     });
                 }
             }
-            catch (Exception ex)
+            // a page given up on and closed meanwhile, which is warned about already
+            catch (Exception ex) when (!page.IsClosed)
             {
                 Logger.LogWarning($"Failed to extract headings from {pageUrl}: {ex.Message}");
             }
@@ -401,6 +472,17 @@ static class PdfBuilder
             }
 
         }
+    }
+
+    /// <summary>
+    /// The arguments Chromium is launched with to print the pages <paramref name="baseUrl"/> serves.
+    /// </summary>
+    internal static string[] GetBrowserArgs(Uri baseUrl)
+    {
+        // The server listens on a port the system picks, from a range that starts as low as 1025 on some machines
+        // (`netsh int ipv4 show dynamicport tcp` on Windows). Chromium refuses to load from the ports it restricts
+        // in that range, such as 1723 or 6000 (`kRestrictedPorts` in net/base/port_util.cc), unless they are allowed.
+        return [$"--explicitly-allowed-ports={baseUrl.Port}"];
     }
 
     static async Task CreatePdf(
