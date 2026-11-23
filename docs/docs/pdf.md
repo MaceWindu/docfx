@@ -76,6 +76,8 @@ These metadata applies to TOC files that controls behaviors of PDF generation.
 
 Indicates whether to generate PDF and shows the "Download PDF" button on the site.
 
+Only `true` generates a PDF: another value, such as `"false"` or `0`, generates none and warns. The other options are read only from a TOC file with `pdf: true`. A TOC file with `pdf: true` that cannot be read, such as one with an option of the wrong type (`pdfTocPage: maybe`), is an error that skips only its own PDF. Warnings about a page name it by its path and its PDF, by the `pdfFileName` and the TOC file, such as `api.pdf (v2/toc.json)`, as several PDFs can print a page.
+
 ### `pdfFileName`
 
 Sets the PDF output file name. The default value is `toc.pdf`.

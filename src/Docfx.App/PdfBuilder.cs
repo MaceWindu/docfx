@@ -55,7 +55,7 @@ static class PdfBuilder
             => pageTreeMembers.MediaBox ?? MediaBox.Letter;
     }
 
-    class Outline
+    internal class Outline
     {
         public string name { get; init; } = "";
         public string? href { get; init; }
@@ -74,6 +74,77 @@ static class PdfBuilder
 
         public string? pdfTocSource { get; init; }
         public int pdfTocHeadingDepth { get; init; } = 3;
+
+        /// <summary>The path of the table of contents in the site, which names it in warnings.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? tocPath { get; set; }
+
+        /// <summary>
+        /// The PDF in a warning: the table of contents it is printed from, with its file name, which is relative to the
+        /// folder of the table of contents, so that the PDFs of two folders named alike can be told apart.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string Label => (pdfFileName, tocPath) switch
+        {
+            ({ } file, { } toc) => $"{file} ({toc})",
+            (null, { } toc) => toc,
+            ({ } file, null) => file,
+            _ => name,
+        };
+    }
+
+    /// <summary>
+    /// The outline of a table of contents, or <see langword="null"/> when it has no <c>pdf: true</c> or cannot be read:
+    /// a table of contents that cannot be read, such as one written by hand with an option of the wrong type, is
+    /// reported and has no PDF, rather than stop the PDFs of the others.
+    /// </summary>
+    internal static Outline? ReadPdfOutline(byte[] json, string path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            // Most tables of contents, such as the large ones of an API, have no PDF, and are read no further.
+            if (!HasPdf(document.RootElement, path))
+            {
+                return null;
+            }
+
+            var outline = document.RootElement.Deserialize<Outline>();
+            if (outline is not null)
+            {
+                outline.tocPath = path;
+            }
+            return outline;
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogError($"Table of contents '{path}' cannot be read for its PDF, so none is printed of it: {ex.Message}");
+            return null;
+        }
+
+        static bool HasPdf(JsonElement root, string path)
+        {
+            if (root.ValueKind is not JsonValueKind.Object)
+            {
+                return false;
+            }
+            // a key written twice has its last value, as it has when the outline is read
+            var pdf = JsonValueKind.Undefined;
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.NameEquals("pdf"))
+                {
+                    pdf = property.Value.ValueKind;
+                }
+            }
+            // Only `true` is a PDF, as the boolean the outline reads: a value of another kind, such as "false" or 0,
+            // which would stop it, is none, and says so.
+            if (pdf is not (JsonValueKind.Undefined or JsonValueKind.Null or JsonValueKind.True or JsonValueKind.False))
+            {
+                Logger.LogWarning($"'pdf' of table of contents '{path}' is not true or false, so it has no PDF.");
+            }
+            return pdf is JsonValueKind.True;
+        }
     }
 
     public static Task Run(BuildJsonConfig config, string configDirectory, string? outputDirectory = null, CancellationToken cancellationToken = default)
@@ -232,7 +303,7 @@ static class PdfBuilder
                 if (!File.Exists(tocFile))
                     continue;
 
-                var outline = JsonSerializer.Deserialize<Outline>(File.ReadAllBytes(tocFile));
+                var outline = ReadPdfOutline(File.ReadAllBytes(tocFile), jsonOutput.RelativePath);
                 if (outline?.pdf is true)
                     yield return (jsonOutput.RelativePath, outline);
             }
@@ -291,7 +362,8 @@ static class PdfBuilder
                     catch (TimeoutException)
                     {
                         timedOut = true;
-                        Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
+                        // by its path and its PDF, since several PDFs can print a page
+                        Logger.LogWarning($"'{url.AbsolutePath}' in '{outline.Label}' timed out loading, so its page of the PDF may be incomplete.");
                     }
                 }
 
@@ -309,7 +381,7 @@ static class PdfBuilder
 
                 if (!responsive)
                 {
-                    Logger.LogWarning($"Page does not respond after it timed out loading, and is left out of the PDF: {url}");
+                    Logger.LogWarning($"'{url.AbsolutePath}' in '{outline.Label}' does not respond after it timed out loading, and is left out of the PDF.");
                     return (null, new List<HeadingInfo>());
                 }
                 return (bytes, headings);
