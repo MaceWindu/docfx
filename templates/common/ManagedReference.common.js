@@ -36,6 +36,13 @@ exports.transform = function (model) {
     }
   }
 
+  // A class lists the classes derived from it; an interface lists the types that implement it only when asked to,
+  // as it changes the page of every interface.
+  if (model._enableApiImplementingTypes && model.type && model.type.toLowerCase() === 'interface'
+    && model.derivedClasses && model.derivedClasses.length > 0) {
+    model.showImplementingTypes = true;
+  }
+
   if (model.summary && !model.description) {
     model.description = model.summary.replace(/<.*?>/gi, '').replace(/(\r\n|\n|\r)/gm, ' ').trim();
   }

@@ -94,6 +94,16 @@
 </dl>
 {{/derivedClasses.0}}
 {{/inClass}}
+{{#showImplementingTypes}}
+<dl class="typelist derived">
+  <dt>{{__global.derived}}</dt>
+  <dd>
+{{#derivedClasses}}
+    <div>{{{specName.0.value}}}</div>
+{{/derivedClasses}}
+  </dd>
+</dl>
+{{/showImplementingTypes}}
 
 {{#inheritedMembers.0}}
 <dl class="typelist inheritedMembers">

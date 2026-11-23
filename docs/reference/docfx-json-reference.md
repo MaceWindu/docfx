@@ -595,6 +595,10 @@ Favicon file's path from output root. Will show DocFX's favicon if not specified
 
 Indicate whether to show the search box on the top of page.
 
+### `_enableApiImplementingTypes`
+
+Indicate whether the page of an interface lists the types that implement it, under "Derived", as the page of a class lists the classes derived from it. Off by default.
+
 ### `_enableNewTab`
 
 Indicate whether to open a new tab when clicking an external link. (internal link always shows within the current tab)
