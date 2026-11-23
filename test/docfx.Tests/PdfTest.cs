@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics;
+using Docfx.Pdf;
 using Docfx.Tests.Common;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Actions;
@@ -13,6 +15,68 @@ namespace Docfx.Tests;
 [Collection("docfx STA")]
 public class PdfTest : TestBase
 {
+    [Fact]
+    public async Task APageThatDoesNotAnswerIsGivenUpOn()
+    {
+        // as a page whose own script keeps it busy answers nothing, which Playwright waits for without a timeout
+        var never = new TaskCompletionSource<string>();
+        var (answered, answer) = await PdfBuilder.WaitOrGiveUp(never.Task, TimeSpan.FromMilliseconds(10), CancellationToken.None);
+        Assert.False(answered);
+        Assert.Null(answer);
+        // failing once given up on, as when the page is closed, says nothing
+        never.SetException(new InvalidOperationException("closed"));
+
+        Assert.Equal((true, "state"), await PdfBuilder.WaitOrGiveUp(Task.FromResult("state"), TimeSpan.FromMilliseconds(10), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PdfBuilder.WaitOrGiveUp(Task.FromException<string>(new InvalidOperationException()), TimeSpan.FromSeconds(1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task APageBusyAfterItsContentLoadedTimesOut()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "toc.yml" ] }],
+                    "template": ["default"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("toc.yml",
+            """
+            pdf: true
+            items:
+            - name: Busy
+              href: busy.md
+            """, directory);
+        // keeps the page busy right after its content loaded, for far longer than the timeout
+        CreateFile("busy.md",
+            """
+            # Busy
+
+            <script>document.addEventListener('DOMContentLoaded', () => setTimeout(() => { const end = Date.now() + 60000; while (Date.now() < end) { } }, 0))</script>
+            """, directory);
+
+        await Docset.Build(configPath);
+
+        var timeout = Environment.GetEnvironmentVariable("DOCFX_PDF_TIMEOUT");
+        Environment.SetEnvironmentVariable("DOCFX_PDF_TIMEOUT", "2000");
+        try
+        {
+            var started = Stopwatch.StartNew();
+            await Docset.Pdf(configPath);
+
+            // the page is given up on after the timeout, not waited for until its script ends
+            Assert.True(started.Elapsed < TimeSpan.FromSeconds(40), $"took {started.Elapsed}");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOCFX_PDF_TIMEOUT", timeout);
+        }
+    }
+
     [Theory]
     [InlineData(null, null)]
     [InlineData(false, false)]
