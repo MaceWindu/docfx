@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert'
-import { breakWord, isExternalHref, isSameURL } from './helper'
+import { breakWord, isExternalHref, isSameURL, loc } from './helper'
 
 test('break text', () => {
   assert.deepStrictEqual(breakWord('Other APIs'), ['Other APIs'])
@@ -24,6 +24,36 @@ test('is same URL', () => {
   assert.ok(isSameURL({ pathname: '/a/index.html' }, { pathname: '/A/Index.html' }))
 
   assert.ok(!isSameURL({ pathname: '/a/foo/index.html' }, { pathname: '/a/bar' }))
+})
+
+function withLocalizedText(text: string, check: () => void) {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { querySelector: () => ({ content: text }) }
+  })
+
+  try {
+    check()
+  } finally {
+    if (originalDocument) {
+      Object.defineProperty(globalThis, 'document', originalDocument)
+    } else {
+      Reflect.deleteProperty(globalThis, 'document')
+    }
+  }
+}
+
+test('localized text takes a value with $ as it is', () => {
+  withLocalizedText('No results for "{query}"', () => {
+    assert.strictEqual(loc('searchNoResults', { query: 'Price $$ $& $\' $`' }), 'No results for "Price $$ $& $\' $`"')
+  })
+})
+
+test('localized text takes a value for every place that names it', () => {
+  withLocalizedText('{query}: no results for "{query}"', () => {
+    assert.strictEqual(loc('searchNoResults', { query: 'cat' }), 'cat: no results for "cat"')
+  })
 })
 
 test('is external URL', () => {

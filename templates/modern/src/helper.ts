@@ -24,7 +24,9 @@ export function loc(id: string, args?: { [key: string]: string }): string {
   let result = meta(`loc:${id}`) || id
   if (args) {
     for (const key in args) {
-      result = result.replace(`{${key}}`, args[key])
+      // Split and join rather than `replace`: a value, such as what a reader types into search, is taken as it is,
+      // where `replace` reads `$&` and the like in it as patterns; and every place that names the key gets it.
+      result = result.split(`{${key}}`).join(args[key])
     }
   }
   return result
