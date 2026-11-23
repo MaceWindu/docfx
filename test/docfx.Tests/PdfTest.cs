@@ -1,6 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
+using Docfx.Common;
+using Docfx.Pdf;
 using Docfx.Tests.Common;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Actions;
@@ -13,6 +16,21 @@ namespace Docfx.Tests;
 [Collection("docfx STA")]
 public class PdfTest : TestBase
 {
+    [Fact]
+    public async Task APageThatDoesNotAnswerIsGivenUpOn()
+    {
+        // as a page whose own script keeps it busy answers nothing, which Playwright waits for without a timeout
+        var never = new TaskCompletionSource<string>();
+        var (answered, answer) = await PdfBuilder.WaitOrGiveUp(never.Task, TimeSpan.FromMilliseconds(10), CancellationToken.None);
+        Assert.False(answered);
+        Assert.Null(answer);
+        // failing once given up on, as when the page is closed, says nothing
+        never.SetException(new InvalidOperationException("closed"));
+
+        Assert.Equal((true, "state"), await PdfBuilder.WaitOrGiveUp(Task.FromResult("state"), TimeSpan.FromMilliseconds(10), CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PdfBuilder.WaitOrGiveUp(Task.FromException<string>(new InvalidOperationException()), TimeSpan.FromSeconds(1), CancellationToken.None));
+    }
+
     [Theory]
     [InlineData(null, null)]
     [InlineData(false, false)]
@@ -161,6 +179,125 @@ public class PdfTest : TestBase
             Assert.NotEmpty(links);
             Assert.All(links, link => AssertPageDestination(pdf, link.Destination, pageNumber + 2));
         }
+    }
+
+    [Fact]
+    public void OnlyATableOfContentsOfAPdfIsReadWhole()
+    {
+        using var listener = new TestListenerScope();
+
+        // an option of the wrong type, written by hand, where there is no PDF to apply it to
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "items": [ { "name": "A", "href": "a.html" } ], "pdfTocPage": "maybe" }"""u8.ToArray(), "toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": false, "pdfTocHeadingDepth": "deep" }"""u8.ToArray(), "toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""[ "not", "an", "outline" ]"""u8.ToArray(), "toc.json"));
+        Assert.Empty(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error));
+        Assert.Empty(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Warning));
+
+        // only true is a PDF, as the boolean the outline reads; a value of another kind is none, and says so
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": "false", "items": [] }"""u8.ToArray(), "text/toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": 0, "items": [] }"""u8.ToArray(), "number/toc.json"));
+        Assert.Empty(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error));
+        Assert.Equal(
+            ["'pdf' of table of contents 'text/toc.json' is not true or false, so it has no PDF.", "'pdf' of table of contents 'number/toc.json' is not true or false, so it has no PDF."],
+            listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Warning).Select(w => w.Message));
+
+        var outline = PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfTocPage": true, "items": [ { "name": "A", "href": "a.html" } ] }"""u8.ToArray(), "guide/toc.json");
+        Assert.True(outline?.pdfTocPage);
+        Assert.Equal("A", outline.items?.Single().name);
+        Assert.Equal("guide/toc.json", outline.Label);
+
+        // the PDF of a table of contents that cannot be read says which one, and does not stop the others
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdfTocPage": "maybe" }"""u8.ToArray(), "wrong/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error), x => x.Message.Contains("'wrong/toc.json'"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, """u8.ToArray(), "broken/toc.json"));
+        Assert.Contains(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error), x => x.Message.Contains("'broken/toc.json'"));
+        // the error count is global, and later tests check it
+        Logger.ResetCount();
+    }
+
+    [Fact]
+    public void AKeyWrittenTwiceHasItsLastValue()
+    {
+        using var listener = new TestListenerScope();
+
+        Assert.NotNull(PdfBuilder.ReadPdfOutline("""{ "pdf": false, "pdf": true, "items": [] }"""u8.ToArray(), "toc.json"));
+        Assert.Null(PdfBuilder.ReadPdfOutline("""{ "pdf": true, "pdf": false, "items": [] }"""u8.ToArray(), "toc.json"));
+        Assert.Equal("B", PdfBuilder.ReadPdfOutline("""{ "pdf": true, "items": [ { "name": "A", "name": "B" } ] }"""u8.ToArray(), "toc.json")?.items?.Single().name);
+        Assert.Empty(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error));
+        Assert.Empty(listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Warning));
+    }
+
+    [Theory]
+    [InlineData("api.pdf", "v2/toc.json", "api.pdf (v2/toc.json)")]
+    [InlineData(null, "v2/toc.json", "v2/toc.json")]
+    [InlineData("api.pdf", null, "api.pdf")]
+    public void APdfIsNamedByItsFileNameAndTableOfContents(string fileName, string tocPath, string label)
+    {
+        // as warnings about a page name it, which several PDFs can print
+        Assert.Equal(label, new PdfBuilder.Outline { name = "API", pdfFileName = fileName, tocPath = tocPath }.Label);
+    }
+
+    [Fact]
+    public async Task ATableOfContentsThatCannotBeReadStopsOnlyItsOwnPdf()
+    {
+        var directory = GetRandomFolder();
+        var configPath = CreateFile("docfx.json",
+            """
+            {
+                "build": {
+                    "content": [{ "files": [ "*.md", "*/*.md", "**/toc.yml" ] }],
+                    "template": ["default"],
+                    "dest": "_site"
+                }
+            }
+            """, directory);
+        CreateFile("good/toc.yml",
+            """
+            pdf: true
+            items:
+            - name: Good
+              href: good.md
+            """, directory);
+        CreateFile("good/good.md", "# Good", directory);
+        CreateFile("wrong/toc.yml",
+            """
+            pdf: true
+            pdfTocPage: maybe
+            items:
+            - name: Wrong
+              href: wrong.md
+            """, directory);
+        CreateFile("wrong/wrong.md", "# Wrong", directory);
+
+        await Docset.Build(configPath);
+        // Docset.Pdf disposes every listener when it ends, which a TestListenerScope cannot outlive
+        var errors = new ErrorCollector();
+        Logger.RegisterListener(errors);
+        await Docset.Pdf(configPath);
+
+        Assert.True(File.Exists(Path.Combine(directory, "_site", "good", "toc.pdf")));
+        Assert.False(File.Exists(Path.Combine(directory, "_site", "wrong", "toc.pdf")));
+        Assert.Contains(errors.Messages, message => message.Contains("'wrong/toc.json'"));
+        Logger.ResetCount();
+    }
+
+    private sealed class ErrorCollector : ILoggerListener
+    {
+        private readonly ConcurrentQueue<string> _messages = new();
+
+        public List<string> Messages => [.. _messages];
+
+        public void WriteLine(ILogItem item)
+        {
+            if (item.LogLevel == Docfx.Common.LogLevel.Error)
+            {
+                _messages.Enqueue(item.Message);
+            }
+        }
+
+        public void Flush() { }
+
+        public void Dispose() { }
     }
 
     private static void AssertPageDestination(PdfDocument pdf, ExplicitDestination destination, int pageNumber)
