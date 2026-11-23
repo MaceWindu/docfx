@@ -94,7 +94,9 @@ public static class Docset
         {
             Logger.Flush();
             Logger.PrintSummary();
-            Logger.UnregisterAllListeners();
+
+            // Only the listener this call registered: an application that calls it may have registered its own.
+            Logger.UnregisterListener(consoleLogListener);
         }
     }
 }
