@@ -8,10 +8,15 @@ namespace Docfx.Dotnet;
 
 internal class SetDerivedClass : IResolverPipeline
 {
-    private readonly Dictionary<string, List<string>> _derivedClassMapping = [];
+    // A set: a type that implements an interface twice, as `IConverter<int>` and `IConverter<string>`, derives from it once.
+    private readonly Dictionary<string, HashSet<string>> _derivedClassMapping = [];
 
     public void Run(MetadataModel yaml, ResolverContext context)
     {
+        // One instance serves every run of the process (`YamlMetadataResolver` keeps its steps in a static list), and
+        // each run is one metadata item: the types derived in another item, or in an earlier run, are not listed.
+        _derivedClassMapping.Clear();
+
         if (yaml.Members is { Count: > 0 })
         {
             UpdateDerivedClassMapping(yaml.Members, context.References);
@@ -76,10 +81,9 @@ internal class SetDerivedClass : IResolverPipeline
             {
                 case MemberType.Class:
                 case MemberType.Interface:
-                    if (_derivedClassMapping.TryGetValue(item.Name, out List<string> derivedClasses))
+                    if (_derivedClassMapping.TryGetValue(item.Name, out var derivedClasses))
                     {
-                        derivedClasses.Sort();
-                        item.DerivedClasses = derivedClasses;
+                        item.DerivedClasses = [.. derivedClasses.Order()];
                     }
                     continue;
             }
