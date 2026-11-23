@@ -176,6 +176,40 @@ public class ApiBuildOutput
     [JsonPropertyName("platform")]
     public List<string> Platform { get; set; }
 
+    [YamlMember(Alias = Constants.PropertyName.AppliesTo)]
+    [JsonProperty(Constants.PropertyName.AppliesTo)]
+    [JsonPropertyName(Constants.PropertyName.AppliesTo)]
+    public List<AppliesToViewModel> AppliesTo { get; set; }
+
+    [YamlMember(Alias = "variants")]
+    [JsonProperty("variants")]
+    [JsonPropertyName("variants")]
+    public List<ApiVariantBuildOutput> Variants { get; set; }
+
+    [YamlMember(Alias = "inheritedMembersAppliesTo")]
+    [JsonProperty("inheritedMembersAppliesTo")]
+    [JsonPropertyName("inheritedMembersAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> InheritedMembersAppliesTo { get; set; }
+
+    [YamlMember(Alias = "implementsAppliesTo")]
+    [JsonProperty("implementsAppliesTo")]
+    [JsonPropertyName("implementsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ImplementsAppliesTo { get; set; }
+
+    [YamlMember(Alias = "extensionMethodsAppliesTo")]
+    [JsonProperty("extensionMethodsAppliesTo")]
+    [JsonPropertyName("extensionMethodsAppliesTo")]
+    public Dictionary<string, List<AppliesToViewModel>> ExtensionMethodsAppliesTo { get; set; }
+
+    /// <summary>
+    /// The frameworks of each of <see cref="DerivedClasses"/>, in their order and empty where it needs no mark:
+    /// a derived class is rendered as a type reference, which carries no uid to look it up by.
+    /// </summary>
+    [YamlMember(Alias = "derivedClassesAppliesTo")]
+    [JsonProperty("derivedClassesAppliesTo")]
+    [JsonPropertyName("derivedClassesAppliesTo")]
+    public List<List<AppliesToViewModel>> DerivedClassesAppliesTo { get; set; }
+
     [YamlMember(Alias = "attributes")]
     [JsonProperty("attributes")]
     [JsonPropertyName("attributes")]
@@ -265,6 +299,14 @@ public class ApiBuildOutput
             ExtensionMethods = GetReferenceList(model.ExtensionMethods, references, model.SupportedLanguages),
             Conceptual = model.Conceptual,
             Platform = model.Platform,
+            AppliesTo = model.AppliesTo,
+            Variants = model.Variants?.Select(v => ApiVariantBuildOutput.FromModel(v, references, model.SupportedLanguages)).ToList(),
+            InheritedMembersAppliesTo = model.InheritedMembersAppliesTo,
+            ImplementsAppliesTo = model.ImplementsAppliesTo,
+            ExtensionMethodsAppliesTo = model.ExtensionMethodsAppliesTo,
+            DerivedClassesAppliesTo = model.DerivedClassesAppliesTo is { } derivedIn
+                ? model.DerivedClasses?.Select(uid => derivedIn.TryGetValue(uid, out var appliesTo) ? appliesTo : []).ToList()
+                : null,
             Attributes = model.Attributes,
             Metadata = model.Metadata.Concat(metadata.Where(p => !model.Metadata.ContainsKey(p.Key))).ToDictionary(p => p.Key, p => p.Value),
         };

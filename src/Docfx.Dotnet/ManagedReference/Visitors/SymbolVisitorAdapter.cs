@@ -60,6 +60,8 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
         var comment = symbol.GetDocumentationComment(_compilation, expandIncludes: true, expandInheritdoc: true);
         if (XmlComment.Parse(comment.FullXmlFragment, GetXmlCommentParserContext(item, symbol)) is { } commentModel)
         {
+            // Read only for the merge it applies to: it parses the comment once more.
+            item.IsDocumentationInherited = _config.VariantIgnore.HasFlag(VariantIgnore.InheritedDocumentation) && IsDocumentationInherited(symbol);
             item.Summary = commentModel.Summary;
             item.Remarks = commentModel.Remarks;
             item.Exceptions = commentModel.Exceptions;
@@ -601,6 +603,13 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
             {
                 AddInheritedMembers(symbol, symbol.AllInterfaces[i], dict, typeParameterNames);
             }
+
+            // Named as `Implements` names them, but referenced by nothing: only a framework where the type is a
+            // class lists them, which references them itself.
+            var unreferenced = new Dictionary<string, ReferenceItem>();
+            item.BaseInterfaces = (from t in symbol.AllInterfaces
+                                   where _filter.IncludeApi(t)
+                                   select _generator.AddSpecReference(t, typeParameterNames, null, unreferenced, _filter)).ToList();
         }
         if (dict != null)
         {
@@ -711,6 +720,48 @@ internal partial class SymbolVisitorAdapter : SymbolVisitor<MetadataItem>
                 result.Syntax.Parameters.Add(param);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the documentation of <paramref name="symbol"/> comes from another symbol: its own comment, before
+    /// <c>inheritdoc</c> is expanded, is empty, or its summary is wholly inherited, by an <c>inheritdoc</c> of the
+    /// whole comment before any summary of its own, or one that is all its summary holds. One in its remarks or a parameter leaves its summary its own.
+    /// </summary>
+    private static bool IsDocumentationInherited(ISymbol symbol)
+    {
+        return IsDocumentationInherited(symbol.GetDocumentationCommentXml(expandIncludes: true));
+    }
+
+    internal static bool IsDocumentationInherited(string comment)
+    {
+        if (string.IsNullOrWhiteSpace(comment))
+        {
+            return true;
+        }
+
+        System.Xml.Linq.XElement root;
+        try
+        {
+            root = System.Xml.Linq.XElement.Parse($"<doc>{comment}</doc>");
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+
+        // The comment of a symbol comes in a `member` element, or as it is written.
+        var member = root.Elements().Count() == 1 && root.Element("member") is { } wrapped ? wrapped : root;
+        var summary = member.Element("summary");
+
+        // An `inheritdoc` of the whole comment expands to every part of the base in its place, and the first summary
+        // is the one shown: a summary of its own before it stays its own.
+        if (member.Elements("inheritdoc").FirstOrDefault() is { } inheritdoc && (summary is null || inheritdoc.IsBefore(summary)))
+        {
+            return true;
+        }
+
+        return summary is not null && summary.Nodes().Where(node => node is not System.Xml.Linq.XText text || !string.IsNullOrWhiteSpace(text.Value)).ToList()
+                is [System.Xml.Linq.XElement { Name.LocalName: "inheritdoc" }];
     }
 
     private XmlCommentParserContext GetXmlCommentParserContext(MetadataItem item, ISymbol symbol)

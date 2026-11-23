@@ -84,9 +84,73 @@ public static partial class DotnetApiCatalog
 
         async Task Build(ExtractMetadataConfig config, DotnetApiOptions options)
         {
-            if (await Compile(config) is not { } assemblies)
+            // as an invalid `targetFramework` is: the error has been logged, and nothing is documented
+            if (config.InvalidAxes)
             {
                 return;
+            }
+
+            // Both apply to what several frameworks or values of an axis merge into, which nothing else gives.
+            if (!MergesFrameworks(config) && (config.DefaultFramework is not null || config.VariantIgnore is not VariantIgnore.None))
+            {
+                var unused = new[] { config.DefaultFramework is null ? null : "'defaultFramework'", config.VariantIgnore is VariantIgnore.None ? null : "'variantIgnore'" }.OfType<string>().ToList();
+                var both = unused.Count > 1;
+                var why = config.TargetFrameworks is null ? "which this metadata item does not set" : "and 'targetFramework' overrides 'targetFrameworks'";
+                Logger.LogWarning(
+                    $"{string.Join(" and ", unused)} {(both ? "apply" : "applies")} to 'targetFrameworks' and 'axes' only, {why}, so {(both ? "they are" : "it is")} ignored.",
+                    code: WarningCodes.Metadata.ConflictingTargetFramework);
+            }
+            else if (config.DefaultFramework is not null && !UsesDefaultFramework(config))
+            {
+                // The values of an axis still merge, each at that one framework.
+                Logger.LogWarning(
+                    "'defaultFramework' chooses among the frameworks of 'targetFrameworks', and 'targetFramework' selects a single one, so it is ignored.",
+                    code: WarningCodes.Metadata.ConflictingTargetFramework);
+            }
+
+            if (await Compile(config) is not { } compiled)
+            {
+                return;
+            }
+
+            var (assemblies, frameworks) = compiled;
+            var documented = frameworks;
+
+            // A single framework has nothing to merge, and its output must not differ from plain selection.
+            if (frameworks?.Values.Distinct(StringComparer.OrdinalIgnoreCase).Skip(1).Any() != true)
+            {
+                frameworks = null;
+            }
+
+            // Named after what the entry sets, which with an axis alone is not `targetFrameworks`.
+            var merged = config.Axis is not null ? "'axes'" : "'targetFrameworks' with more than one framework";
+
+            if (frameworks is not null && config.OutputFormat is not MetadataOutputFormat.Mref)
+            {
+                Logger.LogError(
+                    $"{merged} is only supported by the 'mref' output format, not '{config.OutputFormat}'.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
+
+            // Source files and assemblies have no target framework to say an API applies to.
+            if (frameworks is not null && assemblies.Any(a => !frameworks.ContainsKey(a.compilation)))
+            {
+                Logger.LogError(
+                    $"{merged} applies to project and solution input only. "
+                    + "Document source files and assemblies in a metadata item of their own.",
+                    code: ErrorCodes.Metadata.TargetFrameworksNotSupported);
+                return;
+            }
+
+            // As the frameworks are ordered: `net8.0-windows` is documented by the project loaded as `net8.0-windows10.0.19041.0`.
+            // Also for a single framework, where a mistyped default would otherwise go unnoticed.
+            if (documented is { Count: > 0 } && UsesDefaultFramework(config) && config.DefaultFramework is { } defaultFramework &&
+                !documented.Values.Any(unit => TargetFrameworkHelper.IsSameFramework(TargetFrameworkAxis.SplitUnit(unit).Framework, defaultFramework)))
+            {
+                Logger.LogWarning(
+                    $"No project is documented for the default framework '{defaultFramework}', so the nearest framework each project targets provides the content.",
+                    code: WarningCodes.Metadata.TargetFrameworkNotFound);
             }
 
             switch (config.OutputFormat)
@@ -112,10 +176,51 @@ public static partial class DotnetApiCatalog
                     break;
 
                 case MetadataOutputFormat.Mref:
-                    CreateManagedReference(assemblies, config, options);
+                    CreateManagedReference(assemblies, config, options, frameworks);
                     break;
             }
         }
+    }
+
+    private static VariantIgnore ParseVariantIgnore(List<string> values)
+    {
+        var result = VariantIgnore.None;
+        foreach (var value in values ?? [])
+        {
+            switch (value?.Trim().ToLowerInvariant())
+            {
+                case "attributes":
+                    result |= VariantIgnore.Attributes;
+                    break;
+                case "documentation":
+                    result |= VariantIgnore.Documentation;
+                    break;
+                case "inheritdoc":
+                    result |= VariantIgnore.InheritedDocumentation;
+                    break;
+                default:
+                    Logger.LogWarning(
+                        $"Unknown 'variantIgnore' value '{value}'. The supported values are 'attributes', 'documentation' and 'inheritdoc'.",
+                        code: WarningCodes.Metadata.InvalidVariantIgnore);
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    // Whether the metadata item merges several frameworks or values of an axis, which `targetFramework` makes it not
+    // do unless it has an axis.
+    private static bool MergesFrameworks(ExtractMetadataConfig config)
+    {
+        return (config.TargetFrameworks is not null && config.TargetFramework is null) || config.Axis is not null;
+    }
+
+    // Whether `defaultFramework` chooses among several frameworks, of which `targetFramework` leaves one, also with an
+    // axis, whose values are then merged at that framework.
+    private static bool UsesDefaultFramework(ExtractMetadataConfig config)
+    {
+        return config.DefaultFramework is not null && config.TargetFramework is null && MergesFrameworks(config);
     }
 
     private static ExtractMetadataConfig ConvertConfig(MetadataJsonItemConfig configModel, string configDirectory, string outputDirectory)
@@ -132,6 +237,19 @@ public static partial class DotnetApiCatalog
 
         ExtractMetadataConfig.UseClrTypeNames = configModel?.UseClrTypeNames ?? false;
 
+        // The patterns of an axis are relative to the same folders as the patterns that found the projects.
+        var axis = TargetFrameworkAxis.Create(
+            configModel?.Axes,
+            (projects?.Items ?? []).Select(item => Path.GetFullPath(Path.Combine(EnvironmentContext.BaseDirectory, item.Src ?? ""))).Distinct());
+
+        var targetFrameworks = configModel?.TargetFrameworks?
+            .Where(framework => !string.IsNullOrWhiteSpace(framework))
+            .Select(framework => framework.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() is { Count: > 0 } frameworks ? frameworks : null;
+
+        var targetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim();
+
         return new ExtractMetadataConfig
         {
             ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
@@ -140,7 +258,15 @@ public static partial class DotnetApiCatalog
             IncludeExplicitInterfaceImplementations = configModel?.IncludeExplicitInterfaceImplementations ?? false,
             GlobalNamespaceId = configModel?.GlobalNamespaceId,
             MSBuildProperties = configModel?.Properties,
-            TargetFramework = string.IsNullOrWhiteSpace(configModel?.TargetFramework) ? null : configModel.TargetFramework.Trim(),
+            TargetFramework = targetFramework,
+            // An axis tells apart projects that would otherwise be documented as one, so every framework
+            // of each of them is documented unless the framework or frameworks are given.
+            TargetFrameworks = targetFrameworks ?? (axis is null || targetFramework is not null ? null : ["*"]),
+            TargetFrameworksFromAxes = targetFrameworks is null && axis is not null && targetFramework is null,
+            DefaultFramework = string.IsNullOrWhiteSpace(configModel?.DefaultFramework) ? null : configModel.DefaultFramework.Trim(),
+            VariantIgnore = ParseVariantIgnore(configModel?.VariantIgnore),
+            Axis = axis,
+            InvalidAxes = axis is null && configModel?.Axes is { Count: > 0 },
             OutputFormat = configModel?.OutputFormat ?? default,
             OutputFolder = outputFolder,
             CodeSourceBasePath = configModel?.CodeSourceBasePath,

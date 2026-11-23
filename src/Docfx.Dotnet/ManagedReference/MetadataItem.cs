@@ -158,6 +158,76 @@ internal class MetadataItem : ICloneable
     [JsonPropertyName("items")]
     public List<MetadataItem> Items { get; set; }
 
+    /// <summary>
+    /// The target frameworks this item exists in, set only when several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> AppliesTo { get; set; }
+
+    /// <summary>
+    /// The target frameworks of this item each of its <see cref="InheritedMembers"/> is inherited in, set only
+    /// when several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> InheritedMembersAppliesTo { get; set; }
+
+    /// <summary>
+    /// The target frameworks each of <see cref="DerivedClasses"/> derives from this item in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> DerivedClassesAppliesTo { get; set; }
+
+    /// <summary>
+    /// The target frameworks of this item each of its <see cref="Implements"/> is implemented in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> ImplementsAppliesTo { get; set; }
+
+    /// <summary>
+    /// The interfaces an interface extends, which <see cref="Implements"/> does not list for an interface: in a
+    /// framework where the type is an interface and a class elsewhere, it implements them there as well.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> BaseInterfaces { get; set; }
+
+    /// <summary>
+    /// The target frameworks of this item each of its <see cref="ExtensionMethods"/> extends it in, set only when
+    /// several frameworks are documented together.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, List<string>> ExtensionMethodsAppliesTo { get; set; }
+
+    /// <summary>
+    /// What differs in the frameworks that do not share the content of this item.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<MetadataItemVariant> Variants { get; set; }
+
+    /// <summary>
+    /// Whether the documentation of this item is inherited rather than written for it: through
+    /// <c>inheritdoc</c>, or as an override or implementation without a comment of its own.
+    /// </summary>
+    [YamlIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsDocumentationInherited { get; set; }
+
     [YamlMember(Alias = "references")]
     [JsonProperty("references")]
     [JsonPropertyName("references")]

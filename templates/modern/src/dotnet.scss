@@ -15,6 +15,11 @@ body[data-yaml-mime="ManagedReference"] article, body[data-yaml-mime="ApiPage"] 
     margin-top: 3rem;
     padding-bottom: 5px;
     padding-right: 1.6rem;
+
+    // wraps as a whole after a long name, rather than in the middle of a framework
+    .applies-to {
+      display: inline-block;
+    }
   }
 
   h2.section {

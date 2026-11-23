@@ -55,6 +55,7 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     private readonly ConcurrentDictionary<string, string> _openedWith = new(FilePathComparer.OSPlatformSensitiveStringComparer);
     private readonly ConcurrentDictionary<(string Path, string? TargetFramework), Task<ProjectEvaluation>> _evaluated = new(EvaluationKeyComparer.Instance);
     private readonly Func<string, string?, Task<ProjectEvaluation>> _evaluate;
+    private readonly ConcurrentDictionary<string, bool> _reported = new();
     private string? _opening;
 
     /// <param name="properties">The MSBuild properties the workspace loads projects with.</param>
@@ -155,6 +156,27 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     }
 
     /// <summary>
+    /// Reports why MSBuild cannot evaluate a project, the <see cref="ProjectEvaluation.Failure"/>s of its frameworks,
+    /// as <see cref="TargetFrameworkHelper.ReportNotFound"/> does: in one message with <paramref name="message"/>, what
+    /// is said about the project, when it is given. Each failure is reported once: a project is evaluated once for a
+    /// framework, which the frameworks of a list, the label of a framework, and several solutions holding the project
+    /// can each ask for.
+    /// </summary>
+    public void ReportFailures(string? message, IEnumerable<string> failures, bool fromSolution)
+    {
+        var unreported = failures.Where(failure => _reported.TryAdd(failure, true)).Select(failure => $"{failure.TrimEnd('.')}.").ToList();
+        if (message is not null)
+        {
+            unreported.Insert(0, message);
+        }
+
+        if (unreported.Count > 0)
+        {
+            TargetFrameworkHelper.ReportNotFound(string.Join(" ", unreported), fromSolution);
+        }
+    }
+
+    /// <summary>
     /// Evaluates a project, for <paramref name="targetFramework"/> when it is given, once.
     /// </summary>
     public Task<ProjectEvaluation> Evaluate(string path, string? targetFramework)
@@ -170,6 +192,12 @@ internal sealed class ProjectFrameworks : IProgress<ProjectLoadProgress>
     /// </summary>
     public async Task<ProjectEvaluation> EvaluateAsLoaded(string path, string targetFramework)
     {
+        // a file it loaded for several frameworks, each as a global property
+        if (_loaded.TryGetValue(path, out var loaded) && loaded.Count > 1)
+        {
+            return await Evaluate(path, targetFramework);
+        }
+
         var evaluation = await Evaluate(path, null);
         return evaluation.ListsFrameworks ? await Evaluate(path, targetFramework) : evaluation;
     }

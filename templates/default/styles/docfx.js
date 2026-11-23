@@ -596,7 +596,8 @@ $(function () {
         }
 
         var item = {
-          name: htmlEncode($(e).text()),
+          // the frameworks a member applies to are shown in its heading, but are not part of its name
+          name: htmlEncode($(e).clone().find('.applies-to').remove().end().text()),
           href: "#" + e.id,
           items: []
         };

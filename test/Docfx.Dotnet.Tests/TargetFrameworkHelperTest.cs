@@ -358,6 +358,304 @@ public class TargetFrameworkHelperTest
         count.Should().Be(2);
     }
 
+    [Theory]
+    [InlineData("""{ "targetFrameworks": "*" }""", new[] { "*" })]
+    [InlineData("""{ "targetFrameworks": [ "net8.0", "net462" ] }""", new[] { "net8.0", "net462" })]
+    public void TargetFrameworksIsReadFromAStringOrAnArray(string json, string[] expected)
+    {
+        Newtonsoft.Json.JsonConvert.DeserializeObject<MetadataJsonItemConfig>(json).TargetFrameworks.Should().Equal(expected);
+        System.Text.Json.JsonSerializer.Deserialize<MetadataJsonItemConfig>(json).TargetFrameworks.Should().Equal(expected);
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows", "net8.0-windows")]
+    // an alias in `TargetFrameworks` is named for the framework it stands for
+    [InlineData("modern", "net8.0")]
+    public async Task GetFrameworkLabelOfASingleTargetProject(string loaded, string expected)
+    {
+        var (_, projects) = CreateProjects("Lib");
+        var evaluated = new List<string>();
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated.Add(tfm);
+            return Evaluated(new ProjectFramework(loaded, loaded == "modern" ? "net8.0" : "net8.0-windows7.0"));
+        });
+        frameworks.AddLoaded(LibPath, loaded);
+
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[0], frameworks, [])).Should().Be(expected);
+        // as the workspace loaded a `TargetFramework`: without it as a global property
+        evaluated.Should().OnlyContain(tfm => tfm == null);
+    }
+
+    [Theory]
+    [InlineData("Lib(net8.0-windows)", "net8.0-windows")]
+    [InlineData("Lib(modern)", "net8.0")]
+    public async Task GetFrameworkLabelOfAMultiTargetedProject(string name, string expected)
+    {
+        // loaded for another framework too, as the file of a project named after its framework is
+        var (_, projects) = CreateProjects("Lib(netstandard2.0)", name);
+        var frameworks = WithLoaded(new ProjectFrameworks((path, tfm) => Evaluated(tfm == "modern" ? new ProjectFramework("modern", "net8.0") : null)), "netstandard2.0", name[4..^1]);
+
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[1], frameworks, [])).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task GetFrameworkLabelOfAProjectMSBuildCannotEvaluateIsNone()
+    {
+        var (_, projects) = CreateProjects("Lib");
+        var failures = new List<string>();
+
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[0], NotEvaluated(), failures)).Should().BeNull();
+        failures.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetFrameworkLabelOfAnAliasMSBuildCannotEvaluateIsTheAliasAndSaysWhy()
+    {
+        var (_, projects) = CreateProjects("Lib(legacy)", "Lib(modern)");
+        var failures = new List<string>();
+
+        (await TargetFrameworkHelper.GetFrameworkLabel(projects[1], WithLoaded(NotEvaluated(), "legacy", "modern"), failures)).Should().Be("modern");
+        failures.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(false, true, LogLevel.Warning)]
+    [InlineData(true, true, LogLevel.Info)]
+    // a project a listed solution holds too is reported once, as the project `src` lists
+    [InlineData(true, false, null)]
+    public async Task SelectProjectsReportsAProjectMSBuildCannotEvaluateAsItReportsAFrameworkItLacks(bool fromSolution, bool report, LogLevel? expected)
+    {
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib");
+
+        await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0", "net9.0"], NotEvaluated(), fromSolution, report);
+
+        var failures = listener.Items.Where(i => i.Message.StartsWith("MSBuild cannot evaluate project")).ToList();
+        if (expected is { } level)
+        {
+            failures.Should().ContainSingle().Which.LogLevel.Should().Be(level);
+        }
+        else
+        {
+            failures.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task AnEvaluationFailureIsReportedOnceWhoeverAsks()
+    {
+        using var listener = new TestListenerScope(LogLevel.Info);
+        var (solution, projects) = CreateProjects("Lib(modern)", "Lib(legacy)");
+        var frameworks = WithLoaded(NotEvaluated(), "modern", "legacy");
+
+        // every framework of the list asks for both aliases, a later solution holding the project asks again
+        await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0", "net9.0"], frameworks);
+        await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0", "net9.0"], frameworks);
+
+        // in the message that the project lacks the frameworks, which each run gives
+        listener.Items.Should().HaveCount(2).And.OnlyContain(i => i.Message.StartsWith($"Project '{LibPath}' does not target 'net8.0', 'net9.0'"));
+        listener.Items.Count(i => i.Message.Contains($"MSBuild cannot evaluate project '{LibPath}' for 'modern'")).Should().Be(1);
+        listener.Items.Count(i => i.Message.Contains($"MSBuild cannot evaluate project '{LibPath}' for 'legacy'")).Should().Be(1);
+    }
+
+    [Theory]
+    // `net8.0-windows` that MSBuild evaluates to `net8.0-windows7.0` is the other project's `net8.0-windows7.0`
+    [InlineData("net8.0-windows", "net8.0-windows7.0", "net8.0-windows7.0", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", "net8.0-windows7.0", "net8.0-windows")]
+    public async Task WithPlatformVersionOfMergesAFrameworkNamedWithItsVersion(string framework, string named, string evaluated, string expected)
+    {
+        var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(new ProjectFramework(tfm, evaluated)));
+
+        (await TargetFrameworkHelper.WithPlatformVersionOf(framework, LibPath, [framework, named], frameworks)).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task WithPlatformVersionOfEvaluatesOnlyWhenAnotherProjectNamesAVersion()
+    {
+        var evaluated = false;
+        var frameworks = new ProjectFrameworks((path, tfm) =>
+        {
+            evaluated = true;
+            return Evaluated(new ProjectFramework(tfm, "net8.0-windows7.0"));
+        });
+
+        (await TargetFrameworkHelper.WithPlatformVersionOf("net8.0-windows", LibPath, ["net8.0-windows", "net8.0"], frameworks)).Should().Be("net8.0-windows");
+        evaluated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WithPlatformVersionOfAProjectMSBuildCannotEvaluateWarns()
+    {
+        using var listener = new TestListenerScope();
+
+        (await TargetFrameworkHelper.WithPlatformVersionOf("net8.0-windows", LibPath, ["net8.0-windows", "net8.0-windows7.0"], NotEvaluated())).Should().Be("net8.0-windows");
+
+        listener.Items.Should().ContainSingle(i => i.Code == WarningCodes.Metadata.TargetFrameworkNotFound);
+    }
+
+    [Theory]
+    [InlineData("net8.0", "net8.0")]
+    // named as the project names it
+    [InlineData("net8.0-windows7.0", "net8.0-windows")]
+    [InlineData("net9.0", null)]
+    public async Task SelectProjectsOfASingleTargetProjectReadsTheFrameworkTheWorkspaceLoaded(string targetFramework, string expected)
+    {
+        var (solution, projects) = CreateProjects("Lib");
+        var loaded = targetFramework.StartsWith("net8.0-windows") ? "net8.0-windows" : "net8.0";
+        // evaluated as the workspace loaded its `TargetFramework`: without it as a global property
+        var frameworks = new ProjectFrameworks((path, tfm) => Evaluated(tfm is null ? new ProjectFramework(loaded, loaded == "net8.0-windows" ? "net8.0-windows7.0" : loaded) : null));
+        frameworks.AddLoaded(LibPath, loaded);
+
+        var selected = await TargetFrameworkHelper.SelectProjects(solution, projects[0], [targetFramework], frameworks);
+
+        selected.Select(s => s.Framework).Should().Equal(expected is null ? Array.Empty<string>() : new[] { expected });
+    }
+
+    [Fact]
+    public async Task SelectProjectsOfAProjectMSBuildCannotEvaluateNamesNoFramework()
+    {
+        var (solution, projects) = CreateProjects("Lib");
+
+        var selected = await TargetFrameworkHelper.SelectProjects(solution, projects[0], ["net8.0"], NotEvaluated());
+
+        selected.Should().ContainSingle().Which.Framework.Should().BeNull();
+    }
+
+    [Fact]
+    public void AppliesToIsGroupedByValueInTheOrderOfTheAxis()
+    {
+        var axis = TargetFrameworkAxis.Create(
+            [new() { Name = "EF Core", Values = [new() { Id = "ef3", Label = "EF Core 3.1", Files = ["a"] }, new() { Id = "ef9", Files = ["b"] }] }],
+            [Directory.GetCurrentDirectory()]);
+
+        var groups = YamlViewModelExtensions.ToAppliesToViewModel(["ef9:net8.0", "ef3:netstandard2.0", "ef3:net462"], axis);
+
+        groups.Select(g => g.Version).Should().Equal("ef3", "ef9");
+        groups.Select(g => g.Label).Should().Equal("EF Core 3.1", "ef9");
+        groups[0].Frameworks.Should().Equal("netstandard2.0", "net462");
+    }
+
+    [Fact]
+    public void AProjectGetsTheFirstValueThatMatchesItWhicheverSrcFolderItIsMatchedFrom()
+    {
+        // `src/Ef3/Lib.csproj` is `Ef3/Lib.csproj` from the first folder and `Lib.csproj` from the second.
+        var root = Path.Combine(Directory.GetCurrentDirectory(), "src");
+        var axis = TargetFrameworkAxis.Create(
+            [new() { Name = "EF Core", Values = [new() { Id = "ef3", Files = ["Lib.csproj"] }, new() { Id = "ef9", Files = ["Ef3/**"] }] }],
+            [root, Path.Combine(root, "Ef3")]);
+
+        axis.Match(Path.Combine(root, "Ef3", "Lib.csproj")).Should().Be("ef3");
+    }
+
+    [Fact]
+    public void AppliesToWithoutAnAxisIsOneGroup()
+    {
+        var groups = YamlViewModelExtensions.ToAppliesToViewModel(["net8.0", "net462"], null);
+
+        groups.Should().ContainSingle().Which.Frameworks.Should().Equal("net8.0", "net462");
+        groups[0].Version.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("ef9:net8.0", "ef9", "net8.0")]
+    [InlineData("net8.0", null, "net8.0")]
+    public void SplitUnit(string unit, string value, string framework)
+    {
+        TargetFrameworkAxis.SplitUnit(unit).Should().Be((value, framework));
+    }
+
+    [Theory]
+    [InlineData("net10.0", "net462 netstandard2.0 net8.0 net10.0", "net10.0 net8.0 netstandard2.0 net462")]
+    [InlineData("net10.0", "net462 netstandard2.0", "netstandard2.0 net462")]
+    [InlineData("net48", "netstandard2.0 net8.0 net462", "net462 netstandard2.0 net8.0")]
+    [InlineData("net8.0", "netstandard2.0 netstandard2.1 netcoreapp3.1", "netcoreapp3.1 netstandard2.1 netstandard2.0")]
+    [InlineData("net472", "netstandard2.1 netstandard2.0 netstandard1.3", "netstandard2.0 netstandard1.3 netstandard2.1")]
+    [InlineData("net45", "netstandard1.3 netstandard1.1", "netstandard1.1 netstandard1.3")]
+    [InlineData("netcoreapp2.1", "netstandard2.1 netstandard2.0", "netstandard2.0 netstandard2.1")]
+    [InlineData("net8.0", "net8.0-windows netstandard2.0", "netstandard2.0 net8.0-windows")]
+    [InlineData("net8.0-windows", "net8.0 net8.0-windows", "net8.0-windows net8.0")]
+    [InlineData("net8.0-windows", "net8.0 net8.0-windows10.0.19041.0", "net8.0-windows10.0.19041.0 net8.0")]
+    [InlineData("net8.0-windows7.0", "net8.0 net8.0-windows", "net8.0-windows net8.0")]
+    [InlineData("NET8.0", "net9.0 net8.0", "net8.0 net9.0")]
+    [InlineData("unknown", "net8.0 netstandard2.0", "net8.0 netstandard2.0")]
+    public void OrderByNearest(string target, string frameworks, string expected)
+    {
+        TargetFrameworkHelper.OrderByNearest(target, frameworks.Split(' ')).Should().Equal(expected.Split(' '));
+    }
+
+    [Theory]
+    [InlineData("ef 9")]
+    [InlineData("ef\t9")]
+    [InlineData("ef:9")]
+    public void AnAxisValueIdWithASpaceOrColonIsInvalid(string id)
+    {
+        using var listener = new Docfx.Tests.Common.TestListenerScope();
+
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = id, Files = ["**"] }] }], ["."]);
+
+        axis.Should().BeNull();
+        listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error).Should().ContainSingle(x => x.Code == Docfx.Common.ErrorCodes.Metadata.InvalidAxis);
+    }
+
+    [Fact]
+    public void AnAxisWithANullValueOrFileIsInvalid()
+    {
+        using var listener = new Docfx.Tests.Common.TestListenerScope();
+
+        // what `"values": [null]` and `"files": [null]` read as; the schema forbids both, docfx does not check it
+        TargetFrameworkAxis.Create([new() { Name = "EF", Values = [null] }], ["."]).Should().BeNull();
+        TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = "ef9", Files = [null] }] }], ["."]).Should().BeNull();
+        TargetFrameworkAxis.Create([null], ["."]).Should().BeNull();
+
+        listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error).Should().HaveCount(3).And.OnlyContain(x => x.Code == Docfx.Common.ErrorCodes.Metadata.InvalidAxis);
+    }
+
+    [Theory]
+    [InlineData("ef9", "EF9")]
+    [InlineData("ef9", "ef9")]
+    public void AnAxisWithTwoValuesThatDifferOnlyInCaseIsInvalid(string first, string second)
+    {
+        using var listener = new Docfx.Tests.Common.TestListenerScope();
+
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = first, Files = ["a"] }, new() { Id = second, Files = ["b"] }] }], ["."]);
+
+        axis.Should().BeNull();
+        listener.GetItemsByLogLevel(Docfx.Common.LogLevel.Error).Should().ContainSingle(x => x.Code == Docfx.Common.ErrorCodes.Metadata.InvalidAxis);
+    }
+
+    [Fact]
+    public void TheDefaultOfAnAxisNamesAValueInAnyCase()
+    {
+        var axis = TargetFrameworkAxis.Create([new() { Name = "EF", Values = [new() { Id = "ef3", Files = ["a"] }, new() { Id = "ef9", Files = ["b"] }], Default = "EF9" }], ["."]);
+
+        axis.Default.Should().Be("ef9");
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows7", "net8.0-windows7.0 net8.0-windows7", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows7.0", "net8.0-windows7.0 net8.0-windows7", "net8.0-windows7.0")]
+    [InlineData("net8.0-windows10.0.19041", "net8.0-windows10.0.19041.0", "net8.0-windows10.0.19041.0")]
+    // another version, or none, is another name
+    [InlineData("net8.0-windows8.0", "net8.0-windows7.0 net8.0-windows8.0", "net8.0-windows8.0")]
+    [InlineData("net8.0-windows", "net8.0-windows7.0 net8.0-windows", "net8.0-windows")]
+    [InlineData("net8.0", "net8.0", "net8.0")]
+    public void AsNamedFirst(string framework, string named, string expected)
+    {
+        TargetFrameworkHelper.AsNamedFirst(framework, named.Split(' ')).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("net8.0-windows", "net8.0-windows10.0.19041.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows", true)]
+    [InlineData("NET8.0", "net8.0", true)]
+    [InlineData("net8.0-windows10.0.19041.0", "net8.0-windows10.0.22621.0", false)]
+    [InlineData("net8.0", "net8.0-windows", false)]
+    public void IsSameFramework(string left, string right, bool expected)
+    {
+        TargetFrameworkHelper.IsSameFramework(left, right).Should().Be(expected);
+    }
+
     [Fact]
     public async Task SelectProjectOfASingleTargetProjectWithParenthesesInItsNameReadsTheFrameworkTheWorkspaceLoaded()
     {
@@ -582,6 +880,17 @@ public class TargetFrameworkHelperTest
 
     private static Task<ProjectEvaluation> Evaluated(ProjectFramework framework) =>
         Task.FromResult(new ProjectEvaluation(framework, framework is null ? "MSBuild cannot evaluate project 'Lib.csproj': test" : null));
+
+    // as the workspace reports the frameworks it loads a file for
+    private static ProjectFrameworks WithLoaded(ProjectFrameworks frameworks, params string[] loaded)
+    {
+        foreach (var framework in loaded)
+        {
+            frameworks.AddLoaded(LibPath, framework);
+        }
+
+        return frameworks;
+    }
 
     // a failure per project and framework, as `dotnet msbuild` gives
     private static ProjectFrameworks NotEvaluated() =>
