@@ -41,6 +41,37 @@ public class SetDerivedClassTest
     }
 
     [Fact]
+    public void ATypeDerivedInAnotherMetadataItemIsNotListed()
+    {
+        // two metadata items of one run, each with a `N.Base` of its own, through the one instance every run uses
+        var pipeline = new SetDerivedClass();
+        var context = new ResolverContext { References = [] };
+
+        var first = new MetadataModel
+        {
+            Members =
+            [
+                new() { Name = "N.Base", Type = MemberType.Class },
+                new() { Name = "N.OnlyInFirst", Type = MemberType.Class, Inheritance = ["System.Object", "N.Base"] },
+            ],
+        };
+        pipeline.Run(first, context);
+
+        var second = new MetadataModel
+        {
+            Members =
+            [
+                new() { Name = "N.Base", Type = MemberType.Class },
+                new() { Name = "N.OnlyInSecond", Type = MemberType.Class, Inheritance = ["System.Object", "N.Base"] },
+            ],
+        };
+        pipeline.Run(second, context);
+
+        first.Members[0].DerivedClasses.Should().Equal("N.OnlyInFirst");
+        second.Members[0].DerivedClasses.Should().Equal("N.OnlyInSecond");
+    }
+
+    [Fact]
     public void DerivedClassesAreSorted()
     {
         var model = new MetadataModel

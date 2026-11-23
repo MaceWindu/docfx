@@ -13,6 +13,10 @@ internal class SetDerivedClass : IResolverPipeline
 
     public void Run(MetadataModel yaml, ResolverContext context)
     {
+        // One instance serves every run of the process (`YamlMetadataResolver` keeps its steps in a static list), and
+        // each run is one metadata item: the types derived in another item, or in an earlier run, are not listed.
+        _derivedClassMapping.Clear();
+
         if (yaml.Members is { Count: > 0 })
         {
             UpdateDerivedClassMapping(yaml.Members, context.References);
