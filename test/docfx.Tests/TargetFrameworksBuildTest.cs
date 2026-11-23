@@ -72,6 +72,12 @@ public class TargetFrameworksBuildTest : TestBase
                 public class Switches { }
             #endif
 
+            #if NET8_0
+                public class Shape : Base { }
+            #else
+                public interface Shape { }
+            #endif
+
                 public class Shared
                 {
                     public int Everywhere { get; set; }
@@ -149,6 +155,31 @@ public class TargetFrameworksBuildTest : TestBase
             #else
                     /// <summary>Strict on older frameworks.</summary>
                     Strict,
+            #endif
+                }
+
+            #if NET8_0
+                /// <summary>Levels on net8.</summary>
+            #else
+                /// <summary>Levels on older frameworks.</summary>
+            #endif
+                public enum Level
+                {
+                    /// <summary>Low everywhere.</summary>
+                    Low,
+                    /// <summary>High everywhere.</summary>
+                    High,
+                }
+            }
+            """);
+        File.WriteAllText(Path.Combine(folder, "Ext.cs"), """
+            namespace Lib
+            {
+                public static class Ext
+                {
+                    public static void Once(this Shared shared) { }
+            #if NET8_0
+                    public static void Twice(this Shared shared) { }
             #endif
                 }
             }
@@ -302,6 +333,16 @@ public class TargetFrameworksBuildTest : TestBase
         var ns = await Page(site, "Lib.html");
         Assert.Matches(string.Format(Marked, "OnlyNet8"), ns);
         Assert.DoesNotMatch("Shared</a> <span", ns);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ANamespacePageNamesTheFrameworksOfItsNamespace()
+    {
+        // so that the picker says so on a namespace page whose namespace does not exist in the selection
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+
+        Assert.Matches("<h1 id=\"Lib\" data-uid=\"Lib\" class=\"text-break\" data-applies-to=\"net8.0 netstandard2.0\">", await Page(site, "Lib.html"));
     }
 
     [Fact]
@@ -488,6 +529,20 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.DoesNotContain("Field Value", page);
     }
 
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAFieldWithAPageOfItsOwnKeepsItsValue()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: "separatePages");
+        var page = await RawPage(site, "Lib.Shared.Limit.html");
+
+        // the field's own content labels its value as a return value, and so does the copy the picker shows
+        Assert.Contains("Returns", WithoutHiddenContent(page));
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public const int Limit = 2(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.NotEmpty(copy);
+        Assert.Contains("Returns", copy);
+    }
+
     [Theory]
     [Trait("Related", "docfx")]
     [InlineData("\"default\"")]
@@ -506,6 +561,14 @@ public class TargetFrameworksBuildTest : TestBase
         Assert.NotEmpty(wait);
         Assert.DoesNotContain("public void Wait(int time)", wait);
         Assert.Equal(1, Regex.Count(shared, "In milliseconds\\."));
+
+        if (template.Contains("modern"))
+        {
+            // the hidden copy the picker shows takes the declaration from the API
+            var copy = Regex.Match(await RawPage(site, "Lib.Shared.html"), "<div class=\"api-content\" data-applies-to=\"[^\"]*netstandard2.0[^\"]*\" data-search-ignore hidden>(?:(?!<div class=\"api-content\")[\\s\\S])*?In seconds\\.").Value;
+            Assert.NotEmpty(copy);
+            Assert.Contains("public void Wait(int time)", copy);
+        }
     }
 
     [Theory]
@@ -576,14 +639,179 @@ public class TargetFrameworksBuildTest : TestBase
 
     [Theory]
     [Trait("Related", "docfx")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EachVariantIsRenderedAsAWholeForThePickerAndPdf(bool picker)
+    {
+        var options = "\"globalMetadata\": { \"_frameworkNames\": { \"net8.0\": \"Modern\" }" + (picker ? ", \"_enableApiAppliesToPicker\": true" : "") + " },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        // the dropdowns come with the option only, and label frameworks as the page does
+        Assert.Equal(picker, page.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">"));
+        Assert.Equal(picker, Regex.IsMatch(page, "<meta name=\"docfx:frameworknames\" content=\"\\{&quot;net8.0&quot;:&quot;Modern&quot;\\}\">"));
+
+        // a PDF of one framework needs the content of each variant whether the site has the picker or not
+        Assert.Contains("<div class=\"api-contents\">", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+
+        // Size is a long on .NET Standard 2.0: the whole member as it is there, hidden until that is picked
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content)[\\s\\S])*?public long Size(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.NotEmpty(copy);
+        Assert.Contains("Property Value", copy);
+        Assert.DoesNotContain("Returns", copy);
+
+        // the API's own content applies to the frameworks no variant does
+        Assert.Contains("<div class=\"api-content\" data-applies-to=\"net8.0\">", page);
+
+        // pages other than API pages label frameworks as API pages do, from the table of contents
+        var toc = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(site, "toc.json"), TestContext.Current.CancellationToken));
+        Assert.Equal(picker ? "Modern" : null, (string)toc["frameworkNames"]?["net8.0"]);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task DisableApiAppliesToKeepsThePicker()
+    {
+        var options = "\"globalMetadata\": { \"_disableApiAppliesTo\": true, \"_enableApiAppliesToPicker\": true },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        Assert.Contains("<meta name=\"docfx:appliestopicker\" content=\"true\">", page);
+        Assert.DoesNotContain("Applies to", page);
+
+        // and what the picker reads, without the labels: the frameworks of the API and its members, the copy of
+        // what differs, and what differs elsewhere
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+        Assert.Matches("<h3 [^>]*data-uid=\"Lib.Shared.OnlyNet8Member\" data-applies-to=\"net8.0\"", page);
+        Assert.Contains("<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>", page);
+        Assert.Contains("class=\"api-variant\" data-applies-to=\"netstandard2.0\"", await RawPage(site, "Lib.Differs.html"));
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAClassThatIsAnInterfaceInItsFrameworksShowsNoBaseTypes()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Shape.html");
+
+        // the title names the kind each copy shows, for the picker to swap with it
+        Assert.Matches("<h1 [^>]*>\\s*<span class=\"api-contents\"><span class=\"api-content\" data-applies-to=\"net8.0\">Class Shape</span><span class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>Interface Shape</span></span>", page);
+        // and so does only the title of such a type
+        Assert.DoesNotMatch("<h1 [^>]*>\\s*<span class=\"api-contents\">", await RawPage(site, "Lib.Shared.html"));
+
+        var own = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"net8.0\">(?:(?!<div class=\"api-content)[\\s\\S])*").Value;
+        var copy = Regex.Match(page, "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>(?:(?!<div class=\"api-content|api-variants-heading)[\\s\\S])*").Value;
+        Assert.Contains("typelist inheritance", own);
+        Assert.Contains("public interface Shape", copy);
+        Assert.DoesNotContain("typelist inheritance", copy);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task ThePickerIsOffWithoutTheNavbar()
+    {
+        // The picker is in the navbar: without it, a link or an earlier pick would choose a selection the reader
+        // has no dropdown to undo.
+        var options = "\"globalMetadata\": { \"_disableNavbar\": true, \"_enableApiAppliesToPicker\": true },";
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", extraBuild: options);
+        var page = await RawPage(site, "Lib.Shared.html");
+
+        Assert.DoesNotContain("docfx:appliestopicker", page);
+        Assert.Matches("<h1 [^>]*data-applies-to=\"net8.0 netstandard2.0\"", page);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("samePage")]
+    [InlineData("separatePages")]
+    public async Task EachListOfAPageCarriesTheFrameworksOfItsEntries(string memberLayout)
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"", memberLayout: memberLayout);
+
+        // the types of a namespace, which the picker dims
+        Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a [^>]*>OnlyNet8</a>", await RawPage(site, "Lib.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>Switches</a>", await RawPage(site, "Lib.Base.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\"><a [^>]*>ISource</a>", await RawPage(site, "Lib.SometimesSource.html"));
+        Assert.Matches("<div><a [^>]*>ISource</a>", await RawPage(site, "Lib.AlwaysSource.html"));
+        // an extension method by where it extends the type: the interface it extends is implemented in .NET 8 only
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>SourceExtensions\\.Reopen\\(ISource\\)</a>", await RawPage(site, "Lib.SometimesSource.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0 netstandard2.0\">\\s*<a [^>]*>SourceExtensions\\.Reopen\\(ISource\\)</a>", await RawPage(site, "Lib.AlwaysSource.html"));
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Base\\.OnlyNet8Base\\(\\)</a>", await RawPage(site, "Lib.Child.html"));
+
+        var shared = await RawPage(site, "Lib.Shared.html");
+        Assert.Matches("<div data-applies-to=\"net8.0\">\\s*<a [^>]*>Ext\\.Twice\\(Shared\\)</a>", shared);
+        Assert.Matches("<div data-applies-to=\"net8.0 netstandard2.0\">\\s*<a [^>]*>Ext\\.Once\\(Shared\\)</a>", shared);
+        // and the line that names what the picker shows
+        Assert.Contains("<dl class=\"applies-to-line\"><dt>Applies to</dt>", shared);
+        if (memberLayout == "separatePages")
+        {
+            Assert.Matches("<dl class=\"jumplist\" data-applies-to=\"net8.0\">\\s*<dt><a [^>]*>OnlyNet8Member</a>", shared);
+        }
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task AnEnumValueHasItsDeclarationAndDescriptionForEachVariant()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Mode.html");
+
+        // Strict is 2 on .NET 8 and 1 on .NET Standard 2.0, described differently: the picker swaps both
+        Assert.Contains(
+            "<span class=\"api-contents\"><span class=\"api-content\" data-applies-to=\"net8.0\"><code>Strict = 2</code></span>" +
+            "<span class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden><code>Strict = 1</code></span></span>",
+            page);
+        Assert.Matches(
+            "<dd><div class=\"api-contents\"><div class=\"api-content\" data-applies-to=\"net8.0\">[^<]*<p>Strict on net8\\.</p>\\s*</div>" +
+            "<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>[^<]*<p>Strict on older frameworks\\.</p>\\s*</div></div>",
+            page);
+
+        // a value without variants is as before
+        Assert.Matches("<dt id=\"Lib_Mode_Plain\"[^>]*><code>Plain = 0</code></dt>\\s*<dd>[^<]*<p>Plain everywhere\\.</p>\\s*</dd>", page);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAnEnumListsItsValuesOnce()
+    {
+        var site = await Build("\"default\", \"modern\"", targetFrameworks: "\"*\"");
+        var page = await RawPage(site, "Lib.Level.html");
+
+        // the enum is described differently on .NET Standard 2.0, so the page has a copy of it for that framework
+        var start = page.IndexOf("<div class=\"api-content\" data-applies-to=\"netstandard2.0\" data-search-ignore hidden>", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var copy = page[start..ElementEnd(page, start)];
+        Assert.Contains("Levels on older frameworks.", copy);
+
+        // which lists the values as the page does, once each, with ids of its own
+        Assert.Equal(1, Regex.Count(copy, "<h2 "));
+        Assert.Equal(1, Regex.Count(copy, "<dt id=\"Lib_Level_Low_variant1\""));
+        Assert.Equal(1, Regex.Count(copy, "<dt id=\"Lib_Level_High_variant1\""));
+        Assert.Equal(1, Regex.Count(page, "id=\"Lib_Level_Low\""));
+
+        // without the variants of the enum under each value
+        Assert.Equal(1, Regex.Count(page, "api-variants-heading"));
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
     [InlineData(false, "<strong>Version 1</strong> (.NET 8), <strong>Version 2</strong> (.NET 8)", "<strong>Version 1</strong> (.NET 8)")]
     [InlineData(true, "<strong>Version 1</strong>, <strong>Version 2</strong>", "<strong>Version 1</strong>")]
     public async Task AnAxisIsShownWithTheLabelsOfItsValues(bool hideFrameworks, string appliesTo, string variantLabel)
     {
         var site = await BuildWithAxis(v1Members: "", v2Members: "", hideFrameworks);
 
+        // a table of contents that includes the API one drops the axis of its root, and keeps that of its entries
+        var toc = JObject.Parse(await File.ReadAllTextAsync(Path.Combine(_projectFolder, "_site", "toc.json"), TestContext.Current.CancellationToken));
+        var api = toc["items"].Single(i => (string)i["name"] == "API");
+        Assert.Equal("Version", (string)api["items"].Single()["axis"]["name"]);
+        Assert.Equal(["v1", "v2"], api["items"].Single()["axis"]["values"].Select(v => (string)v["id"]));
+
         var page = await Page(site, "Lib.Widget.html");
         Assert.Contains($"<dt>Applies to</dt><dd>{appliesTo}</dd>", page);
+        // which the picker reads from the page, not from the labels
+        Assert.Equal(hideFrameworks, page.Contains("<dl class=\"applies-to-line\" data-frameworks-hidden>"));
         Assert.Contains("Summary of V2.", page);
         Assert.Contains("class=\"api-variant\" data-applies-to=\"v1:net8.0\"", page);
         Assert.Contains($"<h6 class=\"api-variant-label\">{variantLabel}</h6>", page);
@@ -631,6 +859,57 @@ public class TargetFrameworksBuildTest : TestBase
         var variant = Regex.Match(page, "<div class=\"api-variant\" data-applies-to=\"v1:net8.0\">[\\s\\S]*?</dl>").Value;
         Assert.Contains("int value", variant);
         Assert.DoesNotContain("Handles it.", variant);
+    }
+
+    [Theory]
+    [Trait("Related", "docfx")]
+    [InlineData("class", "public void Do() { }", "samePage")]
+    [InlineData("class", "public void Do() { }", "separatePages")]
+    [InlineData("enum", "A", "samePage")]
+    public async Task TheSeeAlsoLinksOfAPageAreSwappedForAVariantsOwn(string typeKind, string members, string memberLayout)
+    {
+        var site = await BuildWithAxis(v1Members: members, v2Members: members, memberLayout: memberLayout, typeComment: "/// <seealso href=\"https://example.org/{version}\"/>", typeKind: typeKind);
+        var page = await RawPage(site, "Lib.Widget.html");
+
+        // after the members, outside the content of the type: the links of the frameworks the page shows, and those of
+        // Version 1 in a copy the picker and a PDF swap in
+        var start = page.IndexOf("<h2 id=\"seealso\">", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var own = page.LastIndexOf("<div class=\"api-content\" data-applies-to=\"v2:net8.0\">", start, StringComparison.Ordinal);
+        Assert.True(own >= 0);
+        Assert.Contains("https://example.org/V2", page[own..ElementEnd(page, own)]);
+        Assert.DoesNotContain("https://example.org/V1", page[own..ElementEnd(page, own)]);
+
+        var copyStart = page.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", start, StringComparison.Ordinal);
+        Assert.True(copyStart >= 0);
+        var copy = page[copyStart..ElementEnd(page, copyStart)];
+        Assert.Contains("<h2 id=\"seealso_variant1\">", copy);
+        Assert.Contains("https://example.org/V1", copy);
+    }
+
+    [Fact]
+    [Trait("Related", "docfx")]
+    public async Task TheCopyOfAVariantWithoutAReturnValueOrParametersShowsNone()
+    {
+        // Version 2, the default, returns an int and takes a value; Version 1 neither
+        var site = await BuildWithAxis(
+            v1Members: "public void Get() { } public delegate void Handler();",
+            v2Members: "public int Get() => 0; public delegate void Handler(long value);");
+
+        var widget = await RawPage(site, "Lib.Widget.html");
+        var get = widget.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", widget.IndexOf("data-uid=\"Lib.Widget.Get\"", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(get >= 0);
+        var copy = widget[get..ElementEnd(widget, get)];
+        Assert.Contains("public void Get()", copy);
+        Assert.DoesNotContain("Returns", copy);
+
+        var handler = await RawPage(site, "Lib.Widget.Handler.html");
+        var start = handler.IndexOf("<div class=\"api-content\" data-applies-to=\"v1:net8.0\" data-search-ignore hidden>", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        copy = handler[start..ElementEnd(handler, start)];
+        Assert.Contains("Handler()", copy);
+        Assert.DoesNotContain("Parameters", copy);
+        Assert.DoesNotContain("long", copy);
     }
 
     [Theory]
@@ -727,7 +1006,7 @@ public class TargetFrameworksBuildTest : TestBase
     }
 
     /// <returns>The folder of the generated API pages of a <c>Widget</c> built against two versions.</returns>
-    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage")
+    private async Task<string> BuildWithAxis(string v1Members, string v2Members, bool hideFrameworks = false, string memberLayout = "samePage", string typeComment = "", string typeKind = "class")
     {
         foreach (var (version, members) in new[] { ("V1", v1Members), ("V2", v2Members) })
         {
@@ -746,7 +1025,8 @@ public class TargetFrameworksBuildTest : TestBase
                 namespace Lib
                 {
                     /// <summary>Summary of {{version}}.</summary>
-                    public class Widget { {{members}} }
+                    {{typeComment.Replace("{version}", version)}}
+                    public {{typeKind}} Widget { {{members}} }
                 }
                 """, TestContext.Current.CancellationToken);
         }
@@ -772,12 +1052,16 @@ public class TargetFrameworksBuildTest : TestBase
                 }
               ],
               "build": {
-                "content": [ { "files": [ "api/**.yml" ] } ],
+                "content": [ { "files": [ "api/**.yml", "toc.yml" ] } ],
                 "template": [ "default", "modern" ],
                 "globalMetadata": { "_disableApiAppliesToFrameworks": {{(hideFrameworks ? "true" : "false")}} },
                 "dest": "_site"
               }
             }
+            """, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_projectFolder, "toc.yml"), """
+            - name: API
+              href: api/toc.yml
             """, TestContext.Current.CancellationToken);
 
         await DotnetApiCatalog.GenerateManagedReferenceYamlFiles(configPath);
@@ -786,7 +1070,45 @@ public class TargetFrameworksBuildTest : TestBase
         return Path.Combine(_projectFolder, "_site", "api");
     }
 
-    private static Task<string> Page(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+    /// <returns>The page as a reader sees it, without the content kept hidden for the picker and PDFs.</returns>
+    private static async Task<string> Page(string site, string name) => WithoutHiddenContent(await RawPage(site, name));
+
+    private static Task<string> RawPage(string site, string name) => File.ReadAllTextAsync(Path.Combine(site, name));
+
+    private static string WithoutHiddenContent(string page)
+    {
+        var hidden = new Regex("<div class=\"api-content\" data-applies-to=\"[^\"]*\" data-search-ignore hidden>");
+        for (var match = hidden.Match(page); match.Success; match = hidden.Match(page))
+        {
+            page = page[..match.Index] + page[ElementEnd(page, match.Index)..];
+        }
+
+        return page;
+    }
+
+    /// <returns>The end of the &lt;div&gt; at <paramref name="start"/>: after the &lt;/div&gt; that balances it.</returns>
+    private static int ElementEnd(string page, int start)
+    {
+        var depth = 1;
+        var end = start + "<div".Length;
+        while (depth > 0)
+        {
+            var open = page.IndexOf("<div", end, StringComparison.Ordinal);
+            var close = page.IndexOf("</div>", end, StringComparison.Ordinal);
+            if (open >= 0 && open < close)
+            {
+                depth++;
+                end = open + "<div".Length;
+            }
+            else
+            {
+                depth--;
+                end = close + "</div>".Length;
+            }
+        }
+
+        return end;
+    }
 
     /// <returns>The variant with this declaration, up to the heading of the next member.</returns>
     private static string VariantOf(string page, string declaration)

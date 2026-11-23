@@ -24,7 +24,8 @@ export function loc(id: string, args?: { [key: string]: string }): string {
   let result = meta(`loc:${id}`) || id
   if (args) {
     for (const key in args) {
-      result = result.replace(`{${key}}`, args[key])
+      // a function, so that `$` in a value, which can be a name the site writes, is not a replacement pattern
+      result = result.replace(`{${key}}`, () => args[key])
     }
   }
   return result

@@ -5,6 +5,7 @@ import AnchorJs from 'anchor-js'
 import { render, html, TemplateResult } from 'lit-html'
 import { breakWordLit, meta, isExternalHref, loc, options } from './helper'
 import { themePicker } from './theme'
+import { Toc, TocEntry, addHeadingAnchors, appliesToPicker, isHiddenBySelection, isNavEntryShown, loadChoices, onSelectionChange } from './appliesTo'
 import { TocNode } from './toc'
 
 export type NavItem = {
@@ -27,8 +28,18 @@ export async function renderNavbar(): Promise<NavItem[]> {
   }
 
   const { iconLinks } = await options()
+  // the entries of the navbar's table of contents, which say what each item applies to
+  const entries = new WeakMap<NavItem | NavItemContainer, TocEntry>()
+  let navToc: Toc = { items: [] }
   const navItems = await loadNavItems()
   const activeItem = findActiveItem(navItems)
+
+  // The picker needs the table of contents: the navbar does not wait for it, and shows the picker once it is there.
+  let choices: Awaited<ReturnType<typeof loadChoices>> = { frameworks: [] }
+  loadChoices().then(loaded => {
+    choices = loaded
+    return loaded.frameworks.length > 0 ? renderCore() : undefined
+  }).catch(console.error)
 
   const menuItem = item => {
     const current = (item === activeItem ? 'page' : false)
@@ -36,8 +47,12 @@ export async function renderNavbar(): Promise<NavItem[]> {
     return html`<li class='nav-item'><a class='nav-link ${active}' aria-current=${current} href=${item.href}>${breakWordLit(item.name)}</a></li>`
   }
 
-  const menu = html`
-    <ul class='navbar-nav'>${navItems.map(item => {
+  // What the selection leaves out goes, as in the table of contents, where the navbar's is that of an API.
+  const shown = <T extends NavItem | NavItemContainer>(items: T[], parent?: NavItemContainer) =>
+    items.filter(item => isNavEntryShown(navToc, entries.get(item), parent && entries.get(parent), item === activeItem || ('items' in item && item.items.includes(activeItem))))
+
+  const menu = () => html`
+    <ul class='navbar-nav'>${shown(navItems).map(item => {
     if ('items' in item) {
       const active = item.items.some(i => i === activeItem) ? 'active' : null
       return html`
@@ -45,7 +60,7 @@ export async function renderNavbar(): Promise<NavItem[]> {
               <a class='nav-link dropdown-toggle ${active}' href='#' role='button' data-bs-toggle='dropdown' aria-expanded='false'>
                 ${breakWordLit(item.name)}
               </a>
-              <ul class='dropdown-menu'>${item.items.map(menuItem)}</ul>
+              <ul class='dropdown-menu'>${shown(item.items, item).map(menuItem)}</ul>
             </li>`
     } else {
       return menuItem(item)
@@ -57,13 +72,15 @@ export async function renderNavbar(): Promise<NavItem[]> {
     const icons = html`
       <form class="icons">
         ${iconLinks?.map(i => html`<a href="${i.href}" title="${i.title}" class="btn border-0"><i class="bi bi-${i.icon}"></i></a>`)}
+        ${appliesToPicker(choices)}
         ${await themePicker(renderCore)}
       </form>`
 
-    render(html`${menu} ${icons}`, navbar)
+    render(html`${menu()} ${icons}`, navbar)
   }
 
   await renderCore()
+  onSelectionChange(renderCore)
 
   return activeItem ? [activeItem] : []
 
@@ -74,12 +91,16 @@ export async function renderNavbar(): Promise<NavItem[]> {
     }
 
     const navUrl = new URL(navrel.replace(/.html$/gi, '.json'), window.location.href)
-    const { items } = await fetch(navUrl).then(res => res.json())
-    return items.map((a: NavItem | NavItemContainer) => {
+    navToc = await fetch(navUrl).then(res => res.json())
+    const keep = <T extends NavItem | NavItemContainer>(item: T, entry: TocEntry): T => {
+      entries.set(item, entry)
+      return item
+    }
+    return navToc.items.map((a: TocEntry) => {
       if ('items' in a) {
-        return { name: a.name, items: a.items.map(i => ({ name: i.name, href: new URL(i.href, navUrl) })) }
+        return keep({ name: a.name, items: a.items.map(i => keep({ name: i.name, href: new URL(i.href, navUrl) }, i)) }, a)
       }
-      return { name: a.name, href: new URL(a.href, navUrl) }
+      return keep({ name: a.name, href: new URL(a.href, navUrl) }, a)
     })
   }
 }
@@ -98,6 +119,11 @@ export function renderBreadcrumb(breadcrumb: (NavItem | TocNode)[]) {
 
 export async function renderInThisArticle() {
   await renderAnchors()
+  updateInThisArticle()
+}
+
+/** Renders "In this article" again, for the headings of the content shown now. */
+export function updateInThisArticle() {
   const affix = document.getElementById('affix')
   if (affix) {
     render(inThisArticle(), affix)
@@ -112,7 +138,7 @@ async function renderAnchors() {
     icon: '#'
   }, anchorsOptions)
 
-  anchors.add('article h2:not(.no-anchor), article h3:not(.no-anchor), article h4:not(.no-anchor)')
+  addHeadingAnchors(headings => anchors.add(headings))
 
   /* eslint-disable no-self-assign */
   if (location.hash) {
@@ -121,7 +147,9 @@ async function renderAnchors() {
 }
 
 function inThisArticle(): TemplateResult {
-  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3'))
+  // the content of an API for other frameworks is hidden until picked, and has headings of its own; a tab not picked
+  // is listed, as it is without the picker
+  const headings = Array.from(document.querySelectorAll<HTMLHeadingElement>('article h2, article h3')).filter(h => !isHiddenBySelection(h))
 
   if (headings.length > 0) {
     return html`
@@ -136,7 +164,7 @@ function inThisArticle(): TemplateResult {
 // The frameworks a member applies to are shown in its heading, but are not part of its name.
 function headingTitle(heading: HTMLHeadingElement): string {
   const title = heading.cloneNode(true) as HTMLHeadingElement
-  title.querySelectorAll('.applies-to').forEach(e => e.remove())
+  title.querySelectorAll('.applies-to, .applies-to-unavailable-badge').forEach(e => e.remove())
   return title.textContent
 }
 

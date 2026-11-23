@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert'
-import { breakWord, isExternalHref, isSameURL } from './helper'
+import { breakWord, isExternalHref, isSameURL, loc } from './helper'
 
 test('break text', () => {
   assert.deepStrictEqual(breakWord('Other APIs'), ['Other APIs'])
@@ -24,6 +24,24 @@ test('is same URL', () => {
   assert.ok(isSameURL({ pathname: '/a/index.html' }, { pathname: '/A/Index.html' }))
 
   assert.ok(!isSameURL({ pathname: '/a/foo/index.html' }, { pathname: '/a/bar' }))
+})
+
+test('localized text takes a value with $ as it is', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { querySelector: () => ({ content: 'Show {name}' }) }
+  })
+
+  try {
+    assert.strictEqual(loc('label', { name: 'Price $$ $& $\' $`' }), 'Show Price $$ $& $\' $`')
+  } finally {
+    if (originalDocument) {
+      Object.defineProperty(globalThis, 'document', originalDocument)
+    } else {
+      Reflect.deleteProperty(globalThis, 'document')
+    }
+  }
 })
 
 test('is external URL', () => {
