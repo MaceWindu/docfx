@@ -281,9 +281,11 @@ export function narrowSelection(units: Unit[], selection: Selection): Selection 
   }
   const bestRank = Math.min(...ranked.map(r => r.rank))
   const best = ranked.filter(r => r.rank === bestRank).map(r => r.unit)
-  // the ids of the axis of the value, which a PDF sets, still apply in the copy
+  // the ids of the axis of the value, which a PDF sets, and the part of the docs still apply in the copy; units it
+  // was limited to before do not, as one unit is all it shows
+  const kept = { ...(selection.axisValues ? { axisValues: selection.axisValues } : {}), ...(selection.part ? { part: selection.part } : {}) }
   return best.length === 1
-    ? { ...selection, framework: selection.framework || best[0].framework, value: selection.value || best[0].value }
+    ? { framework: selection.framework || best[0].framework, value: selection.value || best[0].value, ...kept }
     : { ...selection, within: best }
 }
 
@@ -1374,8 +1376,19 @@ declare global {
      * axis that value is one of, when the table of contents names it, and the paths of the pages of the axes that do
      * not have the value, whose own values may have the same ids. `applied` is set once the page shows it, which
      * `docfx pdf` reads to warn about the pages of a template that does not; `error`, when the page could not.
+     * `parts` are what the parts of the docs of the PDF are built for, as pages write units, and `pageParts` the part
+     * of each page by its index, when there are several.
      */
-    docfxAppliesTo?: { framework?: string, value?: string, axisValues?: string[], otherAxisPages?: string[], applied?: boolean, error?: string }
+    docfxAppliesTo?: {
+      framework?: string
+      value?: string
+      axisValues?: string[]
+      otherAxisPages?: string[]
+      parts?: string[][]
+      pageParts?: Record<string, number>
+      applied?: boolean
+      error?: string
+    }
   }
 }
 
@@ -1391,10 +1404,15 @@ export function applyPrintSelection() {
     distinguishCopies()
     // the value of another axis says nothing about this page
     const otherAxis = !!selection.otherAxisPages?.includes(window.location.pathname)
+    // the part of the page, as `docfx pdf` reads it from the PDF's table of contents; that of the page's own APIs
+    // for a page it does not list
+    const parts = selection.parts || []
+    const part = parts.length > 1 ? parts[selection.pageParts?.[window.location.pathname] ?? -1] : parts[0]
     applySelection({
       framework: selection.framework || undefined,
       value: otherAxis ? undefined : selection.value || undefined,
-      axisValues: otherAxis ? undefined : selection.axisValues || undefined
+      axisValues: otherAxis ? undefined : selection.axisValues || undefined,
+      part: part ? parseUnits(part.join(' ')) : pageUnits()
     }, undefined, true)
     selection.applied = true
   } catch (e) {

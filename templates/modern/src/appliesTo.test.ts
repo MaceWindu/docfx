@@ -176,6 +176,11 @@ test('a group kept beside the one in place is shown for the selection narrowed t
   assert.ok(isAvailable(parseUnits('d1:net462'), d1Old))
   assert.ok(!isAvailable(parseUnits('d1:net8.0'), d1Old))
   assert.ok(isAvailable(parseUnits('net462'), d1Old))
+  // a copy within one narrowed to one unit is shown for that unit, with the ids of the axis of a PDF and the part
+  const part = parseUnits('d1:netstandard2.0 d1:net462')
+  assert.deepStrictEqual(
+    narrowSelection(parseUnits('d1:net462'), { value: 'd1', axisValues: ['d1', 'd2'], within: part, part }),
+    { framework: 'net462', value: 'd1', axisValues: ['d1', 'd2'], part })
 })
 
 test('frameworks in picker order', () => {
@@ -1601,6 +1606,27 @@ test('in print, the value of another axis says nothing about a page whose axis h
   assert.ok(!print(['/docs/api/Driver.html']))
   // on a page `docfx pdf` does not know the axis of, the values of the axes that have the value count
   assert.ok(print(undefined))
+})
+
+test('in print, a framework stands for the build of the part of the docs a project targeting it gets', () => {
+  // a member only the .NET Standard 2.0 build of a part for .NET 8 and .NET Standard 2.0 has
+  const markup = `${site}<body><article>
+    <h1 id="Lib_Shared" data-applies-to="net8.0 netstandard2.0">Shared</h1><div class="facts"></div>
+    <h3 id="Lib_Shared_Legacy" data-applies-to="netstandard2.0">Legacy</h3><p>only on .NET Standard 2.0</p>
+  </article></body>`
+  const print = (docfxAppliesTo: Window['docfxAppliesTo']) => {
+    const { document, window } = installDom(markup, 'https://example.org/docs/api/Lib.Shared.html')
+    Object.assign(window, { docfxAppliesTo })
+    applyPrintSelection()
+    return !!document.getElementById('Lib_Shared_Legacy').closest('[hidden]')
+  }
+
+  assert.ok(print({ framework: 'net10.0', parts: [['net8.0', 'netstandard2.0']] }))
+  // in a part built for .NET Standard 2.0 only, it is that build
+  assert.ok(!print({ framework: 'net10.0', parts: [['netstandard2.0'], ['net8.0', 'netstandard2.0']], pageParts: { '/docs/api/Lib.Shared.html': 0 } }))
+  assert.ok(print({ framework: 'net10.0', parts: [['netstandard2.0'], ['net8.0', 'netstandard2.0']], pageParts: { '/docs/api/Lib.Shared.html': 1 } }))
+  // a page `docfx pdf` does not name the part of: what its own APIs are documented for
+  assert.ok(print({ framework: 'net8.0' }))
 })
 
 test('in print, a page that fails to apply the selection says why, and goes on', () => {

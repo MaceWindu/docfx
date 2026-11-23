@@ -37,14 +37,18 @@ public class PdfFrameworkTest
 
     [Theory]
     [InlineData(null, null, "Getting started, Lib, Everywhere, OnlyNet8, Standard, Lib.EF, FromEF8")]
-    // .NET Standard 2.0 stands in for .NET 10, .NET Framework 4.7.2 is served by 4.6.2 and .NET Standard 2.0
-    [InlineData("net10.0", null, "Getting started, Lib, Everywhere, OnlyNet8, Standard, Lib.EF, FromEF8")]
-    [InlineData("net472", null, "Getting started, Lib, Everywhere, Standard, Lib.EF")]
-    [InlineData("net462", null, "Getting started, Lib, Everywhere, Standard, Lib.EF")]
+    // A framework stands for the build a project targeting it gets of the part, which is built for .NET 8, .NET
+    // Framework 4.6.2 and .NET Standard 2.0: .NET 10 gets the .NET 8 build, which lacks what only the .NET Standard 2.0
+    // one has; .NET Framework 4.7.2 the 4.6.2 one. Each axis value is built for frameworks of its own: .NET 10 and
+    // .NET Framework 4.7.2 get the .NET Standard 2.0 build of EF Core 3.1.
+    [InlineData("net10.0", null, "Getting started, Lib, Everywhere, OnlyNet8, Lib.EF, FromEF8")]
+    [InlineData("net472", null, "Getting started, Lib, Everywhere, Lib.EF")]
+    [InlineData("net462", null, "Getting started, Lib, Everywhere, Lib.EF")]
+    [InlineData("netstandard2.0", null, "Getting started, Lib, Standard, Lib.EF")]
     // an axis value leaves out what other values have, and says nothing about APIs without an axis
     [InlineData(null, "ef3", "Getting started, Lib, Everywhere, OnlyNet8, Standard, Lib.EF")]
-    [InlineData("net8.0", "ef3", "Getting started, Lib, Everywhere, OnlyNet8, Standard, Lib.EF")]
-    [InlineData("net462", "ef8", "Getting started, Lib, Everywhere, Standard")]
+    [InlineData("net8.0", "ef3", "Getting started, Lib, Everywhere, OnlyNet8, Lib.EF")]
+    [InlineData("net462", "ef8", "Getting started, Lib, Everywhere")]
     public void APdfOfOneFrameworkLeavesOutWhatDoesNotExistInIt(string framework, string value, string expected)
     {
         var outline = Parse(framework, value);
@@ -58,14 +62,66 @@ public class PdfFrameworkTest
     public void ThePagesOfAPdfOfOneFrameworkAreToldWhichOne()
     {
         Assert.Null(PdfBuilder.GetAppliesToScript(Parse(null, null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":"net462","value":null,"axisValues":null,"otherAxisPages":null};""", PdfBuilder.GetAppliesToScript(Parse("net462", null)));
-        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9","axisValues":null,"otherAxisPages":null};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
+        // with a framework, what the part of the docs is built for, by which it stands for the build a project
+        // targeting it gets
+        Assert.Equal(
+            """window.docfxAppliesTo = {"framework":"net462","value":null,"axisValues":null,"otherAxisPages":null,"parts":[["net8.0","net462","netstandard2.0","ef3:netstandard2.0","ef8:net8.0"]],"pageParts":null};""",
+            PdfBuilder.GetAppliesToScript(Parse("net462", null)));
+        Assert.Equal("""window.docfxAppliesTo = {"framework":null,"value":"ef9","axisValues":null,"otherAxisPages":null,"parts":null,"pageParts":null};""", PdfBuilder.GetAppliesToScript(Parse(null, "ef9")));
 
         // pages carry value ids without their axis, so they are told the values of the axis picked from, and which
         // pages are of another axis, which the value says nothing about, as their own values may have the same ids
         Assert.Equal(
-            """window.docfxAppliesTo = {"framework":null,"value":"d1","axisValues":["d1","d2"],"otherAxisPages":["/api/ef/Everywhere.html","/api/ef/FromEF8.html"]};""",
+            """window.docfxAppliesTo = {"framework":null,"value":"d1","axisValues":["d1","d2"],"otherAxisPages":["/api/ef/Everywhere.html","/api/ef/FromEF8.html"],"parts":null,"pageParts":null};""",
             PdfBuilder.GetAppliesToScript(TwoAxes("d1"), "api/toc.json"));
+    }
+
+    // The API of two metadata items, one built for .NET 8 and .NET Standard 2.0, whose Legacy type only the .NET
+    // Standard 2.0 build has, nor its members' category, which is no part of its own; the other for .NET Standard 2.0.
+    private const string TwoPartsToc = """
+        {
+          "pdf": true,
+          "pdfFramework": "{framework}",
+          "items": [
+            { "name": "Core", "items": [
+              { "name": "Lib", "href": "core/Lib.html", "type": "Namespace", "appliesTo": [ { "frameworks": [ "net8.0", "netstandard2.0" ] } ], "items": [
+                { "name": "Shared", "href": "core/Lib.Shared.html", "type": "Class", "appliesTo": [ { "frameworks": [ "net8.0", "netstandard2.0" ] } ] },
+                { "name": "Legacy", "href": "core/Lib.Legacy.html", "type": "Class", "appliesTo": [ { "frameworks": [ "netstandard2.0" ] } ], "items": [
+                  { "name": "Methods", "items": [ { "name": "Run", "href": "core/Lib.Legacy.Run.html", "type": "Method", "appliesTo": [ { "frameworks": [ "netstandard2.0" ] } ] } ] }
+                ] }
+              ] }
+            ] },
+            { "name": "Old", "items": [
+              { "name": "Old", "href": "old/Old.html", "type": "Namespace", "appliesTo": [ { "frameworks": [ "netstandard2.0" ] } ] }
+            ] }
+          ]
+        }
+        """;
+
+    [Theory]
+    // .NET 8 gets the .NET 8 build of Core, which lacks Legacy, and the .NET Standard 2.0 build of Old
+    [InlineData("net8.0", "Core, Lib, Shared, Old, Old")]
+    [InlineData("net10.0", "Core, Lib, Shared, Old, Old")]
+    [InlineData("netstandard2.0", "Core, Lib, Shared, Legacy, Methods, Run, Old, Old")]
+    [InlineData("net462", "Core, Lib, Shared, Legacy, Methods, Run, Old, Old")]
+    public void AFrameworkStandsForTheBuildOfThePartOfTheDocsAProjectTargetingItGets(string framework, string expected)
+    {
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoPartsToc.Replace("{framework}", framework));
+
+        PdfBuilder.LeaveOutUnavailable(outline);
+
+        Assert.Equal(expected, string.Join(", ", Names(outline.items)));
+    }
+
+    [Fact]
+    public void ThePagesOfAPdfOfSeveralPartsAreToldTheirPart()
+    {
+        var outline = JsonSerializer.Deserialize<PdfBuilder.Outline>(TwoPartsToc.Replace("{framework}", "net8.0"));
+
+        Assert.Equal(
+            """window.docfxAppliesTo = {"framework":"net8.0","value":null,"axisValues":null,"otherAxisPages":null,"parts":[["net8.0","netstandard2.0"],["netstandard2.0"]],""" +
+            "\"pageParts\":" + """{"/api/core/Lib.html":0,"/api/core/Lib.Shared.html":0,"/api/core/Lib.Legacy.html":0,"/api/core/Lib.Legacy.Run.html":0,"/api/old/Old.html":1}};""",
+            PdfBuilder.GetAppliesToScript(outline, "api/toc.json"));
     }
 
     // The API of two metadata items, each with an axis of its own, which `docfx metadata` writes to their entries.

@@ -89,7 +89,7 @@ public static class TocHelper
     /// </summary>
     internal static readonly string[] IdKeys = ["appliesTo", "axis", "pdfFramework", "pdfAxisValue"];
 
-    // The options of the PDF of a table of contents, which only its root has: `docfx pdf` reads no others.
+    // The options of the PDF of a table of contents, which only its root has, with `pdf: true`: `docfx pdf` reads no others.
     private static readonly string[] RootIdKeys = ["pdfFramework", "pdfAxisValue"];
 
     /// <summary>
@@ -105,7 +105,10 @@ public static class TocHelper
         // holds, by which the file is read again for what it says, only when there is such a value.
         var unquoted = new List<(string Key, object Value, string Text, List<object> Path)>();
         var path = new List<object>();
-        Visit(toc);
+        // The options of a PDF are read on the root of a table of contents with `pdf: true` only: one without it, such
+        // as the API's own, included in the table of contents of the PDF, has no PDF of its own to read them for.
+        var hasPdf = toc.Metadata.TryGetValue("pdf", out var pdf) && pdf is true;
+        Visit(toc, hasPdf);
         if (unquoted.Count == 0)
         {
             return;
@@ -135,11 +138,11 @@ public static class TocHelper
             }
         }
 
-        void Visit(TocItemViewModel item, bool isRoot = true)
+        void Visit(TocItemViewModel item, bool readsPdfOptions)
         {
             foreach (var key in IdKeys)
             {
-                if ((isRoot || !RootIdKeys.Contains(key)) && item.Metadata.TryGetValue(key, out var value) && value is not null)
+                if ((readsPdfOptions || !RootIdKeys.Contains(key)) && item.Metadata.TryGetValue(key, out var value) && value is not null)
                 {
                     path.Add(key);
                     item.Metadata[key] = AsText(value, key);
@@ -152,7 +155,7 @@ public static class TocHelper
                 if (item.Items[i] is { } child)
                 {
                     path.Add(i);
-                    Visit(child, isRoot: false);
+                    Visit(child, readsPdfOptions: false);
                     path.RemoveAt(path.Count - 1);
                 }
             }

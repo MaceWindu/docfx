@@ -1043,6 +1043,32 @@ items:
         Assert.StartsWith("'pdfAxisValue' of table of contents 'toc.yml' holds 3.10 unquoted, which YAML reads as a number, so it is used as '3.1'", warning.Message);
     }
 
+    [Fact]
+    public void APdfOptionOfATableOfContentsWithoutPdfDoesNotWarn()
+    {
+        // such as the API's own table of contents, which that of the PDF includes: its options have no PDF to apply to
+        var content = """
+            pdfAxisValue: 3.10
+            items:
+            - name: EF Core 10
+            """;
+        var toc = _fileCreator.CreateFile(content, FileType.YamlToc);
+        var listener = TestLoggerListener.CreateLoggerListenerWithCodesFilter([WarningCodes.Build.UnquotedTocValue]);
+        Logger.RegisterListener(listener);
+        TocItemViewModel model;
+        try
+        {
+            model = TocHelper.LoadSingleToc(toc);
+        }
+        finally
+        {
+            Logger.UnregisterListener(listener);
+        }
+
+        Assert.IsNotType<string>(model.Metadata["pdfAxisValue"]);
+        Assert.Empty(listener.Items);
+    }
+
     [Theory]
     [InlineData("pdfFramework", "true")]
     [InlineData("pdfAxisValue", "False")]

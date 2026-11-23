@@ -71,6 +71,9 @@ static class PdfBuilder
         /// <summary>The axis of the API below this item, which `docfx metadata` writes to its top-level items.</summary>
         public Axis? axis { get; init; }
 
+        /// <summary>The kind of API of this item, such as <c>Namespace</c>, which `docfx metadata` writes.</summary>
+        public string? type { get; init; }
+
         public string? pdfFramework { get; init; }
         public string? pdfAxisValue { get; init; }
 
@@ -333,9 +336,9 @@ static class PdfBuilder
 
     /// <summary>
     /// Leaves out of <paramref name="outline"/> the items whose API does not exist in its <c>pdfFramework</c> and
-    /// <c>pdfAxisValue</c>, by the rule the picker of the modern template follows: a framework an API is not
-    /// built for is stood in for by one it is, and an axis value says nothing about an API without that axis, or
-    /// with another one.
+    /// <c>pdfAxisValue</c>, by the rule the picker of the modern template follows: a framework stands for the build
+    /// a project targeting it gets of the API's part of the docs, the nearest framework that part is built for, and an
+    /// axis value says nothing about an API without that axis, or with another one.
     /// </summary>
     internal static void LeaveOutUnavailable(Outline outline)
     {
@@ -344,6 +347,9 @@ static class PdfBuilder
         {
             return;
         }
+
+        var parts = GetParts(outline);
+        var resolved = new Dictionary<(Part, string?), string?>();
 
         // A selection that nothing in the table of contents applies to is most likely a typo, and would leave every
         // API out of the PDF without saying so.
@@ -411,7 +417,7 @@ static class PdfBuilder
                     // by the group of the value only: a group without a value, written by hand, can keep the item in the framework
                     var key = itemAxis?.name ?? "";
                     var keptOfIt = item.appliesTo.Any(group => group.version == value &&
-                        (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f)));
+                        (group.frameworks ?? []).Any(f => StandsIn(item, group, f)));
                     keptOfValue[key] = keptOfValue.GetValueOrDefault(key) || keptOfIt;
                 }
                 if (!available)
@@ -461,9 +467,81 @@ static class PdfBuilder
             var valueApplies = ValueApplies(axis);
             return node.appliesTo is not { Length: > 0 } || node.appliesTo.Any(group => group.frameworks is { Length: > 0 } &&
                 (!valueApplies || group.version is null || group.version == value || axisValues?.Contains(group.version) is false) &&
-                (framework is null || (group.frameworks ?? []).Any(f => Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f))));
+                (framework is null || (group.frameworks ?? []).Any(f => StandsIn(node, group, f))));
+        }
+
+        // Whether a framework of a group of an item is the one its part of the docs resolves the PDF's framework to, for
+        // the axis value of the group; any that can stand in where the part has no group of that value.
+        bool StandsIn(Outline node, AppliesTo group, string f)
+        {
+            var version = string.IsNullOrEmpty(group.version) ? null : group.version;
+            if (!parts.TryGetValue(node, out var part) || !part.Units.Any(unit => unit.Version == version))
+            {
+                return Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework!, f);
+            }
+
+            if (!resolved.TryGetValue((part, version), out var nearest))
+            {
+                nearest = Resolve(framework!, part.Units.Where(unit => unit.Version == version).Select(unit => unit.Framework));
+                resolved[(part, version)] = nearest;
+            }
+
+            return nearest is not null && Docfx.Dotnet.TargetFrameworkHelper.IsSameFramework(nearest, f);
         }
     }
+
+    /// <summary>
+    /// What a part of the docs is built for: the axis value and framework of each group of the items below its root.
+    /// Compared by reference, as one part is the same for all its items.
+    /// </summary>
+    internal sealed class Part(List<(string? Version, string Framework)> units)
+    {
+        public List<(string? Version, string Framework)> Units { get; } = units;
+    }
+
+    /// <summary>
+    /// The part of the docs each item of <paramref name="outline"/> is in, as the picker of the modern template reads
+    /// it from the site's table of contents: the items outside any API that are not one, with neither <c>appliesTo</c>
+    /// nor <c>type</c>, such as the item a table of contents that includes several metadata items gives each, and the
+    /// root, are the roots of parts; the groups within an API, such as the categories of the members of a type, are not.
+    /// A part is built for the axis values and frameworks of its own items, not of the parts in it.
+    /// </summary>
+    internal static Dictionary<Outline, Part> GetParts(Outline outline)
+    {
+        var parts = new Dictionary<Outline, Part>(ReferenceEqualityComparer.Instance);
+        Assign(outline.items, new([]), false);
+        return parts;
+
+        void Assign(Outline[]? items, Part part, bool inApi)
+        {
+            foreach (var item in items ?? [])
+            {
+                parts[item] = part;
+                foreach (var group in item.appliesTo ?? [])
+                {
+                    var version = string.IsNullOrEmpty(group.version) ? null : group.version;
+                    foreach (var framework in group.frameworks ?? [])
+                    {
+                        if (!part.Units.Any(unit => unit.Version == version && unit.Framework.Equals(framework, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            part.Units.Add((version, framework));
+                        }
+                    }
+                }
+
+                var api = item.appliesTo is { Length: > 0 } || item.type is not null;
+                Assign(item.items, inApi || api || item.items is not { Length: > 0 } ? part : new([]), inApi || api);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The framework a project targeting <paramref name="framework"/> gets of a package built for
+    /// <paramref name="frameworks"/>: the nearest of them, as NuGet picks it; <see langword="null"/> when none can stand in.
+    /// </summary>
+    internal static string? Resolve(string framework, IEnumerable<string> frameworks) =>
+        Docfx.Dotnet.TargetFrameworkHelper.OrderByNearest(framework, frameworks).FirstOrDefault(f =>
+            Docfx.Dotnet.TargetFrameworkHelper.IsSameFramework(f, framework) || Docfx.Dotnet.TargetFrameworkHelper.CanStandIn(framework, f));
 
     /// <summary>
     /// The script that makes the pages of <paramref name="outline"/> show its framework and axis value, as the
@@ -491,7 +569,30 @@ static class PdfBuilder
                 .OfType<string>()
                 .Distinct()
                 .ToArray();
-        return $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value, axisValues, otherAxisPages = otherAxisPages is { Length: > 0 } ? otherAxisPages : null })};";
+
+        // What the part of the docs of each page is built for, by which its framework stands for the build a project
+        // targeting it gets, written as its pages write units; by page only when the outline has several parts.
+        string[][]? parts = null;
+        Dictionary<string, int>? pageParts = null;
+        if (framework is not null)
+        {
+            var partOf = GetParts(outline);
+            var distinct = partOf.Values.Distinct().Where(part => part.Units.Count > 0).ToList();
+            parts = [.. distinct.Select(part => part.Units.Select(unit => unit.Version is null ? unit.Framework : $"{unit.Version}:{unit.Framework}").ToArray())];
+            if (distinct.Count > 1)
+            {
+                pageParts = new(StringComparer.Ordinal);
+                foreach (var (item, part) in partOf)
+                {
+                    if (!string.IsNullOrEmpty(item.href) && distinct.IndexOf(part) is var index and >= 0 && SitePath(tocPath, item.href) is { } path)
+                    {
+                        pageParts.TryAdd(path, index);
+                    }
+                }
+            }
+        }
+
+        return $"window.docfxAppliesTo = {JsonSerializer.Serialize(new { framework, value, axisValues, otherAxisPages = otherAxisPages is { Length: > 0 } ? otherAxisPages : null, parts = parts is { Length: > 0 } ? parts : null, pageParts })};";
 
         static IEnumerable<(string Href, Axis Axis)> PagesWithAxis(Outline node, Axis? axis) =>
             (node.items ?? []).SelectMany(item =>
@@ -886,7 +987,8 @@ static class PdfBuilder
                     catch (TimeoutException)
                     {
                         timedOut = true;
-                        Logger.LogWarning($"Timeout waiting for page to load, generated PDF page may be incomplete: {url}");
+                        // named as the other warnings about a page name it, with its PDF: several PDFs can print it
+                        Logger.LogWarning($"'{url.AbsolutePath}' in '{outline.Label}' timed out loading, so its page of the PDF may be incomplete.");
                         if (!anchored)
                         {
                             await Ask(() => page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript }));
@@ -903,7 +1005,7 @@ static class PdfBuilder
                 // contents lists it again.
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage)
                     && !checkedPages.ContainsKey((outline, pagePath))
-                    && await Ask(() => page.EvaluateAsync<string>(PrintSelectionStateScript)) is { } state
+                    && await Check("whether it applied its 'pdfFramework' or 'pdfAxisValue'", () => page.EvaluateAsync<string>(PrintSelectionStateScript)) is { } state
                     && checkedPages.TryAdd((outline, pagePath), true))
                 {
                     var problem = GetPrintSelectionProblem(state, timedOut);
@@ -937,7 +1039,7 @@ static class PdfBuilder
                 // to a page the PDF leaves out does.
                 if (own.Context is not null && !IsTocPage(url) && !IsCoverPage(url, outputFolder, outline.pdfCoverPage))
                 {
-                    leftOut = await Ask(() => page.EvaluateAsync<string[]>(LeftOutIdsScript)) ?? [];
+                    leftOut = await Check("what it leaves out, so its links to that are kept", () => page.EvaluateAsync<string[]>(LeftOutIdsScript)) ?? [];
                 }
 
                 // Extract headings from the page if needed
@@ -990,6 +1092,21 @@ static class PdfBuilder
                 var (answered, answer) = await WaitOrGiveUp(call(), scriptTimeout, cancellationToken);
                 responsive = answered;
                 return answer;
+            }
+
+            // A page that navigates on its own once loaded, such as with a delayed redirect, cannot answer what the
+            // PDF of one framework or axis value asks it: only that is lost, with a warning, not the PDFs of the run.
+            async Task<T?> Check<T>(string what, Func<Task<T>> call) where T : class
+            {
+                try
+                {
+                    return await Ask(call);
+                }
+                catch (PlaywrightException ex) when (!page.IsClosed)
+                {
+                    Logger.LogWarning($"'{url.AbsolutePath}' in '{outline.Label}' could not tell {what}: {ex.Message}");
+                    return null;
+                }
             }
         }
 
