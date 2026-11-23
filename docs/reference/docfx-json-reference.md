@@ -595,6 +595,8 @@ Favicon file's path from output root. Will show DocFX's favicon if not specified
 
 Indicate whether to show the search box on the top of page.
 
+The search index leaves out an element with a `data-search-ignore` attribute, and everything in it, such as raw HTML in markdown that repeats what the page says elsewhere: `<div data-search-ignore>...</div>`.
+
 ### `_enableNewTab`
 
 Indicate whether to open a new tab when clicking an external link. (internal link always shows within the current tab)
