@@ -284,7 +284,13 @@ static class PdfBuilder
                 {
                     try
                     {
-                        await page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript });
+                        // Playwright waits for a script tag without a timeout, as for the result of a script: a page
+                        // whose own script keeps it busy once its content has loaded would hold the PDF up until it ends.
+                        if (!(await WaitOrGiveUp(page.AddScriptTagAsync(new() { Content = EnsureHeadingAnchorScript }), scriptTimeout, cancellationToken)).Answered)
+                        {
+                            throw new TimeoutException();
+                        }
+
                         await page.WaitForFunctionAsync("!window.docfx || window.docfx.ready");
                         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
                     }
